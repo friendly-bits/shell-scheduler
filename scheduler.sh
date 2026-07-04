@@ -157,7 +157,7 @@ get_remaining_time()
 	export -n "${1}"=0
 
 	get_uptime_cs gt_cur_time_cs || return 1
-	gt_total_time_cs=$((gt_cur_time_cs - LAST_PROGRESS_TIME_CS))
+	gt_total_time_cs=$((gt_cur_time_cs - SCHED_INIT_UPTIME_CS))
 
 	gt_remaining_time_cs=$((PROC_TIMEOUT_S*100 - gt_total_time_cs))
 
@@ -208,7 +208,7 @@ process_done_record()
 	[ -e "${ipc_fifo}" ] ||
 		finalize 1 "FIFO file '${ipc_fifo}' does not exist."
 
-	[ $((_remaining_time_cs/100 > 0)) = 1 ] &&
+	[ $(( (_remaining_time_cs + 99) / 100 )) -gt 0 ] &&
 	read -t "$((_remaining_time_cs/100))" -r done_pid done_rv done_id < "${ipc_fifo}"
 
 	refresh_remaining_time "${rem_time_var}"
