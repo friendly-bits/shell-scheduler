@@ -1329,6 +1329,54 @@ test_23()
 	rm -f "${TIMEOUT_FILE}"
 }
 
+# Verify that the global processing timeout fires based on elapsed time since
+# scheduler start, not since the last job completion — i.e. continuous
+# progress must not indefinitely postpone it.
+test_24()
+{
+	test_24_finalize_handler()
+	{
+		local rv="${1}" pids="${2}"
+
+		finalize_handler_default "${rv}" "${pids}" || return $?
+
+		[ -n "${TIMEOUT_FILE}" ] &&
+			printf '%s\n' "${rv}" > "${TIMEOUT_FILE}"
+
+		return 0
+	}
+
+	local \
+		TEST_NUM=24 \
+		jobs="ok ok ok ok ok ok"
+
+	print_test_header 24 "Global timeout despite continuous progress" "${jobs}"
+
+	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
+	rm -f "${TIMEOUT_FILE}"
+
+	(
+		TEST_MODE=timeout \
+		FINALIZE_HANDLER_CB=test_24_finalize_handler \
+		SCHED_MAX_JOBS=1 \
+		SCHED_TIMEOUT_S=3 \
+		SCHED_IDLE_TIMEOUT_S=20 \
+			schedule_jobs "${jobs}"
+	) &
+	wait "$!"
+
+	if [ "$?" = 82 ] &&
+		read_first_line rv "${TIMEOUT_FILE}" &&
+		[ "${rv}" = 82 ]
+	then
+		printf '%s\n' "Result: ${PASS} (rv=${rv})"
+	else
+		printf '%s\n' "Result: ${FAIL}"
+	fi
+
+	rm -f "${TIMEOUT_FILE}"
+}
+
 
 #
 # Inline test code starts here.
@@ -1345,7 +1393,7 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="$(seq 1 23)"
+RUN_TESTS="$(seq 1 24)"
 #RUN_TESTS="8"
 
 export -n \
