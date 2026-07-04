@@ -1489,6 +1489,116 @@ test_28()
 	fi
 }
 
+# Verify that the caller's original noglob state (glob-enabled or
+# glob-disabled) is what DO_JOB_CB, JOB_DONE_CB, and SCHED_FINALIZE_CB
+# observe, regardless of schedule_jobs()'s internal set -f handling.
+test_29()
+{
+	test_29_do_job()
+	{
+		case "${-}" in
+			*f*) printf 'noglob\n' ;;
+			*) printf 'glob\n' ;;
+		esac >> "${do_job_glob_file}"
+		return 0
+	}
+
+	test_29_done_handler()
+	{
+		case "${-}" in
+			*f*) printf 'noglob\n' ;;
+			*) printf 'glob\n' ;;
+		esac >> "${done_glob_file}"
+		return 0
+	}
+
+	test_29_finalize_handler()
+	{
+		case "${-}" in
+			*f*) printf 'noglob\n' ;;
+			*) printf 'glob\n' ;;
+		esac > "${finalize_glob_file}"
+		return 0
+	}
+
+	local \
+		TEST_NUM=29 \
+		mode \
+		expect \
+		rv \
+		pass_cnt=0 \
+		parent_pre \
+		parent_post \
+		do_job_glob_file \
+		done_glob_file \
+		finalize_glob_file \
+		do_job_result \
+		done_result \
+		finalize_result
+
+	print_test_header 29 "noglob state preserved in callbacks" \
+		"glob-enabled and glob-disabled callers"
+
+	for mode in glob noglob
+	do
+		do_job_glob_file="/tmp/sched.globtest.job.${TEST_NUM:?}.$$"
+		done_glob_file="/tmp/sched.globtest.done.${TEST_NUM:?}.$$"
+		finalize_glob_file="/tmp/sched.globtest.finalize.${TEST_NUM:?}.$$"
+		rm -f "${do_job_glob_file}" "${done_glob_file}" "${finalize_glob_file}"
+
+		case "${mode}" in
+			glob) set +f; expect=glob ;;
+			noglob) set -f; expect=noglob ;;
+		esac
+
+		parent_pre="${mode}"
+
+		(
+			TEST_MODE=success \
+			DO_JOB_CB=test_29_do_job \
+			DONE_HANDLER_CB=test_29_done_handler \
+			FINALIZE_HANDLER_CB=test_29_finalize_handler \
+			SCHED_MAX_JOBS=2 \
+				schedule_jobs '1 2 3'
+		) &
+		wait "$!"
+		rv=$?
+
+		parent_post=glob
+		case "${-}" in
+			*f*) parent_post=noglob ;;
+		esac
+		set +f
+
+		do_job_result="$(sort -u "${do_job_glob_file}" 2>/dev/null | tr '\n' ' ')"
+		done_result="$(sort -u "${done_glob_file}" 2>/dev/null | tr '\n' ' ')"
+		finalize_result="$(cat "${finalize_glob_file}" 2>/dev/null)"
+
+		if [ "${rv}" = 0 ] &&
+			[ "${parent_post}" = "${parent_pre}" ] &&
+			[ "${do_job_result}" = "${expect} " ] &&
+			[ "${done_result}" = "${expect} " ] &&
+			[ "${finalize_result}" = "${expect}" ]
+		then
+			pass_cnt=$((pass_cnt + 1))
+		else
+			printf 'sub-check failed for mode=%s (rv=%s, do_job=%s, done=%s, finalize=%s)\n' \
+				"${mode}" "${rv}" "${do_job_result}" "${done_result}" "${finalize_result}" >&2
+		fi
+
+		rm -f "${do_job_glob_file}" "${done_glob_file}" "${finalize_glob_file}"
+	done
+
+	set +f
+
+	if [ "${pass_cnt}" = 2 ]
+	then
+		printf '%s\n' "Result: ${PASS}"
+	else
+		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/2)"
+	fi
+}
+
 
 #
 # Inline test code starts here.
@@ -1505,7 +1615,7 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="${1:-"$(seq 1 28)"}"
+RUN_TESTS="${1:-"$(seq 1 29)"}"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
