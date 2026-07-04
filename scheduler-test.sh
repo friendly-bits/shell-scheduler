@@ -1377,6 +1377,35 @@ test_24()
 	rm -f "${TIMEOUT_FILE}"
 }
 
+# Verify that when the global processing timeout and the idle timeout are due
+# at the same instant, the global timeout takes priority (if/elif ordering).
+test_25()
+{
+	local \
+		TEST_NUM=25 \
+		rv \
+		jobs='hang'
+
+	print_test_header 25 "Simultaneous global/idle timeout - global wins" "${jobs}"
+
+	(
+		TEST_MODE=idle \
+		SCHED_MAX_JOBS=1 \
+		SCHED_TIMEOUT_S=2 \
+		SCHED_IDLE_TIMEOUT_S=2 \
+			schedule_jobs "${jobs}"
+	) &
+	wait "$!"
+	rv=$?
+
+	if [ "${rv}" = 82 ]
+	then
+		printf '%s\n' "Result: ${PASS} (rv=${rv})"
+	else
+		printf '%s\n' "Result: ${FAIL} (rv=${rv}, expected 82)"
+	fi
+}
+
 
 #
 # Inline test code starts here.
@@ -1393,8 +1422,8 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="$(seq 1 24)"
-#RUN_TESTS="8"
+RUN_TESTS="$(seq 1 25)"
+#RUN_TESTS="15"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
