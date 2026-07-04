@@ -972,38 +972,60 @@ test_17()
 		return 0
 	}
 
-	local \
-		TEST_NUM=17 \
-		rv \
-		pass_cnt=0 \
-		msg_cnt=0
+	# SCHED_MAX_JOBS is required (sch_check_uint's 3rd arg); SCHED_TIMEOUT_S
+	# and SCHED_IDLE_TIMEOUT_S are optional, so '' is a *valid* value for
+	# them (means "use default") and must not be included as a bad value.
+	test_17_check_bad_value()
+	{
+		local var="${1}" bad_val="${2}" rv
 
-	print_test_header 17 "Invalid SCHED_MAX_JOBS values" \
-		"'' abc 0 -1"
+		local "${var}=${bad_val}"
 
-
-	FAIL_MSG_FILE="/tmp/sched.maxjobs.msg.${TEST_NUM:?}.$$"
-	JOB_STARTED_FILE="/tmp/sched.maxjobs.job.${TEST_NUM:?}.$$"
-
-	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
-
-	for max_jobs in '' abc 0 -1
-	do
 		(
 			SCHED_FAIL_MSG_CB=test_17_fail_msg_handler \
 			SCHED_FINALIZE_CB=finalize_handler \
 			DO_JOB_CB=test_17_do_job \
-			SCHED_MAX_JOBS="${max_jobs}" \
 				schedule_jobs '1'
 		) &
 		wait "$!"
 		rv=$?
+
+		total_cnt=$((total_cnt + 1))
 
 		[ "${rv}" = 1 ] &&
 		[ ! -f "${JOB_STARTED_FILE}" ] &&
 			pass_cnt=$((pass_cnt + 1))
 
 		rm -f "${JOB_STARTED_FILE}"
+	}
+
+	local \
+		TEST_NUM=17 \
+		rv \
+		pass_cnt=0 \
+		total_cnt=0 \
+		msg_cnt=0 \
+		var bad_val
+
+	print_test_header 17 "Invalid scheduler numeric env var values" \
+		"SCHED_MAX_JOBS('' abc 0 -1), SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S(abc 0 -1)"
+
+	FAIL_MSG_FILE="/tmp/sched.maxjobs.msg.${TEST_NUM:?}.$$"
+	JOB_STARTED_FILE="/tmp/sched.maxjobs.job.${TEST_NUM:?}.$$"
+
+	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
+
+	for bad_val in '' abc 0 -1
+	do
+		test_17_check_bad_value SCHED_MAX_JOBS "${bad_val}"
+	done
+
+	for var in SCHED_TIMEOUT_S SCHED_IDLE_TIMEOUT_S
+	do
+		for bad_val in abc 0 -1
+		do
+			test_17_check_bad_value "${var}" "${bad_val}"
+		done
 	done
 
 	if [ -f "${FAIL_MSG_FILE}" ]
@@ -1011,12 +1033,12 @@ test_17()
 		msg_cnt=$(wc -l < "${FAIL_MSG_FILE}")
 	fi
 
-	if [ "${pass_cnt}" = 4 ] &&
-		[ "${msg_cnt}" = 4 ]
+	if [ "${pass_cnt}" = "${total_cnt}" ] &&
+		[ "${msg_cnt}" = "${total_cnt}" ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		printf '%s\n' "Result: ${PASS} (passed=${pass_cnt}/${total_cnt})"
 	else
-		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/4, messages=${msg_cnt})"
+		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/${total_cnt}, messages=${msg_cnt})"
 	fi
 
 	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
@@ -1406,6 +1428,67 @@ test_25()
 	fi
 }
 
+# Verify that SCHED_MAX_JOBS greater than the job count never enters the
+# concurrency-limiting wait loop, and all jobs still complete normally.
+test_26()
+{
+	TEST_NUM=26 \
+	TEST_NAME='SCHED_MAX_JOBS exceeds job count' \
+	TEST_MODE=success \
+	TEST_JOBS='1 2 3' \
+	TEST_EXPECT_RV=0 \
+	TEST_SCHED_MAX_JOBS=10 \
+		run_test
+}
+
+# Verify that SCHED_FINALIZE_CB may be empty and that successful execution
+# still completes normally (symmetric to test_18's empty JOB_DONE_CB).
+test_27()
+{
+	SCHED_FINALIZE_CB='' \
+	TEST_NUM=27 \
+	TEST_NAME='Empty SCHED_FINALIZE_CB' \
+	TEST_MODE=success \
+	TEST_JOBS='1 2 3 4 5' \
+	TEST_EXPECT_RV=0 \
+	TEST_SCHED_MAX_JOBS=3 \
+		run_test
+}
+
+# Verify that finalize() removes the scheduler's FIFO after a normal
+# (non-error) run, leaving no leaked file behind.
+test_28()
+{
+	local \
+		TEST_NUM=28 \
+		rv \
+		scheduler_pid \
+		sched_fifo \
+		jobs='1 2 3'
+
+	print_test_header 28 "FIFO cleanup after successful completion" "${jobs}"
+
+	(
+		TEST_MODE=success \
+		SCHED_MAX_JOBS=2 \
+			schedule_jobs "${jobs}"
+	) &
+	scheduler_pid=$!
+
+	sched_fifo="/tmp/sched_ipc_${scheduler_pid}"
+
+	wait "${scheduler_pid}"
+	rv=$?
+
+	if [ "${rv}" = 0 ] &&
+		[ ! -e "${sched_fifo}" ]
+	then
+		printf '%s\n' "Result: ${PASS} (rv=${rv})"
+	else
+		printf '%s\n' "Result: ${FAIL} (rv=${rv}, fifo_exists=$([ -e "${sched_fifo}" ] && echo yes || echo no))"
+	fi
+}
+
 
 #
 # Inline test code starts here.
@@ -1422,8 +1505,7 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="$(seq 1 25)"
-#RUN_TESTS="15"
+RUN_TESTS="${1:-"$(seq 1 28)"}"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
