@@ -153,30 +153,30 @@ refresh_remaining_time()
 # 1 - var name to output remaining time
 get_remaining_time()
 {
-	local gt_cur_time_cs gt_cur_time_s gt_total_time_s gt_remaining_time_s rv
+	local gt_cur_time_cs gt_total_time_cs gt_remaining_time_cs rv
 	export -n "${1}"=0
 
 	get_uptime_cs gt_cur_time_cs || return 1
-	gt_cur_time_s=$((gt_cur_time_cs/100))
-	gt_total_time_s=$((gt_cur_time_s-SCHED_INIT_UPTIME_S))
+	gt_total_time_cs=$((gt_cur_time_cs - LAST_PROGRESS_TIME_CS))
 
-	gt_remaining_time_s=$((PROC_TIMEOUT_S-gt_total_time_s))
+	gt_remaining_time_cs=$((PROC_TIMEOUT_S*100 - gt_total_time_cs))
 
-	if [ ! "${gt_remaining_time_s}" -gt 0 ]
+
+	if [ ! "${gt_remaining_time_cs}" -gt 0 ]
 	then
 		sched_fail_msg "Processing timeout (${PROC_TIMEOUT_S} s) for scheduler (PID: ${SCHEDULER_PID})."
 		rv="${SCHED_RV_GLOBAL_TIMEOUT}"
-	elif [ ! "$(( IDLE_TIMEOUT_S - (gt_cur_time_s-LAST_PROGRESS_TIME_S) ))" -gt 0 ]
+	elif [ ! "$(( IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-LAST_PROGRESS_TIME_CS) ))" -gt 0 ]
 	then
 		sched_fail_msg "Idle timeout (${IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCHEDULER_PID})."
 		rv="${SCHED_RV_IDLE_TIMEOUT}"
 	fi
 
-	case $((IDLE_TIMEOUT_S-gt_remaining_time_s)) in
-		-*) gt_remaining_time_s="${IDLE_TIMEOUT_S}"
+	case $((IDLE_TIMEOUT_S*100 - gt_remaining_time_cs)) in
+		-*) gt_remaining_time_cs="$((IDLE_TIMEOUT_S*100))"
 	esac
 
-	export -n "${1}=${gt_remaining_time_s}"
+	export -n "${1}=${gt_remaining_time_cs}"
 
 	return "${rv:-0}"
 }
@@ -187,7 +187,7 @@ process_done_record()
 		done_pid \
 		done_rv \
 		done_id \
-		_remaining_time_s \
+		_remaining_time_cs \
 		_cur_time_cs \
 		_running_pids \
 		_running_padded \
@@ -201,15 +201,15 @@ process_done_record()
 		job_done_cb="${7}"
 
 	eval \
-		"_remaining_time_s=\"\${${rem_time_var}}\"" \
+		"_remaining_time_cs=\"\${${rem_time_var}}\"" \
 		"_running_pids=\"\${${pids_var}}\"" \
 		"_running_cnt=\"\${${running_cnt_var}}\""
 
 	[ -e "${ipc_fifo}" ] ||
 		finalize 1 "FIFO file '${ipc_fifo}' does not exist."
 
-	[ "${_remaining_time_s}" -gt 0 ] &&
-	read -t "${_remaining_time_s}" -r done_pid done_rv done_id < "${ipc_fifo}"
+	[ $((_remaining_time_cs/100 > 0)) = 1 ] &&
+	read -t "$((_remaining_time_cs/100))" -r done_pid done_rv done_id < "${ipc_fifo}"
 
 	refresh_remaining_time "${rem_time_var}"
 
@@ -244,7 +244,7 @@ process_done_record()
 		"${pids_var}=${_running_pids}"
 
 	get_uptime_cs _cur_time_cs || finalize 1
-	export -n "${last_progress_time_var}=$((_cur_time_cs/100))"
+	export -n "${last_progress_time_var}=${_cur_time_cs}"
 
 	[ -z "${job_done_cb}" ] ||
 	"${job_done_cb}" "${done_id}" "${done_rv}" ||
@@ -314,14 +314,13 @@ schedule_jobs()
 	local \
 		IFS=" 	"$'\n' \
 		SCHEDULER_PID \
-		remaining_time_s \
-		sched_init_uptime_cs \
+		remaining_time_cs \
+		SCHED_INIT_UPTIME_CS \
 		id \
 		pid \
 		running_pids \
 		running_jobs_cnt=0 \
-		LAST_PROGRESS_TIME_S \
-		SCHED_INIT_UPTIME_S \
+		LAST_PROGRESS_TIME_CS \
 		USR_TRIG \
 		sched_ipc_fifo \
 		sched_dir="${SCHED_DIR:-/tmp}" \
@@ -330,7 +329,7 @@ schedule_jobs()
 		\
 		job_ids="${1?}"
 	
-	: "${remaining_time_s}" # Silence shellcheck warning
+	: "${remaining_time_cs}" # Silence shellcheck warning
 
 	shift 1
 
@@ -358,12 +357,11 @@ schedule_jobs()
 
 	# Main logic
 
-	get_uptime_cs sched_init_uptime_cs &&
+	get_uptime_cs SCHED_INIT_UPTIME_CS &&
 	get_curr_pid SCHEDULER_PID ||
 		return 1
 
-	SCHED_INIT_UPTIME_S=$((sched_init_uptime_cs/100))
-	LAST_PROGRESS_TIME_S="${SCHED_INIT_UPTIME_S}"
+	LAST_PROGRESS_TIME_CS="${SCHED_INIT_UPTIME_CS}"
 
 	sched_ipc_fifo="${sched_dir}/sched_ipc_${SCHEDULER_PID}"
 
@@ -381,16 +379,16 @@ schedule_jobs()
 			[ -e "${sched_ipc_fifo}" ]
 		do
 			process_done_record \
-				remaining_time_s \
+				remaining_time_cs \
 				running_pids \
 				running_jobs_cnt \
-				LAST_PROGRESS_TIME_S \
+				LAST_PROGRESS_TIME_CS \
 				"${job_ids}" \
 				"${sched_ipc_fifo}" \
 				"${JOB_DONE_CB}"
 		done
 
-		refresh_remaining_time remaining_time_s
+		refresh_remaining_time remaining_time_cs
 
 		running_jobs_cnt=$((running_jobs_cnt + 1))
 
@@ -404,10 +402,10 @@ schedule_jobs()
 		[ -e "${sched_ipc_fifo}" ]
 	do
 		process_done_record \
-			remaining_time_s \
+			remaining_time_cs \
 			running_pids \
 			running_jobs_cnt \
-			LAST_PROGRESS_TIME_S \
+			LAST_PROGRESS_TIME_CS \
 			"${job_ids}" \
 			"${sched_ipc_fifo}" \
 			"${JOB_DONE_CB}"
@@ -415,7 +413,7 @@ schedule_jobs()
 
 	[ "${running_jobs_cnt}" = 0 ] ||
 	{
-		refresh_remaining_time remaining_time_s
+		refresh_remaining_time remaining_time_cs
 		finalize 1 "Not all jobs are done: running_jobs_cnt=${running_jobs_cnt}"
 	}
 
