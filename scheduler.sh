@@ -208,8 +208,9 @@ process_done_record()
 	[ -e "${ipc_fifo}" ] ||
 		finalize 1 "FIFO file '${ipc_fifo}' does not exist."
 
-	[ $(( (_remaining_time_cs + 99) / 100 )) -gt 0 ] &&
-	read -t "$((_remaining_time_cs/100))" -r done_pid done_rv done_id < "${ipc_fifo}"
+	local _read_t_s=$(( (_remaining_time_cs + 99) / 100 ))
+	[ "${_read_t_s}" -gt 0 ] &&
+	read -t "${_read_t_s}" -r done_pid done_rv done_id < "${ipc_fifo}"
 
 	refresh_remaining_time "${rem_time_var}"
 
