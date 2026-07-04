@@ -374,8 +374,15 @@ schedule_jobs()
 
 	trap 'USR_TRIG=1 finalize "${SCHED_RV_SIGNAL}"' USR1
 
+	local had_f=
+	case "${-}" in
+		*f*) had_f=1 ;;
+	esac
+	set -f
+
 	for id in ${job_ids}
 	do
+		[ -n "${had_f}" ] && set +f
 		while [ "${running_jobs_cnt}" -ge "${SCHED_MAX_JOBS}" ] &&
 			[ -e "${sched_ipc_fifo}" ]
 		do
@@ -398,6 +405,8 @@ schedule_jobs()
 
 		running_pids="${running_pids}${running_pids:+ }${pid}"
 	done
+
+	[ -n "${had_f}" ] && set +f
 
 	while [ "${running_jobs_cnt}" -gt 0 ] &&
 		[ -e "${sched_ipc_fifo}" ]
