@@ -1660,13 +1660,13 @@ test_30()
 		ARGS_FILE="/tmp/sched.idchars.args.${TEST_NUM}.$$" \
 		DONE_FILE="/tmp/sched.idchars.done.${TEST_NUM}.$$"
 
-
 	# Includes: glob metacharacters, brackets/braces/parens, quoting
 	# characters, a literal backslash, and several classic
 	# command-injection payloads (command substitution, backticks, ';',
-	# '&&', '|') embedded directly in the job ID text. Built by sequential
-	# concatenation (rather than a bash array) since arrays are a bashism
-	# with no ash equivalent.
+	# '&&', '|') embedded directly in the job ID text. Built as a single
+	# multi-line literal (rather than a bash array, a bashism with no ash
+	# equivalent); the continuation/indentation whitespace it introduces
+	# is stripped below.
 
 	jobs="
 		plain1 \
@@ -1701,9 +1701,10 @@ test_30()
 		pipeexec|test_30_touch_inject \
 	"
 
-    jobs="${jobs//[$'\n'	]/}"
+	jobs="${jobs//[$'\n'$'\t']/}"
 
-	print_test_header 30 "Arbitrary characters in job IDs"
+	print_test_header 30 "Arbitrary characters in job IDs" \
+		"30 IDs covering glob/quote/injection-shaped characters"
 
 	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 
@@ -1820,7 +1821,6 @@ test_31()
 		INJECT_FILE="/tmp/sched.forge.inject.${TEST_NUM}.$$" \
 		FAIL_MSG_FILE="/tmp/sched.forge.msg.${TEST_NUM}.$$"
 
-
 	print_test_header 31 "Job-ID forgery / injection resistance" \
 		"spoofed completion records with glob and shell-metacharacter IDs"
 
@@ -1851,9 +1851,8 @@ test_31()
 # Inline test code starts here.
 #
 
-NL='
-'
-DEFAULT_IFS="	 ${NL}"
+NL=$'\n'
+DEFAULT_IFS=$'\t'" ${NL}"
 IFS="${DEFAULT_IFS}"
 
 set_ansi

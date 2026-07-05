@@ -259,7 +259,7 @@ normalize_ids()
 {
 	local \
 		had_f \
-		IFS=" 	"$'\n' \
+		IFS=" "$'\t'$'\n' \
 		out_var="${1}"
 
 	case "${-}" in
@@ -313,7 +313,7 @@ schedule_jobs()
 		SCHED_RV_SIGNAL=83
 
 	local \
-		IFS=" 	"$'\n' \
+		IFS=" "$'\t'$'\n' \
 		SCHEDULER_PID \
 		remaining_time_cs \
 		SCHED_INIT_UPTIME_CS \
