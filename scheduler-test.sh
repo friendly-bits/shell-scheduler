@@ -36,23 +36,32 @@ print_test_header() {
 verify_recorded_set()
 {
 	local \
-		actual_cnt_var="${1:?}" \
-		record_file="${2:?}" \
-		expected_items="${3:?}" \
-		expected_cnt \
+		expected_items_var="${1:?}" \
+		actual_items_var="${2:?}" \
+		expected_cnt_var="${3:?}" \
+		actual_cnt_var="${4:?}" \
+		record_file="${5:?}" \
+		vrs_expected_items="${6:?}" \
+		vrs_actual_items \
+		vrs_expected_cnt \
 		vrs_actual_cnt
 
 	# Remove duplicate expected items
-	expected_items="$(printf '%s\n' "${expected_items// /$'\n'}" | sort -u)"
-	expected_cnt="$(printf '%s\n' "${expected_items}" | wc -l)"
+	vrs_expected_items="$(printf '%s\n' "${vrs_expected_items// /$'\n'}" | sed '/^$/d' | sort -u)"
+	vrs_expected_cnt="$(printf '%s\n' "${vrs_expected_items}" | wc -l)"
 
 	[ -f "${record_file}" ] || return 1
 
 	vrs_actual_cnt="$(sed '/^$/d' "${record_file}" | wc -l)"
-	export -n "${actual_cnt_var}=${vrs_actual_cnt}"
+	vrs_actual_items="$(sed '/^$/d' "${record_file}" | sort -u)"
+	export -n \
+		"${expected_items_var}=${vrs_expected_items}" \
+		"${actual_items_var}=${vrs_actual_items}" \
+		"${expected_cnt_var}=${vrs_expected_cnt}" \
+		"${actual_cnt_var}=${vrs_actual_cnt}"
 
-	[ "${expected_cnt}" = "${vrs_actual_cnt}" ] &&
-		[ "${expected_items}" = "$(sed '/^$/d' "${record_file}" | sort -u)" ]
+	[ "${vrs_expected_cnt}" = "${vrs_actual_cnt}" ] &&
+		[ "${vrs_expected_items}" = "${vrs_actual_items}" ]
 }
 
 done_handler_default()
@@ -479,6 +488,8 @@ test_9()
 	local \
 		TEST_NUM=9 \
 		rv \
+		expected_cnt \
+		actual_done_jobs \
 		done_cnt=0 \
 		jobs="1 2 3 4 5"
 
@@ -499,13 +510,16 @@ test_9()
 
 	if [ "${rv}" = 0 ] &&
 		verify_recorded_set \
+			_ \
+			actual_done_jobs \
+			expected_cnt \
 			done_cnt \
 			"${DONE_COUNT_FILE}" \
 			"${jobs}"
 	then
-		printf '%s\n' "Result: ${PASS} (completed=${done_cnt})"
+		printf '%s\n' "Result: ${PASS} (done_cnt=${done_cnt})"
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, completed=${done_cnt})"
+		printf '%s\n' "Result: ${FAIL} (rv=${rv}, expected_cnt=${expected_cnt}, done_cnt=${done_cnt}, actual_done_jobs=${actual_done_jobs})"
 	fi
 
 	rm -f "${DONE_COUNT_FILE}"
@@ -547,7 +561,9 @@ test_10()
 	local \
 		TEST_NUM=10 \
 		rv \
-		done_cnt=0 \
+		expected_cnt \
+		actual_done_jobs \
+		actual_done_cnt=0 \
 		finalize_state \
 		jobs=''
 
@@ -576,14 +592,17 @@ test_10()
 
 	if [ "${rv}" = 0 ] &&
 		verify_recorded_set \
-			done_cnt \
+			_ \
+			actual_done_jobs \
+			expected_cnt \
+			actual_done_cnt \
 			"${DONE_COUNT_FILE}" \
 			"${jobs}" &&
 		[ "${finalize_state}" = empty ]
 	then
-		printf '%s\n' "Result: ${PASS} (completed=${done_cnt})"
+		printf '%s\n' "Result: ${PASS} (completed=${actual_done_cnt})"
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, completed=${done_cnt}, finalize=${finalize_state})"
+		printf '%s\n' "Result: ${FAIL} (rv=${rv}, finalize_state=${finalize_state}, expected_cnt=${expected_cnt}, actual_done_cnt=${actual_done_cnt}, actual_done_jobs=${actual_done_jobs})"
 	fi
 
 	rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
@@ -672,7 +691,7 @@ test_12()
 	local \
 		TEST_NUM=12 \
 		rv \
-		done_cnt=0 \
+		actual_done_cnt=0 \
 		finalize_state='' \
 		jobs="<none>"
 
@@ -695,18 +714,18 @@ test_12()
 
 	if [ -f "${EMPTY_DONE_FILE}" ]
 	then
-		done_cnt=$(wc -l < "${EMPTY_DONE_FILE}")
+		actual_done_cnt=$(wc -l < "${EMPTY_DONE_FILE}")
 	fi
 
 	read_first_line finalize_state "${EMPTY_FINALIZE_FILE}"
 
 	if [ "${rv}" = 0 ] &&
-		[ "${done_cnt}" = 0 ] &&
+		[ "${actual_done_cnt}" = 0 ] &&
 		[ "${finalize_state}" = empty ]
 	then
 		printf '%s\n' "Result: ${PASS}"
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, done_cnt=${done_cnt}, finalize=${finalize_state})"
+		printf '%s\n' "Result: ${FAIL} (rv=${rv}, actual_done_cnt=${actual_done_cnt}, finalize=${finalize_state})"
 	fi
 
 	rm -f "${EMPTY_DONE_FILE}" "${EMPTY_FINALIZE_FILE}"
@@ -1619,15 +1638,28 @@ test_30()
 		return 0
 	}
 
+	test_30_touch_inject()
+	{
+		touch "${INJECT_FILE}"
+	}
+
 	local \
 		TEST_NUM=30 \
 		rv \
-		do_job_cnt=0 \
-		done_cnt=0 \
-		jobs='' \
-		INJECT_FILE
+		expected_do_jobs \
+		expected_do_cnt \
+		expected_done_cnt \
+		actual_do_jobs \
+		actual_done_jobs \
+		actual_do_cnt=0 \
+		actual_done_cnt=0 \
+		jobs=''
 
-	INJECT_FILE="/tmp/sched.idchars.inject.${TEST_NUM}.$$"
+	local \
+		INJECT_FILE="/tmp/sched.idchars.inject.${TEST_NUM}.$$" \
+		ARGS_FILE="/tmp/sched.idchars.args.${TEST_NUM}.$$" \
+		DONE_FILE="/tmp/sched.idchars.done.${TEST_NUM}.$$"
+
 
 	# Includes: glob metacharacters, brackets/braces/parens, quoting
 	# characters, a literal backslash, and several classic
@@ -1635,41 +1667,43 @@ test_30()
 	# '&&', '|') embedded directly in the job ID text. Built by sequential
 	# concatenation (rather than a bash array) since arrays are a bashism
 	# with no ash equivalent.
-	jobs="${jobs}plain1"
-	jobs="${jobs} star*id"
-	jobs="${jobs} quest?id"
-	jobs="${jobs} brk[et]s"
-	jobs="${jobs} brace{d}"
-	jobs="${jobs} paren(ed)"
-	jobs="${jobs} dollarsign\$x"
-	jobs="${jobs} backtick\`x\`"
-	jobs="${jobs} semi;colon"
-	jobs="${jobs} pipe|line"
-	jobs="${jobs} amp&and"
-	jobs="${jobs} ltgt<>x"
-	jobs="${jobs} eqsign=x"
-	jobs="${jobs} hashtag#x"
-	jobs="${jobs} bangmark!x"
-	jobs="${jobs} tildeish~x"
-	jobs="${jobs} atsign@x"
-	jobs="${jobs} carethat^x"
-	jobs="${jobs} percentsign%x"
-	jobs="${jobs} colonok:x"
-	jobs="${jobs} dotdot.x"
-	jobs="${jobs} commasep,x"
-	jobs="${jobs} apos'trophe"
-	jobs="${jobs} dquo\"te"
-	jobs="${jobs} bslash\\x"
-	jobs="${jobs} cmdsub\$(touch ${INJECT_FILE})"
-	jobs="${jobs} subshelltick\`touch ${INJECT_FILE}\`"
-	jobs="${jobs} semiexec;touch ${INJECT_FILE}"
-	jobs="${jobs} andexec&&touch ${INJECT_FILE}"
-	jobs="${jobs} pipeexec|touch ${INJECT_FILE}"
 
-	print_test_header 30 "Arbitrary characters in job IDs" "${jobs}"
+	jobs="
+		plain1 \
+		star*id \
+		quest?id \
+		brk[et]s \
+		brace{d} \
+		paren(ed) \
+		dollarsign\$x \
+		backtick\`x\` \
+		semi;colon \
+		pipe|line \
+		amp&and \
+		ltgt<>x \
+		eqsign=x \
+		hashtag#x \
+		bangmark!x \
+		tildeish~x \
+		atsign@x \
+		carethat^x \
+		percentsign%x \
+		colonok:x \
+		dotdot.x \
+		commasep,x \
+		apos'trophe \
+		dquo\"te \
+		bslash\\x \
+		cmdsub\$(test_30_touch_inject) \
+		subshelltick\`test_30_touch_inject\` \
+		semiexec;test_30_touch_inject \
+		andexec&&test_30_touch_inject \
+		pipeexec|test_30_touch_inject \
+	"
 
-	ARGS_FILE="/tmp/sched.idchars.args.${TEST_NUM}.$$"
-	DONE_FILE="/tmp/sched.idchars.done.${TEST_NUM}.$$"
+    jobs="${jobs//[$'\n'	]/}"
+
+	print_test_header 30 "Arbitrary characters in job IDs"
 
 	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 
@@ -1685,13 +1719,26 @@ test_30()
 	rv=$?
 
 	if [ "${rv}" = 0 ] &&
-		verify_recorded_set do_job_cnt "${ARGS_FILE}" "${jobs}" &&
-		verify_recorded_set done_cnt "${DONE_FILE}" "${jobs}" &&
+		verify_recorded_set expected_do_jobs  actual_do_jobs   expected_do_cnt   actual_do_cnt   "${ARGS_FILE}" "${jobs}" &&
+		verify_recorded_set        _          actual_done_jobs expected_done_cnt actual_done_cnt "${DONE_FILE}" "${jobs}" &&
 		[ ! -e "${INJECT_FILE}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (jobs=${do_job_cnt})"
+		printf '%s\n' "Result: ${PASS} (jobs=${actual_do_cnt})"
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, do_job=${do_job_cnt}, done=${done_cnt}, inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no))"
+		printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+			"Result: ${FAIL} (rv=${rv})" \
+			"expected_do_cnt=${expected_do_cnt}, actual_do_cnt=${actual_do_cnt}" \
+			"expected_done_cnt=${expected_done_cnt}, actual_done_cnt=${actual_done_cnt}" \
+			"inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)" \
+			"" \
+			"expected jobs:" \
+			"${expected_do_jobs}" \
+			"" \
+			"actual_do_jobs:" \
+			"${actual_do_jobs}" \
+			"" \
+			"actual_done_jobs:" \
+			"${actual_done_jobs}"
 	fi
 
 	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
@@ -1711,6 +1758,11 @@ test_30()
 # like any other wrong value, and must never actually execute.
 test_31()
 {
+	test_31_touch_inject()
+	{
+		touch "${INJECT_FILE}"
+	}
+
 	test_31_do_job()
 	{
 		local self_pid
@@ -1762,21 +1814,22 @@ test_31()
 		TEST_NUM=31 \
 		pass_cnt=0 \
 		total_cnt=0 \
-		msg_cnt=0 \
-		INJECT_FILE
+		msg_cnt=0
+
+	local \
+		INJECT_FILE="/tmp/sched.forge.inject.${TEST_NUM}.$$" \
+		FAIL_MSG_FILE="/tmp/sched.forge.msg.${TEST_NUM}.$$"
+
 
 	print_test_header 31 "Job-ID forgery / injection resistance" \
 		"spoofed completion records with glob and shell-metacharacter IDs"
 
-	INJECT_FILE="/tmp/sched.forge.inject.${TEST_NUM}.$$"
-	FAIL_MSG_FILE="/tmp/sched.forge.msg.${TEST_NUM}.$$"
-
 	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
 
 	test_31_check_forgery "realjob" "*"
-	test_31_check_forgery "realjob" "\$(touch ${INJECT_FILE})"
-	test_31_check_forgery "realjob" "\`touch ${INJECT_FILE}\`"
-	test_31_check_forgery "realjob" ";touch ${INJECT_FILE}"
+	test_31_check_forgery "realjob" "\$(test_31_touch_inject)"
+	test_31_check_forgery "realjob" "\`test_31_touch_inject\`"
+	test_31_check_forgery "realjob" ";test_31_touch_inject"
 
 	[ -f "${FAIL_MSG_FILE}" ] &&
 		msg_cnt=$(wc -l < "${FAIL_MSG_FILE}")
