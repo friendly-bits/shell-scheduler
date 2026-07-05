@@ -108,7 +108,6 @@ finalize()
 	trap ':' USR1
 
 	[ -n "${2}" ] && [ "${rv}" != 0 ] && sched_fail_msg "${2}"
-	[ -n "${USR_TRIG}" ] && printf '\n%s\n' "Job scheduler is stopping on receipt of USR1 signal." >&2
 
 	exec 3>&-
 	rm -f "${sched_ipc_fifo}"
@@ -322,7 +321,6 @@ schedule_jobs()
 		running_pids \
 		running_jobs_cnt=0 \
 		LAST_PROGRESS_TIME_CS \
-		USR_TRIG \
 		sched_ipc_fifo \
 		sched_dir="${SCHED_DIR:-/tmp}" \
 		PROC_TIMEOUT_S="${SCHED_TIMEOUT_S:-900}" \
@@ -372,7 +370,7 @@ schedule_jobs()
 	exec 3<>"${sched_ipc_fifo}" ||
 		finalize 1 "Failed to create FIFO '${sched_ipc_fifo}'."
 
-	trap 'USR_TRIG=1 finalize "${SCHED_RV_SIGNAL}"' USR1
+	trap 'finalize "${SCHED_RV_SIGNAL}"' USR1
 
 	local had_f=
 	case "${-}" in
