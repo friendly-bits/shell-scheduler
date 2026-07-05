@@ -1599,6 +1599,200 @@ test_29()
 	fi
 }
 
+# Verify that job IDs may contain arbitrary characters - punctuation, shell
+# metacharacters, glob wildcards, quotes, backslashes, etc. - i.e. anything
+# other than the whitespace characters (space/tab/newline) used as list
+# separators - and that such IDs are passed through to DO_JOB_CB and
+# JOB_DONE_CB completely unchanged.
+test_30()
+{
+	test_30_do_job()
+	{
+		printf '%s\n' "$1" >> "${ARGS_FILE}"
+		sleep 1
+		return 0
+	}
+
+	test_30_done_handler()
+	{
+		printf '%s\n' "$1" >> "${DONE_FILE}"
+		return 0
+	}
+
+	local \
+		TEST_NUM=30 \
+		rv \
+		do_job_cnt=0 \
+		done_cnt=0 \
+		jobs='' \
+		INJECT_FILE
+
+	INJECT_FILE="/tmp/sched.idchars.inject.${TEST_NUM}.$$"
+
+	# Includes: glob metacharacters, brackets/braces/parens, quoting
+	# characters, a literal backslash, and several classic
+	# command-injection payloads (command substitution, backticks, ';',
+	# '&&', '|') embedded directly in the job ID text. Built by sequential
+	# concatenation (rather than a bash array) since arrays are a bashism
+	# with no ash equivalent.
+	jobs="${jobs}plain1"
+	jobs="${jobs} star*id"
+	jobs="${jobs} quest?id"
+	jobs="${jobs} brk[et]s"
+	jobs="${jobs} brace{d}"
+	jobs="${jobs} paren(ed)"
+	jobs="${jobs} dollarsign\$x"
+	jobs="${jobs} backtick\`x\`"
+	jobs="${jobs} semi;colon"
+	jobs="${jobs} pipe|line"
+	jobs="${jobs} amp&and"
+	jobs="${jobs} ltgt<>x"
+	jobs="${jobs} eqsign=x"
+	jobs="${jobs} hashtag#x"
+	jobs="${jobs} bangmark!x"
+	jobs="${jobs} tildeish~x"
+	jobs="${jobs} atsign@x"
+	jobs="${jobs} carethat^x"
+	jobs="${jobs} percentsign%x"
+	jobs="${jobs} colonok:x"
+	jobs="${jobs} dotdot.x"
+	jobs="${jobs} commasep,x"
+	jobs="${jobs} apos'trophe"
+	jobs="${jobs} dquo\"te"
+	jobs="${jobs} bslash\\x"
+	jobs="${jobs} cmdsub\$(touch ${INJECT_FILE})"
+	jobs="${jobs} subshelltick\`touch ${INJECT_FILE}\`"
+	jobs="${jobs} semiexec;touch ${INJECT_FILE}"
+	jobs="${jobs} andexec&&touch ${INJECT_FILE}"
+	jobs="${jobs} pipeexec|touch ${INJECT_FILE}"
+
+	print_test_header 30 "Arbitrary characters in job IDs" "${jobs}"
+
+	ARGS_FILE="/tmp/sched.idchars.args.${TEST_NUM}.$$"
+	DONE_FILE="/tmp/sched.idchars.done.${TEST_NUM}.$$"
+
+	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
+
+	(
+		DO_JOB_CB=test_30_do_job \
+		JOB_DONE_CB=test_30_done_handler \
+		SCHED_MAX_JOBS=5 \
+		SCHED_TIMEOUT_S=15 \
+		SCHED_IDLE_TIMEOUT_S=10 \
+			schedule_jobs "${jobs}"
+	) &
+	wait "$!"
+	rv=$?
+
+	if [ "${rv}" = 0 ] &&
+		verify_recorded_set do_job_cnt "${ARGS_FILE}" "${jobs}" &&
+		verify_recorded_set done_cnt "${DONE_FILE}" "${jobs}" &&
+		[ ! -e "${INJECT_FILE}" ]
+	then
+		printf '%s\n' "Result: ${PASS} (jobs=${do_job_cnt})"
+	else
+		printf '%s\n' "Result: ${FAIL} (rv=${rv}, do_job=${do_job_cnt}, done=${done_cnt}, inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no))"
+	fi
+
+	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
+}
+
+# Verify that acceptance of arbitrary characters in job IDs does not
+# introduce bugs or security vulnerabilities. process_done_record() checks
+# an incoming completion record's job ID against the known job list using
+# `case " ${job_ids} " in *" ${done_id} "*)`, relying on quoting
+# ${done_id} inside the pattern to force literal (non-glob) matching. If
+# that quoting were ever lost, a forged ID of "*" would match almost any
+# job list, letting a bogus completion record be accepted as legitimate.
+# Separately, since done_id only ever flows through `read -r` and
+# case/string comparisons - never eval or a command string - a forged ID
+# that looks like a shell command (command substitution, backticks, a
+# ';'-separated command) must be rejected as an unknown/malformed ID just
+# like any other wrong value, and must never actually execute.
+test_31()
+{
+	test_31_do_job()
+	{
+		local self_pid
+
+		get_test_pid self_pid || return 1
+		printf '%s %s %s\n' "${self_pid}" 0 "${SPOOF_DONE_ID:?}" >&3
+		sleep 1
+
+		return 0
+	}
+
+	test_31_fail_msg_handler()
+	{
+		printf '%s\n' "$*" >> "${FAIL_MSG_FILE}"
+	}
+
+	test_31_check_forgery()
+	{
+		local job_id="${1:?}" spoof_id="${2:?}" rv
+
+		rm -f "${INJECT_FILE}"
+
+		(
+			DO_JOB_CB=test_31_do_job \
+			SCHED_FAIL_MSG_CB=test_31_fail_msg_handler \
+			SPOOF_DONE_ID="${spoof_id}" \
+			SCHED_MAX_JOBS=1 \
+			SCHED_TIMEOUT_S=5 \
+			SCHED_IDLE_TIMEOUT_S=5 \
+				schedule_jobs "${job_id}"
+		) &
+		wait "$!"
+		rv=$?
+
+		total_cnt=$((total_cnt + 1))
+
+		if [ "${rv}" = 1 ] &&
+			[ ! -e "${INJECT_FILE}" ]
+		then
+			pass_cnt=$((pass_cnt + 1))
+		else
+			printf 'sub-check failed for job_id=%s spoof_id=%s (rv=%s, inject_marker_exists=%s)\n' \
+				"${job_id}" "${spoof_id}" "${rv}" \
+				"$([ -e "${INJECT_FILE}" ] && echo yes || echo no)" >&2
+		fi
+	}
+
+	local \
+		TEST_NUM=31 \
+		pass_cnt=0 \
+		total_cnt=0 \
+		msg_cnt=0 \
+		INJECT_FILE
+
+	print_test_header 31 "Job-ID forgery / injection resistance" \
+		"spoofed completion records with glob and shell-metacharacter IDs"
+
+	INJECT_FILE="/tmp/sched.forge.inject.${TEST_NUM}.$$"
+	FAIL_MSG_FILE="/tmp/sched.forge.msg.${TEST_NUM}.$$"
+
+	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
+
+	test_31_check_forgery "realjob" "*"
+	test_31_check_forgery "realjob" "\$(touch ${INJECT_FILE})"
+	test_31_check_forgery "realjob" "\`touch ${INJECT_FILE}\`"
+	test_31_check_forgery "realjob" ";touch ${INJECT_FILE}"
+
+	[ -f "${FAIL_MSG_FILE}" ] &&
+		msg_cnt=$(wc -l < "${FAIL_MSG_FILE}")
+
+	if [ "${pass_cnt}" = "${total_cnt}" ] &&
+		[ "${msg_cnt}" = "${total_cnt}" ]
+	then
+		printf '%s\n' "Result: ${PASS} (passed=${pass_cnt}/${total_cnt})"
+	else
+		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/${total_cnt}, messages=${msg_cnt})"
+	fi
+
+	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
+}
+
+
 
 #
 # Inline test code starts here.
@@ -1615,7 +1809,7 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="${1:-"$(seq 1 29)"}"
+RUN_TESTS="${1:-"$(seq 1 31)"}"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
