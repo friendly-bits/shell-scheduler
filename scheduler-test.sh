@@ -1618,11 +1618,8 @@ test_29()
 	fi
 }
 
-# Verify that job IDs may contain arbitrary characters - punctuation, shell
-# metacharacters, glob wildcards, quotes, backslashes, etc. - i.e. anything
-# other than the whitespace characters (space/tab/newline) used as list
-# separators - and that such IDs are passed through to DO_JOB_CB and
-# JOB_DONE_CB completely unchanged.
+# Verify job IDs can contain arbitrary non-whitespace characters and are
+# passed to DO_JOB_CB/JOB_DONE_CB unchanged.
 test_30()
 {
 	test_30_do_job()
@@ -1660,13 +1657,9 @@ test_30()
 		ARGS_FILE="/tmp/sched.idchars.args.${TEST_NUM}.$$" \
 		DONE_FILE="/tmp/sched.idchars.done.${TEST_NUM}.$$"
 
-	# Includes: glob metacharacters, brackets/braces/parens, quoting
-	# characters, a literal backslash, and several classic
-	# command-injection payloads (command substitution, backticks, ';',
-	# '&&', '|') embedded directly in the job ID text. Built as a single
-	# multi-line literal (rather than a bash array, a bashism with no ash
-	# equivalent); the continuation/indentation whitespace it introduces
-	# is stripped below.
+	# Glob/quote/injection-shaped characters. Multi-line literal (not a
+	# bash array); whitespace from continuation/indentation is stripped
+	# below.
 
 	jobs="
 		plain1 \
@@ -1745,18 +1738,8 @@ test_30()
 	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 }
 
-# Verify that acceptance of arbitrary characters in job IDs does not
-# introduce bugs or security vulnerabilities. process_done_record() checks
-# an incoming completion record's job ID against the known job list using
-# `case " ${job_ids} " in *" ${done_id} "*)`, relying on quoting
-# ${done_id} inside the pattern to force literal (non-glob) matching. If
-# that quoting were ever lost, a forged ID of "*" would match almost any
-# job list, letting a bogus completion record be accepted as legitimate.
-# Separately, since done_id only ever flows through `read -r` and
-# case/string comparisons - never eval or a command string - a forged ID
-# that looks like a shell command (command substitution, backticks, a
-# ';'-separated command) must be rejected as an unknown/malformed ID just
-# like any other wrong value, and must never actually execute.
+# Verify forged completion records (glob "*", or shell-injection-shaped
+# IDs) are rejected as unknown/malformed, never accepted or executed.
 test_31()
 {
 	test_31_touch_inject()
@@ -1861,7 +1844,7 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="${1:-"$(seq 1 31)"}"
+RUN_TESTS="${*:-"$(seq 1 31)"}"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
