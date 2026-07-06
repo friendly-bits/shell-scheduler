@@ -2,7 +2,7 @@
 # shellcheck disable=SC3043,SC3045,SC3001,SC3060,SC3003,SC2329
 # shellcheck source=/dev/null
 
-# scheduler-test.sh
+# scheduler-tests.sh
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 
@@ -1828,6 +1828,73 @@ test_31()
 	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
 }
 
+# Verify that additional arguments passed to schedule_jobs() preserve exact
+# argument boundaries and content when forwarded to DO_JOB_CB - an
+# empty-string arg, an arg with embedded whitespace, a glob-metacharacter
+# arg, and a leading-dash arg - regardless of caller noglob state.
+test_32()
+{
+	test_32_do_job()
+	{
+		local id="${1}" rec
+
+		shift
+
+		rec="${id} $# $(printf '<%s>\037' "$@")"
+		printf '%s\n' "${rec}" >> "${ARGS_FILE}"
+
+		return 0
+	}
+
+	local \
+		TEST_NUM=32 \
+		rv \
+		expected \
+		actual \
+		jobs='1 2 3'
+
+	local ARGS_FILE="/tmp/sched.args32.${TEST_NUM:?}.$$"
+
+	print_test_header 32 "Extra-argument boundary/content integrity" \
+		"${jobs}"
+
+	rm -f "${ARGS_FILE}"
+
+	(
+		DO_JOB_CB=test_32_do_job \
+		JOB_DONE_CB='' \
+		SCHED_MAX_JOBS=2 \
+			schedule_jobs "${jobs}" '' 'a b' '*' '-x'
+	) &
+	wait "$!"
+	rv=$?
+
+	expected="$(
+		for id in 1 2 3
+		do
+			printf '%s 4 <>\037<a b>\037<*>\037<-x>\037\n' \
+				"${id}"
+		done
+	)"
+
+	actual=
+	[ -f "${ARGS_FILE}" ] &&
+		actual="$(sort "${ARGS_FILE}")"
+
+	if [ "${rv}" = 0 ] &&
+		[ "${actual}" = "${expected}" ]
+	then
+		printf '%s\n' "Result: ${PASS}"
+	else
+		printf '%s\n%s\n%s\n%s\n%s\n' \
+			"Result: ${FAIL} (rv=${rv})" \
+			"expected:" "${expected}" \
+			"actual:" "${actual}"
+	fi
+
+	rm -f "${ARGS_FILE}"
+}
+
 
 
 #
@@ -1844,7 +1911,7 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="${*:-"$(seq 1 31)"}"
+RUN_TESTS="${*:-"$(seq 1 32)"}"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
