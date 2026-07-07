@@ -1840,7 +1840,11 @@ test_32()
 
 		shift
 
-		rec="${id} $# $(printf '<%s>\037' "$@")"
+		rec="${id} $# $(
+			for arg in "$@"; do
+				printf '<%s>\037' "${arg//$'\n'/$'\035'}"
+			done
+		)"
 		printf '%s\n' "${rec}" >> "${ARGS_FILE}"
 
 		return 0
@@ -1864,7 +1868,7 @@ test_32()
 		DO_JOB_CB=test_32_do_job \
 		JOB_DONE_CB='' \
 		SCHED_MAX_JOBS=2 \
-			schedule_jobs "${jobs}" '' 'a b' '*' '-x'
+			schedule_jobs "${jobs}" '' 'a b' '*' '-x' c$'\n'd
 	) &
 	wait "$!"
 	rv=$?
@@ -1872,7 +1876,7 @@ test_32()
 	expected="$(
 		for id in 1 2 3
 		do
-			printf '%s 4 <>\037<a b>\037<*>\037<-x>\037\n' \
+			printf '%s 5 <>\037<a b>\037<*>\037<-x>\037<c\035d>\037\n' \
 				"${id}"
 		done
 	)"
@@ -1886,10 +1890,21 @@ test_32()
 	then
 		printf '%s\n' "Result: ${PASS}"
 	else
-		printf '%s\n%s\n%s\n%s\n%s\n' \
+		printf '%s\n' \
 			"Result: ${FAIL} (rv=${rv})" \
-			"expected:" "${expected}" \
-			"actual:" "${actual}"
+			"expected:" \
+			"'${expected}'" \
+			"actual:" \
+			"'${actual}'"
+
+		if command -v hexdump 1>/dev/null; then
+			printf 'expected (hex):\n'
+			printf '%s' "${expected}" | hexdump
+			printf 'actual (hex):\n'
+			printf '%s' "${actual}" | hexdump
+		else
+			printf '%s\n' "Can not show expected vs actual hex because hexdump util is not found."
+		fi
 	fi
 
 	rm -f "${ARGS_FILE}"
