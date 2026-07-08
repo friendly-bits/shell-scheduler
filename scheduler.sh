@@ -105,7 +105,7 @@ sch_finalize()
 {
 	local cb_rv rv="${1}"
 
-	trap ':' USR1
+	trap ':' USR1 INT TERM
 
 	[ -n "${2}" ] && [ "${rv}" != 0 ] && sch_fail_msg "${2}"
 
