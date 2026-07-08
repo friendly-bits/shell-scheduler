@@ -2062,6 +2062,7 @@ test_33()
 		TEST_NUM=33 \
 		sig \
 		rv \
+		expect_rv=84 \
 		callback_rv \
 		pids \
 		schedule_pid \
@@ -2072,41 +2073,59 @@ test_33()
 		SIG_RV_FILE="/tmp/sched.sigintterm.rv.${TEST_NUM:?}.$$" \
 		SIG_PIDS_FILE="/tmp/sched.sigintterm.pids.${TEST_NUM:?}.$$"
 
+	local \
+		TEST_MODE=idle \
+		FINALIZE_HANDLER_CB=test_33_finalize_handler \
+		SCHED_MAX_JOBS=2 \
+		SCHED_TIMEOUT_S=10 \
+		SCHED_IDLE_TIMEOUT_S=5
+
 	print_test_header 33 "SIGINT/SIGTERM termination" "1 2"
 
 	for sig in INT TERM
 	do
 		rm -f "${SIG_RV_FILE}" "${SIG_PIDS_FILE}"
 
-		(
-			TEST_MODE=idle \
-			FINALIZE_HANDLER_CB=test_33_finalize_handler \
-			SCHED_MAX_JOBS=2 \
-			SCHED_TIMEOUT_S=10 \
-			SCHED_IDLE_TIMEOUT_S=5 \
-				schedule_jobs 'hang hang'
-		) &
-		schedule_pid=$!
+		case "${sig}" in
+			TERM)
+				# Send TERM signal to background scheduler process
+				(
+					schedule_jobs 'hang hang' &
+					schedule_pid=$!
 
-		sleep 1
+					sleep 1
 
-		kill "-${sig}" "${schedule_pid}"
+					kill "-${sig}" "${schedule_pid}"
 
-		wait "${schedule_pid}"
+					wait "${schedule_pid}"
+				)
+				;;
+			INT)
+				# Send INT signal to foreground scheduler process
+				(
+					get_test_pid pid
+					(
+						sleep 1
+						kill "-${sig}" "$pid"
+					) &
+					schedule_jobs 'hang hang'
+				)
+		esac
+
 		rv=$?
 
 		read_first_line pids "${SIG_PIDS_FILE}"
 
-		if [ "${rv}" = 84 ] &&
+		if [ "${rv}" = "${expect_rv}" ] &&
 			read_first_line callback_rv "${SIG_RV_FILE}" &&
-			[ "${callback_rv}" = 84 ] &&
+			[ "${callback_rv}" = "${expect_rv}" ] &&
 			[ -n "${pids}" ]
 		then
 			printf 'SIG%s: %s\n' "${sig}" "${PASS}"
 		else
 			all_ok=0
-			printf 'SIG%s: %s (rv=%s, callback_rv=%s, pids=%s)\n' \
-				"${sig}" "${FAIL}" "${rv}" "${callback_rv}" "${pids}"
+			printf 'SIG%s: %s (expect_rv=%s, rv=%s, callback_rv=%s, pids=%s)\n' \
+				"${sig}" "${FAIL}" "${expect_rv}" "${rv}" "${callback_rv}" "${pids}"
 		fi
 	done
 
