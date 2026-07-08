@@ -310,7 +310,9 @@ The scheduler does not terminate running jobs by itself, including when a timeou
 
 For a real-world integration example, check out [`hagezi-fetch.sh`](hagezi-fetch.sh). It implements a concurrent downloader for DNS blocklists.
 
-*Note: `wget` and `pgrep` are dependencies of this specific example, not the `shell-scheduler` library.*
+*Note 1: `wget` and `pgrep` are dependencies of this specific example, not the `shell-scheduler` library.*
+
+*Note 2: this example script intentionally includes an invalid download URL to showcase scheduler error tracking and propagation.*
 
 Implementation highlights you will likely need in your own projects utilizing this library:
 
