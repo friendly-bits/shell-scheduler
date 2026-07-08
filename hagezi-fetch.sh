@@ -35,12 +35,15 @@ mkdir -p "${OUT_DIR}" || exit 1
 
 # --- Callbacks ---
 
-# DO_JOB_CB: download one list; returns wget's exit code.
+# Job execution callback - DO_JOB_CB
+# Downloads one list; returns wget's exit code.
 download_list()
 {
 	local id="${1}" name url rv
 
-	eval "name=\"\${JOB_NAME_${id}}\" url=\"\${JOB_URL_${id}}\""
+	eval \
+		"name=\"\${JOB_NAME_${id}}\" \
+		url=\"\${JOB_URL_${id}}\""
 
 	printf 'Downloading: %s\n' "${name}"
 
