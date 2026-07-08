@@ -1910,6 +1910,85 @@ test_32()
 	rm -f "${ARGS_FILE}"
 }
 
+# Verify that SIGINT and SIGTERM both terminate the scheduler with SCHED_RV_INT_TERM,
+# and that the finalize callback receives that rv plus a non-empty running-PID list.
+test_33()
+{
+	test_33_finalize_handler()
+	{
+		local rv="${1}" pids="${2}"
+
+		printf '%s\n' "${rv}" > "${SIG_RV_FILE}"
+
+		if [ -n "${pids}" ]
+		then
+			printf '%s\n' "${pids}" > "${SIG_PIDS_FILE}"
+		fi
+
+		finalize_handler_default "${rv}" "${pids}"
+	}
+
+	local \
+		TEST_NUM=33 \
+		sig \
+		rv \
+		callback_rv \
+		pids \
+		schedule_pid \
+		all_ok=1
+
+	local \
+		SIG_RV_FILE="/tmp/sched.sigintterm.rv.${TEST_NUM:?}.$$" \
+		SIG_PIDS_FILE="/tmp/sched.sigintterm.pids.${TEST_NUM:?}.$$"
+
+	print_test_header 33 "SIGINT/SIGTERM termination" "1 2"
+
+	for sig in INT TERM
+	do
+		rm -f "${SIG_RV_FILE}" "${SIG_PIDS_FILE}"
+
+		(
+			TEST_MODE=idle \
+			FINALIZE_HANDLER_CB=test_33_finalize_handler \
+			SCHED_MAX_JOBS=2 \
+			SCHED_TIMEOUT_S=10 \
+			SCHED_IDLE_TIMEOUT_S=5 \
+				schedule_jobs 'hang hang'
+		) &
+		schedule_pid=$!
+
+		sleep 1
+
+		kill "-${sig}" "${schedule_pid}"
+
+		wait "${schedule_pid}"
+		rv=$?
+
+		read_first_line pids "${SIG_PIDS_FILE}"
+
+		if [ "${rv}" = 84 ] &&
+			read_first_line callback_rv "${SIG_RV_FILE}" &&
+			[ "${callback_rv}" = 84 ] &&
+			[ -n "${pids}" ]
+		then
+			printf 'SIG%s: %s\n' "${sig}" "${PASS}"
+		else
+			all_ok=0
+			printf 'SIG%s: %s (rv=%s, callback_rv=%s, pids=%s)\n' \
+				"${sig}" "${FAIL}" "${rv}" "${callback_rv}" "${pids}"
+		fi
+	done
+
+	if [ "${all_ok}" = 1 ]
+	then
+		printf '%s\n' "Result: ${PASS}"
+	else
+		printf '%s\n' "Result: ${FAIL}"
+	fi
+
+	rm -f "${SIG_RV_FILE}" "${SIG_PIDS_FILE}"
+}
+
 
 
 #
@@ -1926,7 +2005,7 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="${*:-"$(seq 1 32)"}"
+RUN_TESTS="${*:-"$(seq 1 33)"}"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
