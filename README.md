@@ -347,7 +347,7 @@ trap '
 ```
 
 ### 3. Cleaning Up Orphaned Child Processes
-The scheduler tracks the PIDs of the jobs (i.e. instances of the shell function `download_list()`, each running in a separate subshell). If your job invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler kills the shell wrapper, the external binary will keep running as an orphaned process. The example script uses `pgrep -P` inside the **scheduler termination callback** (`SCHED_FINALIZE_CB`) to find and terminate the actual child processes along with the job subshell processes:
+The scheduler tracks the PIDs of the jobs (i.e. instances of the shell function `download_list()`, each running in a separate subshell). If your **job execution callback** invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler terminates before all jobs have completed, the subshell in which the callback lives, as well as any external binaries it called, will keep running as orphaned processes. The example script uses `pgrep -P` inside the **scheduler termination callback** (`SCHED_FINALIZE_CB`) to find and terminate the actual child processes along with the job subshell processes:
 
 ```sh
 # Inside SCHED_FINALIZE_CB
@@ -358,5 +358,4 @@ kill -TERM ${child_pids} ${running_pids} 2>/dev/null
 ```
 
 ### 4. Tracking State Across Callbacks
-Because `schedule_jobs` runs in a background child process, variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks are strictly isolated from the main script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. The in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`) while final processing of the collected information is in the **scheduler termination callback** (`SCHED_FINALIZE_CB`) - both of these callbacks execute synchronously within the scheduler's process context and share visibility of the callback-updated variables.
-
+Because, from the application point of view, `schedule_jobs` runs in a background child process, any callbacks invoked by the scheduler are isolated from the application process. Hence variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks will not be visible in the scope of the application script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. The in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`) while final processing of the collected information is in the **scheduler termination callback** (`SCHED_FINALIZE_CB`) - both of these callbacks execute synchronously within the scheduler's process context and share visibility of the callback-updated variables.
