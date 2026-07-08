@@ -60,7 +60,8 @@ verify_recorded_set()
 
 	# Remove duplicate expected items
 	vrs_expected_items="$(printf '%s\n' "${vrs_expected_items// /$'\n'}" | sed '/^$/d' | sort -u)"
-	vrs_expected_cnt="$(printf '%s\n' "${vrs_expected_items}" | wc -l)"
+
+	vrs_expected_cnt="$(printf '%s\n' "${vrs_expected_items}" | sed '/^$/d' | wc -l)"
 
 	[ -f "${record_file}" ] || return 1
 
@@ -312,7 +313,7 @@ run_parallelism_test()
 
 	exec 8>"${fifo}"
 
-	TEST_MODE=parallel
+	TEST_MODE=parallel \
 	SCHED_MAX_JOBS="${TEST_SCHED_MAX_JOBS:?}" \
 		schedule_jobs "${TEST_JOBS:?}" &
 
@@ -2084,6 +2085,10 @@ test_33()
 						sleep 1
 						kill "-${sig}" "$pid"
 					) &
+					killer_pid=${!}
+
+					trap 'kill "${killer_pid}" 2>/dev/null' EXIT
+
 					schedule_jobs 'hang hang'
 				)
 		esac
