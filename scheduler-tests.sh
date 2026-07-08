@@ -907,7 +907,7 @@ test_16()
 			SCHED_FINALIZE_CB \
 			DO_JOB_CB \
 			JOB_DONE_CB \
-			SCHED_FAIL_MSG_CB" \
+			SCHED_FAIL_MSG_CB"
 
 	set -- ${cb_list}
 	local IFS=" "
@@ -2127,7 +2127,7 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="${*:-"$(seq 1 34)"}"
+RUN_TESTS="${*}"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
@@ -2139,21 +2139,27 @@ export -n \
 	SCHED_IDLE_TIMEOUT_S=2 \
 	SCHED_MAX_JOBS=1
 
+if [ -n "${RUN_TESTS}" ]; then
+	printf 'Scheduler tests\n'
 
-printf 'Scheduler tests\n'
+	TESTS_RUN=0
+	TESTS_PASSED=0
 
-TESTS_RUN=0
-TESTS_PASSED=0
+	[ "${RUN_TESTS}" = "run" ] &&
+		RUN_TESTS="$(seq 1 34)"
 
-for RUN_TEST in ${RUN_TESTS}; do
-	TESTS_RUN=$((TESTS_RUN + 1))
+	for RUN_TEST in ${RUN_TESTS}; do
+		TESTS_RUN=$((TESTS_RUN + 1))
 
-	if "test_${RUN_TEST}"
-	then
-		TESTS_PASSED=$((TESTS_PASSED + 1))
-	fi
-done
+		if "test_${RUN_TEST}"
+		then
+			TESTS_PASSED=$((TESTS_PASSED + 1))
+		fi
+	done
 
-printf '\n%s\n' "== ${purple}Summary${n_c} =="
-printf 'Ran: %s, Passed: %s, Failed: %s\n' \
-	"${TESTS_RUN}" "${TESTS_PASSED}" "$((TESTS_RUN - TESTS_PASSED))"
+	printf '\n%s\n' "== ${purple}Summary${n_c} =="
+	printf 'Ran: %s, Passed: %s, Failed: %s\n' \
+		"${TESTS_RUN}" "${TESTS_PASSED}" "$((TESTS_RUN - TESTS_PASSED))"
+fi
+
+:
