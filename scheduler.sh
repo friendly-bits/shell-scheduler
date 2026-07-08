@@ -129,13 +129,13 @@ sch_start_job()
 
 	shift
 
-	sch_get_curr_pid job_pid || exit 1
-
 	trap '
 		rv=${?}
 		printf "%s %s %s\n" "${job_pid}" "${rv}" "${job_id}" >&3 2>/dev/null
 		exit "${rv}"
 	' EXIT
+
+	sch_get_curr_pid job_pid || exit 1
 
 	"${DO_JOB_CB:?}" "${job_id}" "${@}"
 	exit "${?}"
@@ -219,6 +219,7 @@ process_done_record()
 
 	sch_is_uint "${done_pid}" &&
 	sch_is_uint "${done_rv}" &&
+	[ -n "${done_id}" ] &&
 	case " ${job_ids} " in
 		*" ${done_id} "*) : ;;
 		*) false ;;
