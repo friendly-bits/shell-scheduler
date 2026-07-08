@@ -152,28 +152,28 @@ refresh_remaining_time()
 # 1 - var name to output remaining time
 get_remaining_time()
 {
-	local gt_cur_time_cs gt_total_time_cs gt_remaining_time_cs rv
+	local gt_cur_time_cs gt_total_time_cs gt_remaining_time_cs idle_remaining_time_cs rv
 	export -n "${1}"=0
 
 	sch_get_uptime_cs gt_cur_time_cs || return 1
 	gt_total_time_cs=$((gt_cur_time_cs - SCHED_INIT_UPTIME_CS))
 
 	gt_remaining_time_cs=$((PROC_TIMEOUT_S*100 - gt_total_time_cs))
-
+	idle_remaining_time_cs=$(( IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-LAST_PROGRESS_TIME_CS) ))
 
 	if [ ! "${gt_remaining_time_cs}" -gt 0 ]
 	then
 		sch_fail_msg "Processing timeout (${PROC_TIMEOUT_S} s) for scheduler (PID: ${SCHEDULER_PID})."
 		rv="${SCHED_RV_GLOBAL_TIMEOUT}"
-	elif [ ! "$(( IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-LAST_PROGRESS_TIME_CS) ))" -gt 0 ]
+	elif [ ! "${idle_remaining_time_cs}" -gt 0 ]
 	then
 		sch_fail_msg "Idle timeout (${IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCHEDULER_PID})."
 		rv="${SCHED_RV_IDLE_TIMEOUT}"
 	fi
 
-	case $((IDLE_TIMEOUT_S*100 - gt_remaining_time_cs)) in
-		-*) gt_remaining_time_cs="$((IDLE_TIMEOUT_S*100))"
-	esac
+	if [ "${idle_remaining_time_cs}" -lt "${gt_remaining_time_cs}" ]; then
+		gt_remaining_time_cs="${idle_remaining_time_cs}"
+	fi
 
 	export -n "${1}=${gt_remaining_time_cs}"
 
