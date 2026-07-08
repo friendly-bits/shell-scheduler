@@ -1,5 +1,5 @@
 ## shell-scheduler
-The goal of this project is to implement a well-tested, reusable, flexible and comprehensive API for parallelization in shell scripts, which would allow to keep application code separate from scheduler infrastructure - all that in a small, lightweight and self-contained library.
+The goal of this project is to implement a reliable, reusable, flexible and reasonably comprehensive library for parallelization in shell scripts, which would allow to keep application code separate from scheduler infrastructure - and keep it small, lightweight and self-contained.
 
 ## Main Features
 
@@ -50,8 +50,8 @@ Output:
 Hello from job 1!
 Hello from job 2!
 Hello from job 3!
-Hello from job 5!
 Hello from job 4!
+Hello from job 5!
 Scheduler finished with exit code 0
 ```
 
