@@ -309,7 +309,8 @@ schedule_jobs()
 	local \
 		SCHED_RV_IDLE_TIMEOUT=81 \
 		SCHED_RV_GLOBAL_TIMEOUT=82 \
-		SCHED_RV_SIGNAL=83
+		SCHED_RV_USR1=83 \
+		SCHED_RV_INT_TERM=84
 
 	local \
 		IFS=" "$'\t'$'\n' \
@@ -370,7 +371,8 @@ schedule_jobs()
 	exec 3<>"${sched_ipc_fifo}" ||
 		sch_finalize 1 "Failed to create FIFO '${sched_ipc_fifo}'."
 
-	trap 'sch_finalize "${SCHED_RV_SIGNAL}"' USR1
+	trap 'sch_finalize "${SCHED_RV_USR1}"' USR1
+	trap 'sch_finalize "${SCHED_RV_INT_TERM}"' INT TERM
 
 	local had_f=
 	case "${-}" in
