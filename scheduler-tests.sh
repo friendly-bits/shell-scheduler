@@ -13,6 +13,18 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 # Testing infrastructure functions
 #
 
+is_uint()
+{
+	local _v
+	for _v in "${@}"
+	do
+		case "${_v}" in
+			''|*[!0-9]*) return 1
+		esac
+	done
+	:
+}
+
 read_first_line()
 {
 	export -n "${1:?}="
