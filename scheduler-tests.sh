@@ -2,6 +2,10 @@
 # shellcheck disable=SC3043,SC3045,SC3001,SC3060,SC3003,SC2329
 # shellcheck source=/dev/null
 
+# Supported script arguments:
+# To run all tests: 'run'
+# To run select tests: <space_separated_list_of_numbers>
+
 # scheduler-tests.sh
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
