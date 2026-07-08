@@ -108,106 +108,33 @@ finalize_handler()
 	"${FINALIZE_HANDLER_CB:-finalize_handler_default}" "$@"
 }
 
-do_job()
+do_job_default()
 {
-	local self_pid
+	local self_pid job_name="${1}"
 
-	case "${TEST_MODE:?}:$1" in
-		normal:ok1)
-			sleep 1
+	case "${job_name}" in
+		instant) sleep 0 ;;
+		ok|ok1) sleep 1 ;;
+		ok2) sleep 2 ;;
+		ok5) sleep 5 ;;
+		hang) sleep 30 ;;
+
+		crash)
+			get_test_pid self_pid || return 1
+			kill -9 "${self_pid}"
 		;;
 
-		normal:ok2)
-			sleep 2
-		;;
-
-		normal:fail)
+		fail)
 			sleep 1
 			return 17
 		;;
 
-		idle:ok)
-			sleep 1
-		;;
-
-		idle:hang)
-			sleep 30
-		;;
-
-		crash:ok)
-			sleep 1
-		;;
-
-		crash:crash)
-			get_test_pid self_pid || return 1
-			kill -9 "${self_pid}"
-		;;
-
-		missing_record:crash)
-			get_test_pid self_pid || return 1
-			kill -9 "${self_pid}"
-		;;
-
-		missing_record:hang)
-			sleep 30
-		;;
-
-		malformed:bad)
+		malformed)
 			printf 'garbage\n' >&3
 			sleep 1
 		;;
-		success:*)
-			sleep 1
-		;;
-		parallel:*)
-			parallel_job_enter
-			sleep 1
-			parallel_job_leave
-		;;
-		failprop:ok)
-			sleep 1
-		;;
-
-		failprop:fail)
-			sleep 1
-			return 17
-		;;
-		queue:*)
-			sleep 1
-		;;
-		timeout:ok)
-			sleep 1
-		;;
-
-		timeout:hang)
-			sleep 30
-		;;
-
-		large:*)
-			sleep 0
-		;;
-
-		stress:*)
-			parallel_job_enter
-
-			case $(( $1 % 2 )) in
-				0) sleep 0 ;;
-				*) sleep 1 ;;
-			esac
-
-			parallel_job_leave
-		;;
-
-		status:*)
-			return "$1"
-		;;
-
-		fifo_gone:*)
-			sleep 5
-		;;
-
 		*)
-			printf '%s\n' "Unexpected TEST_MODE/job combination '${TEST_MODE}:$1'" >&2
+			printf '%s\n' "Unexpected job name '${job_name}'." >&2
 			return 1
 		;;
 	esac
@@ -271,6 +198,13 @@ parallel_job_leave()
 
 run_parallelism_test()
 {
+	do_job_parallel()
+	{
+		parallel_job_enter
+		sleep 1
+		parallel_job_leave
+	}
+
 	monitor_parallel_fifo()
 	{
 		local active=0 max_active=0 msg \
@@ -313,8 +247,8 @@ run_parallelism_test()
 
 	exec 8>"${fifo}"
 
-	TEST_MODE=parallel \
 	SCHED_MAX_JOBS="${TEST_SCHED_MAX_JOBS:?}" \
+	DO_JOB_CB=do_job_parallel \
 		schedule_jobs "${TEST_JOBS:?}" &
 
 	scheduler_pid=$!
@@ -358,7 +292,6 @@ test_1()
 {
 	TEST_NUM=1 \
 	TEST_NAME='Normal completion with failure status propagation' \
-	TEST_MODE=normal \
 	TEST_JOBS='ok1 ok2 fail' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
@@ -371,7 +304,6 @@ test_2()
 {
 	TEST_NUM=2 \
 	TEST_NAME='Idle timeout' \
-	TEST_MODE=idle \
 	TEST_JOBS='ok ok hang' \
 	TEST_EXPECT_RV=81 \
 	TEST_SCHED_MAX_JOBS=1 \
@@ -384,7 +316,6 @@ test_3()
 {
 	TEST_NUM=3 \
 	TEST_NAME='Child crash before completion record' \
-	TEST_MODE=crash \
 	TEST_JOBS='ok crash' \
 	TEST_EXPECT_RV=81 \
 	TEST_SCHED_MAX_JOBS=2 \
@@ -397,8 +328,7 @@ test_4()
 {
 	TEST_NUM=4 \
 	TEST_NAME='Malformed completion record' \
-	TEST_MODE=malformed \
-	TEST_JOBS='bad' \
+	TEST_JOBS='malformed' \
 	TEST_EXPECT_RV=1 \
 	TEST_SCHED_MAX_JOBS=1 \
 		run_test
@@ -433,8 +363,7 @@ test_7()
 {
 	TEST_NUM=7 \
 	TEST_NAME='All jobs succeed' \
-	TEST_MODE=success \
-	TEST_JOBS='1 2 3 4 5' \
+	TEST_JOBS='ok ok ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
 		run_test
@@ -469,7 +398,6 @@ test_8()
 
 	print_test_header 8 "Failure status propagation to done_handler" "${jobs}"
 
-	TEST_MODE=failprop \
 	DONE_HANDLER_CB=test_8_done_handler \
 	SCHED_MAX_JOBS=2 \
 		schedule_jobs "${jobs}" &
@@ -497,6 +425,11 @@ test_8()
 # next queued job until all queued jobs have been processed.
 test_9()
 {
+	test_9_do_job()
+	{
+		sleep 1
+	}
+
 	test_9_done_handler()
 	{
 		echo "done idx='$1' rv='$2'"
@@ -521,10 +454,10 @@ test_9()
 	DONE_COUNT_FILE="/tmp/sched.queue.${TEST_NUM:?}.$$"
 	rm -f "${DONE_COUNT_FILE}"
 
-	TEST_MODE=queue \
 	DONE_HANDLER_CB=test_9_done_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=6 \
+	DO_JOB_CB=test_9_do_job \
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
@@ -555,6 +488,11 @@ test_9()
 # finalize callback receives an empty running PID list on success.
 test_10()
 {
+	test_10_do_job()
+	{
+		sleep 0
+	}
+
 	test_10_done_handler()
 	{
 		echo "done idx='$1' rv='$2'"
@@ -603,11 +541,11 @@ test_10()
 
 	rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
 
-	TEST_MODE=large \
 	DONE_HANDLER_CB=test_10_done_handler \
 	FINALIZE_HANDLER_CB=test_10_finalize_handler \
 	SCHED_MAX_JOBS=10 \
 	SCHED_TIMEOUT_S=20 \
+	DO_JOB_CB=test_10_do_job \
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
@@ -664,7 +602,6 @@ test_11()
 	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
-	TEST_MODE=timeout \
 	FINALIZE_HANDLER_CB=test_11_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=3 \
@@ -737,7 +674,6 @@ test_12()
 
 	rm -f "${EMPTY_DONE_FILE}" "${EMPTY_FINALIZE_FILE}"
 
-	TEST_MODE=empty \
 	DONE_HANDLER_CB=test_12_done_handler \
 	FINALIZE_HANDLER_CB=test_12_finalize_handler \
 	SCHED_MAX_JOBS=3 \
@@ -802,7 +738,6 @@ test_13()
 
 	rm -f "${SIGUSR1_RV_FILE}" "${SIGUSR1_PIDS_FILE}"
 
-	TEST_MODE=idle \
 	FINALIZE_HANDLER_CB=test_13_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=10 \
@@ -851,7 +786,6 @@ test_14()
 		"Missing completion record with active writer" \
 		"${jobs}"
 
-	TEST_MODE=missing_record \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=8 \
 	SCHED_IDLE_TIMEOUT_S=3 \
@@ -903,16 +837,14 @@ test_15()
 	rm -f "${FINALIZE_RV_FILE}"
 
 	# Successful scheduler run: callback RV should become scheduler RV.
-	TEST_MODE=success \
 	FINALIZE_HANDLER_CB=test_15_finalize_handler \
 	SCHED_MAX_JOBS=2 \
-		schedule_jobs '1' &
+		schedule_jobs 'ok' &
 
 	wait "$!"
 	rv_success=$?
 
 	# Scheduler error: callback failure must not overwrite scheduler RV.
-	TEST_MODE=idle \
 	FINALIZE_HANDLER_CB=test_15_finalize_handler \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=30 \
@@ -1129,10 +1061,9 @@ test_18()
 	JOB_DONE_CB='' \
 	TEST_NUM=18 \
 	TEST_NAME='Empty JOB_DONE_CB' \
-	TEST_MODE=success \
-	TEST_JOBS='1 2 3 4 5' \
+	TEST_JOBS='ok ok ok' \
 	TEST_EXPECT_RV=0 \
-	TEST_SCHED_MAX_JOBS=3 \
+	TEST_SCHED_MAX_JOBS=2 \
 		run_test
 }
 
@@ -1199,6 +1130,18 @@ EOF
 # and that maximum observed parallelism never exceeds the configured limit.
 test_20()
 {
+	test_20_do_job()
+	{
+		parallel_job_enter
+
+		case $(( $1 % 2 )) in
+			0) sleep 0 ;;
+			*) sleep 1 ;;
+		esac
+
+		parallel_job_leave
+	}
+
 	monitor_stress_fifo()
 	{
 		local active=0 max_active=0 msg \
@@ -1254,10 +1197,10 @@ test_20()
 		jobs="${jobs} ${i}"
 	done
 
-	TEST_MODE=stress \
 	SCHED_MAX_JOBS=20 \
 	SCHED_TIMEOUT_S=30 \
 	SCHED_IDLE_TIMEOUT_S=10 \
+	DO_JOB_CB=test_20_do_job \
 		schedule_jobs "${jobs}" &
 
 	scheduler_pid=$!
@@ -1291,6 +1234,11 @@ test_20()
 # JOB_DONE_CB and that non-zero job failures do not cause scheduler failure.
 test_21()
 {
+	test_21_do_job()
+	{
+		return "$1"
+	}
+
 	test_21_done_handler()
 	{
 		printf '%s %s\n' "$1" "$2" >> "${STATUS_FILE}"
@@ -1312,11 +1260,11 @@ test_21()
 
 	rm -f "${STATUS_FILE}"
 
-	TEST_MODE=status \
 	DONE_HANDLER_CB=test_21_done_handler \
 	SCHED_MAX_JOBS=3 \
 	SCHED_TIMEOUT_S=20 \
 	SCHED_IDLE_TIMEOUT_S=10 \
+	DO_JOB_CB=test_21_do_job \
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
@@ -1365,11 +1313,10 @@ test_22()
 		test_pass \
 		scheduler_pid \
 		sched_fifo \
-		jobs="1 2"
+		jobs="ok5 ok5"
 
 	print_test_header 22 "FIFO disappearance during execution" "${jobs}"
 
-	TEST_MODE=fifo_gone \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=20 \
 	SCHED_IDLE_TIMEOUT_S=10 \
@@ -1423,7 +1370,6 @@ test_23()
 	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
-	TEST_MODE=timeout \
 	FINALIZE_HANDLER_CB=test_23_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=10 \
@@ -1475,7 +1421,6 @@ test_24()
 	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
-	TEST_MODE=timeout \
 	FINALIZE_HANDLER_CB=test_24_finalize_handler \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=3 \
@@ -1512,7 +1457,6 @@ test_25()
 
 	print_test_header 25 "Simultaneous global/idle timeout - global wins" "${jobs}"
 
-	TEST_MODE=idle \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=2 \
 	SCHED_IDLE_TIMEOUT_S=2 \
@@ -1539,8 +1483,7 @@ test_26()
 {
 	TEST_NUM=26 \
 	TEST_NAME='SCHED_MAX_JOBS exceeds job count' \
-	TEST_MODE=success \
-	TEST_JOBS='1 2 3' \
+	TEST_JOBS='ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=10 \
 		run_test
@@ -1553,8 +1496,7 @@ test_27()
 	SCHED_FINALIZE_CB='' \
 	TEST_NUM=27 \
 	TEST_NAME='Empty SCHED_FINALIZE_CB' \
-	TEST_MODE=success \
-	TEST_JOBS='1 2 3 4 5' \
+	TEST_JOBS='ok ok ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
 		run_test
@@ -1570,11 +1512,10 @@ test_28()
 		test_pass \
 		scheduler_pid \
 		sched_fifo \
-		jobs='1 2 3'
+		jobs='ok ok ok'
 
 	print_test_header 28 "FIFO cleanup after successful completion" "${jobs}"
 
-	TEST_MODE=success \
 	SCHED_MAX_JOBS=2 \
 		schedule_jobs "${jobs}" &
 
@@ -1663,12 +1604,11 @@ test_29()
 
 		parent_pre="${mode}"
 
-		TEST_MODE=success \
 		DO_JOB_CB=test_29_do_job \
 		DONE_HANDLER_CB=test_29_done_handler \
 		FINALIZE_HANDLER_CB=test_29_finalize_handler \
 		SCHED_MAX_JOBS=2 \
-			schedule_jobs '1 2 3' &
+			schedule_jobs 'ok ok ok' &
 
 		wait "$!"
 		rv=$?
@@ -2051,7 +1991,6 @@ test_33()
 		SIG_PIDS_FILE="/tmp/sched.sigintterm.pids.${TEST_NUM:?}.$$"
 
 	local \
-		TEST_MODE=idle \
 		FINALIZE_HANDLER_CB=test_33_finalize_handler \
 		SCHED_MAX_JOBS=2 \
 		SCHED_TIMEOUT_S=10 \
@@ -2124,6 +2063,54 @@ test_33()
 	return "${test_pass}"
 }
 
+# Verify that the idle timeout correctly accounts for time elapsed during job completion callbacks,
+# rather than resetting to the full IDLE_TIMEOUT_S.
+test_34()
+{
+	test_34_done_handler()
+	{
+		# Artificially delay the callback to consume a portion of the idle timeout before the next read -t call.
+		sleep 3
+		return 0
+	}
+
+	local \
+		TEST_NUM=34 \
+		rv \
+		start_time \
+		end_time \
+		elapsed \
+		test_pass \
+		jobs="instant hang"
+
+	print_test_header 34 "Idle timeout accounts for elapsed callback time" "${jobs}"
+
+	start_time=$(date +%s)
+
+	DONE_HANDLER_CB=test_34_done_handler \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=20 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+	schedule_jobs "${jobs}" &
+	wait "$!"
+	rv=$?
+
+	end_time=$(date +%s)
+	elapsed=$((end_time - start_time))
+
+	# instant takes 0s, callback takes 3s (total 3s elapsed since start).
+	# Remaining idle timeout is 2s. Expected total ~5s. Adding 1s margin.
+	if [ "${rv}" = 81 ] && [ "${elapsed}" -le 6 ]
+	then
+		printf '%s\n' "Result: ${PASS} (elapsed=${elapsed}s)"
+		test_pass=0
+	else
+		printf '%s\n' "Result: ${FAIL} (rv=${rv}, elapsed=${elapsed}s, expected <= 6s)"
+		test_pass=1
+	fi
+
+	return "${test_pass}"
+}
 
 
 #
@@ -2140,20 +2127,17 @@ PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
 
-RUN_TESTS="${*:-"$(seq 1 33)"}"
+RUN_TESTS="${*:-"$(seq 1 34)"}"
 
 export -n \
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=do_job \
+	DO_JOB_CB=do_job_default \
 	\
 	SCHED_TIMEOUT_S=3 \
 	SCHED_IDLE_TIMEOUT_S=2 \
 	SCHED_MAX_JOBS=1
-
-TEST_MODE=
-
 
 
 printf 'Scheduler tests\n'
