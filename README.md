@@ -122,7 +122,7 @@ If your jobs only need configuration shared by every job, simply pass it as addi
 
 For applications using consecutive integer job IDs, another possibility is to encode job-specific parameters in the extra arguments passed to `schedule_jobs()` (e.g. `schedule_jobs "1 2 3" [job_1_param] [job_2_param] [job_3_param]`) and let each job derive the location of its own parameters from its job ID. This can be convenient for simple cases, but the variable-based approach above is more flexible and works with arbitrary job IDs.
 
-The recommended approach for more complex cases is prior to starting the scheduler, store job-specific parameters in variables whose names contain the corresponding job ID. The job execution callback can then use `eval` to retrieve the parameters for the current job.
+The recommended approach for more complex cases is prior to starting the scheduler, store job-specific parameters in variables whose names contain the corresponding job ID. The job execution callback can then retrieve parameters for the current job by indirection: on Bash, use `val=${!var_name}`; on Busybox ash, use `eval val=\"\${${var_name}}\"`.
 
 Example:
 
@@ -133,7 +133,13 @@ process_job()
 		job_id="${1}" \
 		file
 
-    # Fetch job-specific parameters in job execution callback
+    # Get job-specific parameter via indirection
+
+    # Bash
+    local file_var="JOB_FILE_${job_id}"
+    file="${!file_var}"
+
+    # Busybox ash
 	eval "file=\"\${JOB_FILE_${job_id}}\""
 
 	printf 'Processing %s...\n' "${file}"
@@ -158,20 +164,11 @@ SCHED_MAX_JOBS=4 \
     schedule_jobs "${ids}"
 ```
 
-You can store and retrieve any number of parameters with this technique:
-
-```sh
-eval \
-	"file=\"\${JOB_FILE_${job_id}}\"" \
-	"mode=\"\${JOB_MODE_${job_id}}\"" \
-	"timeout=\"\${JOB_TIMEOUT_${job_id}}\""
-```
-
 **Note:** This technique constructs shell variable names from job IDs. Therefore, when using it, job IDs should consist only of characters allowed by the shell for variable names, specifically: letters (`A-Z`, `a-z`), digits (`0-9`) and underscores (`_`).
 
 **Special note about `eval`**:
 
-This technique requires the use of `eval` to expand variables via indirection. `eval` may introduce security concerns because it reparses its argument as shell code and executes the result. For this reason, make sure to use it correctly. When applying the **exact** pattern
+On Busybox ash, this technique requires the use of `eval` to expand variables via indirection. `eval` may introduce security concerns because it reparses its argument as shell code and executes the result. Make sure to use it correctly in order to avoid creating security holes. When applying the **exact** pattern
 
 ```
 <var_name_1>=\"\${<var_name_3_prefix>${var_name_2}}\"
