@@ -120,7 +120,7 @@ Passing arbitrary job-specific data structures to each job execution callback vi
 
 If your jobs only need configuration shared by every job, simply pass it as additional arguments to `schedule_jobs()`. These arguments are forwarded unchanged to every invocation of the job execution callback.
 
-For applications using consecutive integer job IDs, another possibility is to encode job-specific parameters in the extra arguments passed to `schedule_jobs()` (e.g. `schedule_jobs "1 2 3" [job_1_param] [job_2_param] [job_3_param]`) and let each job derive the location of its own parameters from its job ID. This can be convenient for simple cases, but the variable-based approach above is more flexible and works with arbitrary job IDs.
+For applications using consecutive integer job IDs, another possibility is to encode job-specific parameters in the extra arguments passed to `schedule_jobs()` (e.g. `schedule_jobs "1 2 3" [job_1_param] [job_2_param] [job_3_param]`) and let each job derive the location of its own parameters from its job ID. This can be convenient for simple cases.
 
 The recommended approach for more complex cases is prior to starting the scheduler, store job-specific parameters in variables whose names contain the corresponding job ID. The job execution callback can then retrieve parameters for the current job by indirection: on Bash, use `val=${!var_name}`; on Busybox ash, use `eval val=\"\${${var_name}}\"`.
 
@@ -144,7 +144,7 @@ process_job()
 
 	printf 'Processing %s...\n' "${file}"
 
-	wc -l "${file}"
+    # Placeholer for actual processing
 }
 
 # Generate variables storing parameters
