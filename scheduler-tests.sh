@@ -2127,6 +2127,8 @@ test_33()
 			INT)
 				# Send INT signal to foreground scheduler process
 				(
+					local pid killer_pid
+
 					get_test_pid pid
 					(
 						sleep 1
