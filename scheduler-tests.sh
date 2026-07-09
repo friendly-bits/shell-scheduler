@@ -166,9 +166,9 @@ get_test_pid()
 	export -n "${1}=${__pid}"
 }
 
-run_test()
+run_generic_test()
 {
-	local rv
+	local sched_rv
 	
 	print_test_header "${TEST_NUM:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
 
@@ -182,14 +182,14 @@ run_test()
 		schedule_jobs "${TEST_JOBS}" &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
-	if [ "${rv}" = "${TEST_EXPECT_RV:?}" ]
+	if [ "${sched_rv}" = "${TEST_EXPECT_RV:?}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv})"
+		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, expected ${TEST_EXPECT_RV})"
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected ${TEST_EXPECT_RV})"
 		return 1
 	fi
 }
@@ -238,7 +238,7 @@ run_parallelism_test()
 	}
 
 	local \
-		rv \
+		sched_rv \
 		fifo="/tmp/sched.parallel.${TEST_NUM:?}.$$" \
 		result_file="/tmp/sched.parallel.res.${TEST_NUM:?}.$$" \
 		max_active=0 \
@@ -271,25 +271,21 @@ run_parallelism_test()
 	wait "${monitor_pid}"
 
 	wait "${scheduler_pid}"
-	rv=$?
+	sched_rv=$?
 
-	local test_pass
+	read_first_line max_active "${result_file}"
+	rm -f "${fifo}" "${result_file}"
 
-	if [ "${rv}" = 0 ] &&
-		read_first_line max_active "${result_file}" &&
+	if [ "${sched_rv}" = 0 ] &&
 		is_uint "${max_active}" &&
 		[ "${max_active}" = "${TEST_EXPECT_MAX_JOBS:?}" ]
 	then
 		printf '%s\n' "Result: ${PASS} (max_parallel=${max_active})"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, max_parallel=${max_active})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, max_parallel=${max_active})"
+		return 1
 	fi
-
-	rm -f "${fifo}" "${result_file}"
-
-	return "${test_pass}"
 }
 
 
@@ -308,7 +304,7 @@ test_1()
 	TEST_JOBS='ok1 ok2 fail' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
-		run_test
+		run_generic_test
 }
 
 # Verify that the scheduler detects lack of progress and terminates when the
@@ -321,7 +317,7 @@ test_2()
 	TEST_EXPECT_RV=81 \
 	TEST_SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
-		run_test
+		run_generic_test
 }
 
 # Verify that the scheduler eventually times out when a worker exits without sending a completion record.
@@ -333,7 +329,7 @@ test_3()
 	TEST_EXPECT_RV=81 \
 	TEST_SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=5 \
-		run_test
+		run_generic_test
 }
 
 # Verify that the scheduler treats malformed completion records as an error.
@@ -344,7 +340,7 @@ test_4()
 	TEST_JOBS='malformed' \
 	TEST_EXPECT_RV=1 \
 	TEST_SCHED_MAX_JOBS=1 \
-		run_test
+		run_generic_test
 }
 
 # Verify that the scheduler never runs more than SCHED_MAX_JOBS workers at the same time.
@@ -379,7 +375,7 @@ test_7()
 	TEST_JOBS='ok ok ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
-		run_test
+		run_generic_test
 }
 
 # Verify that a failure returned by done_handler() causes the scheduler to
@@ -390,23 +386,21 @@ test_8()
 	{
 		echo "done idx='$1' rv='$2'"
 
-		if [ -n "${FAILPROP_FILE}" ] && [ "$2" != 0 ]
+		if [ "$2" != 0 ]
 		then
-			printf 'fail_seen\n' > "${FAILPROP_FILE}"
+			printf 'fail_seen\n' > "${FAILPROP_FILE:?}"
 			return "${TEST_8_DONE_HANDLER_RV:?}"
 		fi
 
 		return 0
 	}
 
-	local rv failprop_msg test_pass \
+	local sched_rv failprop_msg \
 		TEST_NUM=8 \
 		TEST_8_DONE_HANDLER_RV=99 \
 		jobs="ok fail"
 
-
-	FAILPROP_FILE="/tmp/sched.failprop.${TEST_NUM:?}.$$"
-
+	local FAILPROP_FILE="/tmp/sched.failprop.${TEST_NUM:?}.$$"
 	rm -f "${FAILPROP_FILE}"
 
 	print_test_header 8 "Failure status propagation to done_handler" "${jobs}"
@@ -422,22 +416,20 @@ test_8()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
-	if [ "${rv}" = "${TEST_8_DONE_HANDLER_RV}" ] &&
-		read_first_line failprop_msg "${FAILPROP_FILE}" &&
+	read_first_line failprop_msg "${FAILPROP_FILE}"
+	rm -f "${FAILPROP_FILE}"
+
+	if [ "${sched_rv}" = "${TEST_8_DONE_HANDLER_RV}" ] &&
 		[ "${failprop_msg}" = "fail_seen" ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv})"
+		return 1
 	fi
-
-	rm -f "${FAILPROP_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that completion of a running job causes the scheduler to launch the
@@ -453,25 +445,23 @@ test_9()
 	{
 		echo "done idx='$1' rv='$2'"
 
-		[ -n "${DONE_COUNT_FILE}" ] &&
-			printf '%s\n' "$1" >> "${DONE_COUNT_FILE}"
+		printf '%s\n' "$1" >> "${DONE_COUNT_FILE:?}"
 
 		return 0
 	}
 
 	local \
 		TEST_NUM=9 \
-		rv \
+		sched_rv \
 		expected_cnt \
 		actual_done_jobs \
 		done_cnt=0 \
-		test_pass \
 		jobs="1 2 3 4 5"
 
-	print_test_header 9 "Queue refill" "${jobs}"
-
-	DONE_COUNT_FILE="/tmp/sched.queue.${TEST_NUM:?}.$$"
+	local DONE_COUNT_FILE="/tmp/sched.queue.${TEST_NUM:?}.$$"
 	rm -f "${DONE_COUNT_FILE}"
+
+	print_test_header 9 "Queue refill" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -484,9 +474,9 @@ test_9()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
-	if [ "${rv}" = 0 ] &&
+	if [ "${sched_rv}" = 0 ] &&
 		verify_recorded_set \
 			_ \
 			actual_done_jobs \
@@ -495,16 +485,13 @@ test_9()
 			"${DONE_COUNT_FILE}" \
 			"${jobs}"
 	then
+		rm -f "${DONE_COUNT_FILE}"
 		printf '%s\n' "Result: ${PASS} (done_cnt=${done_cnt})"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, expected_cnt=${expected_cnt}, done_cnt=${done_cnt}, actual_done_jobs=${actual_done_jobs})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected_cnt=${expected_cnt}, done_cnt=${done_cnt}, actual_done_jobs=${actual_done_jobs})"
+		return 1
 	fi
-
-	rm -f "${DONE_COUNT_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify scheduler behavior with a larger number of jobs and ensure that
@@ -520,8 +507,7 @@ test_10()
 	{
 		echo "done idx='$1' rv='$2'"
 
-		[ -n "${DONE_COUNT_FILE}" ] &&
-			printf '%s\n' "$1" >> "${DONE_COUNT_FILE}"
+		printf '%s\n' "$1" >> "${DONE_COUNT_FILE:?}"
 
 		return 0
 	}
@@ -532,14 +518,11 @@ test_10()
 
 		finalize_handler_default "${rv}" "${pids}" || return $?
 
-		if [ -n "${LARGE_FINALIZE_FILE}" ]
+		if [ -z "${pids}" ]
 		then
-			if [ -z "${pids}" ]
-			then
-				printf 'empty\n' > "${LARGE_FINALIZE_FILE}"
-			else
-				printf 'nonempty\n' > "${LARGE_FINALIZE_FILE}"
-			fi
+			printf 'empty\n' > "${LARGE_FINALIZE_FILE:?}"
+		else
+			printf 'nonempty\n' > "${LARGE_FINALIZE_FILE:?}"
 		fi
 
 		return 0
@@ -547,22 +530,22 @@ test_10()
 
 	local \
 		TEST_NUM=10 \
-		rv \
+		sched_rv \
 		expected_cnt \
 		actual_done_jobs \
 		actual_done_cnt=0 \
 		finalize_state \
-		test_pass \
 		jobs=''
+
+	local \
+		DONE_COUNT_FILE="/tmp/sched.large.${TEST_NUM:?}.$$" \
+		LARGE_FINALIZE_FILE="/tmp/sched.large.finalize.${TEST_NUM:?}.$$"
+
+	rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
 
 	print_test_header 10 "Large job count" "100 jobs"
 
 	jobs=$(seq 1 100)
-
-	DONE_COUNT_FILE="/tmp/sched.large.${TEST_NUM:?}.$$"
-	LARGE_FINALIZE_FILE="/tmp/sched.large.finalize.${TEST_NUM:?}.$$"
-
-	rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -576,12 +559,12 @@ test_10()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
 	finalize_state=
 	read_first_line finalize_state "${LARGE_FINALIZE_FILE}"
 
-	if [ "${rv}" = 0 ] &&
+	if [ "${sched_rv}" = 0 ] &&
 		verify_recorded_set \
 			_ \
 			actual_done_jobs \
@@ -591,16 +574,13 @@ test_10()
 			"${jobs}" &&
 		[ "${finalize_state}" = empty ]
 	then
+		rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
 		printf '%s\n' "Result: ${PASS} (completed=${actual_done_cnt})"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, finalize_state=${finalize_state}, expected_cnt=${expected_cnt}, actual_done_cnt=${actual_done_cnt}, actual_done_jobs=${actual_done_jobs})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, finalize_state=${finalize_state}, expected_cnt=${expected_cnt}, actual_done_cnt=${actual_done_cnt}, actual_done_jobs=${actual_done_jobs})"
+		return 1
 	fi
-
-	rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that the scheduler terminates when the overall processing timeout
@@ -614,20 +594,19 @@ test_11()
 
 		finalize_handler_default "${rv}" "${pids}" || return $?
 
-		[ -n "${TIMEOUT_FILE}" ] &&
-			printf '%s\n' "${rv}" > "${TIMEOUT_FILE}"
+		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
 		return 0
 	}
 
 	local \
 		TEST_NUM=11 \
-		test_pass \
 		jobs="ok hang"
-	print_test_header 11 "Processing timeout" "${jobs}"
 
-	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
+	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
+
+	print_test_header 11 "Processing timeout" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -640,21 +619,20 @@ test_11()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
+	local sched_rv=$?
 
-	if [ "$?" = 82 ] &&
-		read_first_line rv "${TIMEOUT_FILE}" &&
+	read_first_line rv "${TIMEOUT_FILE}"
+	rm -f "${TIMEOUT_FILE}"
+
+	if [ "${sched_rv}" = 82 ] &&
 		[ "${rv}" = 82 ]
 	then
 		printf '%s\n' "Result: ${PASS} (rv=${rv})"
-		test_pass=0
+		return 0
 	else
 		printf '%s\n' "Result: ${FAIL}"
-		test_pass=1
+		return 1
 	fi
-
-	rm -f "${TIMEOUT_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that an empty job list exits successfully, invokes no done_handler()
@@ -665,8 +643,7 @@ test_12()
 	{
 		echo "done idx='$1' rv='$2'"
 
-		[ -n "${EMPTY_DONE_FILE}" ] &&
-			printf '%s\n' "$1" >> "${EMPTY_DONE_FILE}"
+		printf '%s\n' "$1" >> "${EMPTY_DONE_FILE:?}"
 
 		return 0
 	}
@@ -677,14 +654,11 @@ test_12()
 
 		finalize_handler_default "${rv}" "${pids}" || return $?
 
-		if [ -n "${EMPTY_FINALIZE_FILE}" ]
+		if [ -z "${pids}" ]
 		then
-			if [ -z "${pids}" ]
-			then
-				printf 'empty\n' > "${EMPTY_FINALIZE_FILE}"
-			else
-				printf 'nonempty\n' > "${EMPTY_FINALIZE_FILE}"
-			fi
+			printf 'empty\n' > "${EMPTY_FINALIZE_FILE:?}"
+		else
+			printf 'nonempty\n' > "${EMPTY_FINALIZE_FILE:?}"
 		fi
 
 		return 0
@@ -692,18 +666,18 @@ test_12()
 
 	local \
 		TEST_NUM=12 \
-		rv \
+		sched_rv \
 		actual_done_cnt=0 \
 		finalize_state='' \
-		test_pass \
 		jobs="<none>"
 
-	print_test_header 12 "Empty job list" "${jobs}"
-
-	EMPTY_DONE_FILE="/tmp/sched.empty.done.${TEST_NUM:?}.$$"
-	EMPTY_FINALIZE_FILE="/tmp/sched.empty.finalize.${TEST_NUM:?}.$$"
+	local \
+		EMPTY_DONE_FILE="/tmp/sched.empty.done.${TEST_NUM:?}.$$" \
+		EMPTY_FINALIZE_FILE="/tmp/sched.empty.finalize.${TEST_NUM:?}.$$"
 
 	rm -f "${EMPTY_DONE_FILE}" "${EMPTY_FINALIZE_FILE}"
+
+	print_test_header 12 "Empty job list" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -717,7 +691,7 @@ test_12()
 		schedule_jobs '' &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
 	if [ -f "${EMPTY_DONE_FILE}" ]
 	then
@@ -726,20 +700,18 @@ test_12()
 
 	read_first_line finalize_state "${EMPTY_FINALIZE_FILE}"
 
-	if [ "${rv}" = 0 ] &&
+	rm -f "${EMPTY_DONE_FILE}" "${EMPTY_FINALIZE_FILE}"
+
+	if [ "${sched_rv}" = 0 ] &&
 		[ "${actual_done_cnt}" = 0 ] &&
 		[ "${finalize_state}" = empty ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, actual_done_cnt=${actual_done_cnt}, finalize=${finalize_state})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, actual_done_cnt=${actual_done_cnt}, finalize=${finalize_state})"
+		return 1
 	fi
-
-	rm -f "${EMPTY_DONE_FILE}" "${EMPTY_FINALIZE_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that SIGUSR1 causes scheduler termination with SCHED_RV_SIGNAL,
@@ -750,11 +722,11 @@ test_13()
 	{
 		local rv="${1}" pids="${2}"
 
-		printf '%s\n' "${rv}" > "${SIGUSR1_RV_FILE}"
+		printf '%s\n' "${rv}" > "${SIGUSR1_RV_FILE:?}"
 
 		if [ -n "${pids}" ]
 		then
-			printf '%s\n' "${pids}" > "${SIGUSR1_PIDS_FILE}"
+			printf '%s\n' "${pids}" > "${SIGUSR1_PIDS_FILE:?}"
 		fi
 
 		finalize_handler_default "${rv}" "${pids}"
@@ -762,18 +734,18 @@ test_13()
 
 	local \
 		TEST_NUM=13 \
-		rv \
+		sched_rv \
 		callback_rv \
 		pids='' \
-		test_pass \
 		schedule_pid
 
-	print_test_header 13 "SIGUSR1 termination" "1 2"
-
-	SIGUSR1_RV_FILE="/tmp/sched.sigusr1.rv.${TEST_NUM:?}.$$"
-	SIGUSR1_PIDS_FILE="/tmp/sched.sigusr1.pids.${TEST_NUM:?}.$$"
+	local \
+		SIGUSR1_RV_FILE="/tmp/sched.sigusr1.rv.${TEST_NUM:?}.$$" \
+		SIGUSR1_PIDS_FILE="/tmp/sched.sigusr1.pids.${TEST_NUM:?}.$$"
 
 	rm -f "${SIGUSR1_RV_FILE}" "${SIGUSR1_PIDS_FILE}"
+
+	print_test_header 13 "SIGUSR1 termination" "1 2"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -792,25 +764,23 @@ test_13()
 	kill -USR1 "${schedule_pid}"
 
 	wait "${schedule_pid}"
-	rv=$?
+	sched_rv=$?
 
 	read_first_line pids "${SIGUSR1_PIDS_FILE}"
+	read_first_line callback_rv "${SIGUSR1_RV_FILE}"
 
-	if [ "${rv}" = 83 ] &&
-		read_first_line callback_rv "${SIGUSR1_RV_FILE}" &&
+	rm -f "${SIGUSR1_RV_FILE}" "${SIGUSR1_PIDS_FILE}"
+
+	if [ "${sched_rv}" = 83 ] &&
 		[ "${callback_rv}" = 83 ] &&
 		[ -n "${pids}" ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, callback_rv=${callback_rv}, pids=${pids})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, callback_rv=${callback_rv}, pids=${pids})"
+		return 1
 	fi
-
-	rm -f "${SIGUSR1_RV_FILE}" "${SIGUSR1_PIDS_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that loss of a completion record while another worker still holds the FIFO open
@@ -819,8 +789,7 @@ test_14()
 {
 	local \
 		TEST_NUM=14 \
-		rv \
-		test_pass \
+		sched_rv \
 		jobs='crash hang'
 
 	print_test_header 14 \
@@ -837,18 +806,16 @@ test_14()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
-	if [ "${rv}" = 81 ]
+	if [ "${sched_rv}" = 81 ]
 	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv})"
-		test_pass=0
+		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, expected 81)"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 81)"
+		return 1
 	fi
-
-	return "${test_pass}"
 }
 
 # Verify that a failing SCHED_FINALIZE_CB overrides rv=0 but does not
@@ -871,7 +838,6 @@ test_15()
 		rv_success \
 		rv_failure \
 		recorded_rvs \
-		test_pass \
 		TEST_15_FINALIZE_RV=97
 
 	print_test_header 15 "Failure of SCHED_FINALIZE_CB" \
@@ -910,20 +876,18 @@ test_15()
 	[ -f "${FINALIZE_RV_FILE}" ] &&
 		recorded_rvs="$(tr '\n' ' ' < "${FINALIZE_RV_FILE}")"
 
+	rm -f "${FINALIZE_RV_FILE}"
+
 	if [ "${rv_success}" = "${TEST_15_FINALIZE_RV}" ] &&
 		[ "${rv_failure}" = 81 ] &&
 		[ "${recorded_rvs}" = "0 81 " ]
 	then
 		printf '%s\n' "Result: ${PASS} (success_rv=${rv_success}, failure_rv=${rv_failure})"
-		test_pass=0
+		return 0
 	else
 		printf '%s\n' "Result: ${FAIL} (success_rv=${rv_success}, failure_rv=${rv_failure}, recorded=${recorded_rvs})"
-		test_pass=1
+		return 1
 	fi
-
-	rm -f "${FINALIZE_RV_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that invalid callback configuration is rejected before any jobs are
@@ -932,29 +896,35 @@ test_16()
 {
 	test_16_fail_msg_handler()
 	{
-		printf '%s\n' "$*" >> "${FAIL_MSG_FILE}"
+		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
 	test_16_do_job()
 	{
-		printf 'started\n' > "${JOB_STARTED_FILE}"
+		printf 'started\n' > "${JOB_STARTED_FILE:?}"
 		return 0
 	}
 
 	# shellcheck disable=SC2034
 	local \
 		TEST_NUM=16 \
-		rv \
+		sched_rv \
 		pass_cnt=0 \
 		msg_cnt=0 \
-		test_pass \
 		cb bad_cb \
 		\
 		SCHED_FINALIZE_CB_def=finalize_handler \
 		DO_JOB_CB_def=test_16_do_job \
 		JOB_DONE_CB_def=done_handler \
-		SCHED_FAIL_MSG_CB_def=test_16_fail_msg_handler \
-		\
+		SCHED_FAIL_MSG_CB_def=test_16_fail_msg_handler
+
+	local \
+		FAIL_MSG_FILE="/tmp/sched.badcb.msg.${TEST_NUM:?}.$$" \
+		JOB_STARTED_FILE="/tmp/sched.badcb.job.${TEST_NUM:?}.$$"
+
+	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
+
+	local \
 		cb_list=" \
 			SCHED_FINALIZE_CB \
 			DO_JOB_CB \
@@ -968,11 +938,6 @@ test_16()
 
 
 	print_test_header 16 "Invalid callback configuration" "${cb_list}"
-
-	FAIL_MSG_FILE="/tmp/sched.badcb.msg.${TEST_NUM:?}.$$"
-	JOB_STARTED_FILE="/tmp/sched.badcb.job.${TEST_NUM:?}.$$"
-
-	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
 
 	for bad_cb in ${cb_list}
 	do
@@ -990,9 +955,9 @@ test_16()
 		SCHED_IDLE_TIMEOUT_S=2 \
 			schedule_jobs '1' &
 		wait "$!"
-		rv=$?
+		sched_rv=$?
 
-		[ "${rv}" = 1 ] &&
+		[ "${sched_rv}" = 1 ] &&
 		[ ! -f "${JOB_STARTED_FILE}" ] &&
 			pass_cnt=$((pass_cnt + 1))
 
@@ -1002,19 +967,17 @@ test_16()
 	[ -f "${FAIL_MSG_FILE}" ] &&
 		msg_cnt=$(wc -l < "${FAIL_MSG_FILE}")
 
+	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
+
 	if [ "${pass_cnt}" = 4 ] &&
 		[ "${msg_cnt}" = 3 ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
 		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/4, messages=${msg_cnt})"
-		test_pass=1
+		return 1
 	fi
-
-	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that invalid values of SCHED_MAX_JOBS are rejected before any jobs
@@ -1023,12 +986,12 @@ test_17()
 {
 	test_17_fail_msg_handler()
 	{
-		printf '%s\n' "$*" >> "${FAIL_MSG_FILE}"
+		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
 	test_17_do_job()
 	{
-		printf 'started\n' > "${JOB_STARTED_FILE}"
+		printf 'started\n' > "${JOB_STARTED_FILE:?}"
 		return 0
 	}
 
@@ -1037,7 +1000,7 @@ test_17()
 	# them (means "use default") and must not be included as a bad value.
 	test_17_check_bad_value()
 	{
-		local var="${1}" bad_val="${2}" rv \
+		local var="${1}" bad_val="${2}" sched_rv \
 			SCHED_MAX_JOBS=1 \
 			SCHED_TIMEOUT_S=3 \
 			SCHED_IDLE_TIMEOUT_S=2
@@ -1051,11 +1014,11 @@ test_17()
 			schedule_jobs '1' &
 
 		wait "$!"
-		rv=$?
+		sched_rv=$?
 
 		total_cnt=$((total_cnt + 1))
 
-		[ "${rv}" = 1 ] &&
+		[ "${sched_rv}" = 1 ] &&
 		[ ! -f "${JOB_STARTED_FILE}" ] &&
 			pass_cnt=$((pass_cnt + 1))
 
@@ -1064,20 +1027,19 @@ test_17()
 
 	local \
 		TEST_NUM=17 \
-		rv \
 		pass_cnt=0 \
 		total_cnt=0 \
 		msg_cnt=0 \
-		test_pass \
 		var bad_val
+
+	local \
+		FAIL_MSG_FILE="/tmp/sched.maxjobs.msg.${TEST_NUM:?}.$$" \
+		JOB_STARTED_FILE="/tmp/sched.maxjobs.job.${TEST_NUM:?}.$$"
+
+	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
 
 	print_test_header 17 "Invalid scheduler numeric env var values" \
 		"SCHED_MAX_JOBS('' abc 0 -1), SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S(abc 0 -1)"
-
-	FAIL_MSG_FILE="/tmp/sched.maxjobs.msg.${TEST_NUM:?}.$$"
-	JOB_STARTED_FILE="/tmp/sched.maxjobs.job.${TEST_NUM:?}.$$"
-
-	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
 
 	for bad_val in '' abc 0 -1
 	do
@@ -1097,19 +1059,17 @@ test_17()
 		msg_cnt=$(wc -l < "${FAIL_MSG_FILE}")
 	fi
 
+	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
+
 	if [ "${pass_cnt}" = "${total_cnt}" ] &&
 		[ "${msg_cnt}" = "${total_cnt}" ]
 	then
 		printf '%s\n' "Result: ${PASS} (passed=${pass_cnt}/${total_cnt})"
-		test_pass=0
+		return 0
 	else
 		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/${total_cnt}, messages=${msg_cnt})"
-		test_pass=1
+		return 1
 	fi
-
-	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
-
-	return "${test_pass}"
 }
 
 
@@ -1123,7 +1083,7 @@ test_18()
 	TEST_JOBS='ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=2 \
-		run_test
+		run_generic_test
 }
 
 # Test 19
@@ -1132,23 +1092,22 @@ test_19()
 {
 	test_19_do_job()
 	{
-		printf '%s\n' "$*" >> "${ARGS_FILE}"
+		printf '%s\n' "$*" >> "${ARGS_FILE:?}"
 		return 0
 	}
 
 	local \
 		TEST_NUM=19 \
-		rv \
+		sched_rv \
 		expected \
 		actual \
-		test_pass \
 		jobs='1 2 3'
+
+	local ARGS_FILE="/tmp/sched.args.${TEST_NUM:?}.$$"
+	rm -f "${ARGS_FILE}"
 
 	print_test_header 19 "Job callback receives scheduler arguments" \
 		"${jobs}"
-
-	ARGS_FILE="/tmp/sched.args.${TEST_NUM:?}.$$"
-	rm -f "${ARGS_FILE}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -1160,7 +1119,7 @@ test_19()
 		schedule_jobs "${jobs}" foo bar &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
 	expected=$(cat <<EOF
 1 foo bar
@@ -1173,19 +1132,17 @@ EOF
 	[ -f "${ARGS_FILE}" ] &&
 		actual="$(sort "${ARGS_FILE}")"
 
-	if [ "${rv}" = 0 ] &&
+	rm -f "${ARGS_FILE}"
+
+	if [ "${sched_rv}" = 0 ] &&
 		[ "${actual}" = "${expected}" ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv})"
+		return 1
 	fi
-
-	rm -f "${ARGS_FILE}"
-
-	return "${test_pass}"
 }
 
 # Large parallelism stress test
@@ -1231,13 +1188,12 @@ test_20()
 
 	local TEST_NUM=20
 	local \
-		rv \
+		sched_rv \
 		fifo="/tmp/sched.stress.${TEST_NUM:?}.$$" \
 		result_file="/tmp/sched.stress.res.${TEST_NUM:?}.$$" \
 		scheduler_pid \
 		monitor_pid \
 		max_active=0 \
-		test_pass \
 		jobs \
 		i=0 \
 		N=300
@@ -1274,26 +1230,24 @@ test_20()
 	exec 8>&-
 
 	wait "${scheduler_pid}"
-	rv=$?
+	sched_rv=$?
 
 	wait "${monitor_pid}"
 
+	read_first_line max_active "${result_file}"
+	rm -f "${fifo}" "${result_file}"
+
 	if \
-		read_first_line max_active "${result_file}" &&
+		[ "${sched_rv}" = 0 ] &&
 		is_uint "${max_active}" &&
-		[ "${rv}" = 0 ] &&
 		[ "${max_active}" -le 20 ]
 	then
 		printf '%s\n' "Result: ${PASS} (max_parallel=${max_active})"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, max_parallel=${max_active})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, max_parallel=${max_active})"
+		return 1
 	fi
-
-	rm -f "${fifo}" "${result_file}"
-
-	return "${test_pass}"
 }
 
 # Verify that arbitrary DO_JOB_CB return codes are propagated unchanged to
@@ -1307,24 +1261,22 @@ test_21()
 
 	test_21_done_handler()
 	{
-		printf '%s %s\n' "$1" "$2" >> "${STATUS_FILE}"
+		printf '%s %s\n' "$1" "$2" >> "${STATUS_FILE:?}"
 
 		return 0
 	}
 
 	local \
 		TEST_NUM=21 \
-		rv \
+		sched_rv \
 		actual \
 		expected \
-		test_pass \
 		jobs='0 1 17 42 99 255'
 
-	print_test_header 21 "DO_JOB_CB return statuses" "${jobs}"
-
-	STATUS_FILE="/tmp/sched.status.${TEST_NUM:?}.$$"
-
+	local STATUS_FILE="/tmp/sched.status.${TEST_NUM:?}.$$"
 	rm -f "${STATUS_FILE}"
+
+	print_test_header 21 "DO_JOB_CB return statuses" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -1337,7 +1289,7 @@ test_21()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 	expected=$(cat <<EOF | sort
 0 0
 1 1
@@ -1357,20 +1309,18 @@ EOF
 		actual_cnt="$(wc -l < "${STATUS_FILE}")"
 	fi
 
-	if [ "${rv}" = 0 ] &&
+	rm -f "${STATUS_FILE}"
+
+	if [ "${sched_rv}" = 0 ] &&
 		[ "${actual_cnt}" = 6 ] &&
 		[ "${actual}" = "${expected}" ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, count=${actual_cnt}, actual=${actual//$'\n'/; })"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, count=${actual_cnt}, actual=${actual//$'\n'/; })"
+		return 1
 	fi
-
-	rm -f "${STATUS_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that removal of the scheduler FIFO during execution is detected and causes scheduler failure.
@@ -1378,8 +1328,7 @@ test_22()
 {
 	local \
 		TEST_NUM=22 \
-		rv \
-		test_pass \
+		sched_rv \
 		scheduler_pid \
 		sched_fifo \
 		jobs="ok5 ok5"
@@ -1403,18 +1352,16 @@ test_22()
 	rm -f "${sched_fifo}"
 
 	wait "${scheduler_pid}"
-	rv=$?
+	sched_rv=$?
 
-	if [ "${rv}" = 1 ]
+	if [ "${sched_rv}" = 1 ]
 	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv})"
-		test_pass=0
+		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv})"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv})"
+		return 1
 	fi
-
-	return "${test_pass}"
 }
 
 # Verify that the scheduler terminates when the idle timeout
@@ -1428,20 +1375,20 @@ test_23()
 
 		finalize_handler_default "${rv}" "${pids}" || return $?
 
-		[ -n "${TIMEOUT_FILE}" ] &&
-			printf '%s\n' "${rv}" > "${TIMEOUT_FILE}"
+		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
 		return 0
 	}
 
 	local \
 		TEST_NUM=23 \
-		test_pass \
+		timeout_rv \
 		jobs="ok ok ok hang ok"
-	print_test_header 23 "Idle timeout" "${jobs}"
 
-	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
+	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
+
+	print_test_header 23 "Idle timeout" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -1454,21 +1401,20 @@ test_23()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
+	local sched_rv=$?
 
-	if [ "$?" = 81 ] &&
-		read_first_line rv "${TIMEOUT_FILE}" &&
-		[ "${rv}" = 81 ]
-	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv})"
-		test_pass=0
-	else
-		printf '%s\n' "Result: ${FAIL}"
-		test_pass=1
-	fi
-
+	read_first_line timeout_rv "${TIMEOUT_FILE}"
 	rm -f "${TIMEOUT_FILE}"
 
-	return "${test_pass}"
+	if [ "${sched_rv}" = 81 ] &&
+		[ "${timeout_rv}" = 81 ]
+	then
+		printf '%s\n' "Result: ${PASS} (timeout_rv=${timeout_rv})"
+		return 0
+	else
+		printf '%s\n' "Result: ${FAIL}"
+		return 1
+	fi
 }
 
 # Verify that the global processing timeout fires based on elapsed time since
@@ -1482,21 +1428,20 @@ test_24()
 
 		finalize_handler_default "${rv}" "${pids}" || return $?
 
-		[ -n "${TIMEOUT_FILE}" ] &&
-			printf '%s\n' "${rv}" > "${TIMEOUT_FILE}"
+		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
 		return 0
 	}
 
 	local \
 		TEST_NUM=24 \
-		test_pass \
+		timeout_rv \
 		jobs="ok ok ok ok ok ok"
 
-	print_test_header 24 "Global timeout despite continuous progress" "${jobs}"
-
-	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
+	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
+
+	print_test_header 24 "Global timeout despite continuous progress" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -1509,21 +1454,20 @@ test_24()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
+	local sched_rv=$?
 
-	if [ "$?" = 82 ] &&
-		read_first_line rv "${TIMEOUT_FILE}" &&
-		[ "${rv}" = 82 ]
-	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv})"
-		test_pass=0
-	else
-		printf '%s\n' "Result: ${FAIL}"
-		test_pass=1
-	fi
-
+	read_first_line timeout_rv "${TIMEOUT_FILE}"
 	rm -f "${TIMEOUT_FILE}"
 
-	return "${test_pass}"
+	if [ "${sched_rv}" = 82 ] &&
+		[ "${timeout_rv}" = 82 ]
+	then
+		printf '%s\n' "Result: ${PASS} (timeout_rv=${timeout_rv})"
+		return 0
+	else
+		printf '%s\n' "Result: ${FAIL}"
+		return 1
+	fi
 }
 
 # Verify that when the global processing timeout and the idle timeout are due
@@ -1532,8 +1476,7 @@ test_25()
 {
 	local \
 		TEST_NUM=25 \
-		rv \
-		test_pass \
+		sched_rv \
 		jobs='hang'
 
 	print_test_header 25 "Simultaneous global/idle timeout - global wins" "${jobs}"
@@ -1548,18 +1491,16 @@ test_25()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
-	if [ "${rv}" = 82 ]
+	if [ "${sched_rv}" = 82 ]
 	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv})"
-		test_pass=0
+		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, expected 82)"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 82)"
+		return 1
 	fi
-
-	return "${test_pass}"
 }
 
 # Verify that SCHED_MAX_JOBS greater than the job count never enters the
@@ -1571,7 +1512,7 @@ test_26()
 	TEST_JOBS='ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=10 \
-		run_test
+		run_generic_test
 }
 
 # Verify that SCHED_FINALIZE_CB may be empty and that successful execution
@@ -1584,7 +1525,7 @@ test_27()
 	TEST_JOBS='ok ok ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
-		run_test
+		run_generic_test
 }
 
 # Verify that finalize() removes the scheduler's FIFO after a normal
@@ -1593,8 +1534,7 @@ test_28()
 {
 	local \
 		TEST_NUM=28 \
-		rv \
-		test_pass \
+		sched_rv \
 		scheduler_pid \
 		sched_fifo \
 		jobs='ok ok ok'
@@ -1615,19 +1555,17 @@ test_28()
 	sched_fifo="/tmp/sched_ipc_${scheduler_pid}"
 
 	wait "${scheduler_pid}"
-	rv=$?
+	sched_rv=$?
 
-	if [ "${rv}" = 0 ] &&
+	if [ "${sched_rv}" = 0 ] &&
 		[ ! -e "${sched_fifo}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv})"
-		test_pass=0
+		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, fifo_exists=$([ -e "${sched_fifo}" ] && echo yes || echo no))"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, fifo_exists=$([ -e "${sched_fifo}" ] && echo yes || echo no))"
+		return 1
 	fi
-
-	return "${test_pass}"
 }
 
 # Verify that the caller's original noglob state (glob-enabled or
@@ -1666,9 +1604,8 @@ test_29()
 		TEST_NUM=29 \
 		mode \
 		expect \
-		rv \
+		sched_rv \
 		pass_cnt=0 \
-		test_pass \
 		parent_pre \
 		parent_post \
 		do_job_glob_file \
@@ -1707,7 +1644,7 @@ test_29()
 			schedule_jobs 'ok ok ok' &
 
 		wait "$!"
-		rv=$?
+		sched_rv=$?
 
 		parent_post=glob
 		case "${-}" in
@@ -1719,7 +1656,7 @@ test_29()
 		done_result="$(sort -u "${done_glob_file}" 2>/dev/null | tr '\n' ' ')"
 		finalize_result="$(cat "${finalize_glob_file}" 2>/dev/null)"
 
-		if [ "${rv}" = 0 ] &&
+		if [ "${sched_rv}" = 0 ] &&
 			[ "${parent_post}" = "${parent_pre}" ] &&
 			[ "${do_job_result}" = "${expect} " ] &&
 			[ "${done_result}" = "${expect} " ] &&
@@ -1727,8 +1664,8 @@ test_29()
 		then
 			pass_cnt=$((pass_cnt + 1))
 		else
-			printf 'sub-check failed for mode=%s (rv=%s, do_job=%s, done=%s, finalize=%s)\n' \
-				"${mode}" "${rv}" "${do_job_result}" "${done_result}" "${finalize_result}" >&2
+			printf 'sub-check failed for mode=%s (sched_rv=%s, do_job=%s, done=%s, finalize=%s)\n' \
+				"${mode}" "${sched_rv}" "${do_job_result}" "${done_result}" "${finalize_result}" >&2
 		fi
 
 		rm -f "${do_job_glob_file}" "${done_glob_file}" "${finalize_glob_file}"
@@ -1739,13 +1676,11 @@ test_29()
 	if [ "${pass_cnt}" = 2 ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
 		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/2)"
-		test_pass=1
+		return 1
 	fi
-
-	return "${test_pass}"
 }
 
 # Verify job IDs can contain arbitrary non-whitespace characters and are
@@ -1754,25 +1689,25 @@ test_30()
 {
 	test_30_do_job()
 	{
-		printf '%s\n' "$1" >> "${ARGS_FILE}"
+		printf '%s\n' "$1" >> "${ARGS_FILE:?}"
 		sleep 1
 		return 0
 	}
 
 	test_30_done_handler()
 	{
-		printf '%s\n' "$1" >> "${DONE_FILE}"
+		printf '%s\n' "$1" >> "${DONE_FILE:?}"
 		return 0
 	}
 
 	test_30_touch_inject()
 	{
-		touch "${INJECT_FILE}"
+		touch "${INJECT_FILE:?}"
 	}
 
 	local \
 		TEST_NUM=30 \
-		rv \
+		sched_rv \
 		expected_do_jobs \
 		expected_do_cnt \
 		expected_done_cnt \
@@ -1780,13 +1715,14 @@ test_30()
 		actual_done_jobs \
 		actual_do_cnt=0 \
 		actual_done_cnt=0 \
-		test_pass \
 		jobs=''
 
 	local \
 		INJECT_FILE="/tmp/sched.idchars.inject.${TEST_NUM}.$$" \
 		ARGS_FILE="/tmp/sched.idchars.args.${TEST_NUM}.$$" \
 		DONE_FILE="/tmp/sched.idchars.done.${TEST_NUM}.$$"
+
+	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 
 	# Glob/quote/injection-shaped characters. Multi-line literal (not a
 	# bash array); whitespace from continuation/indentation is stripped
@@ -1830,8 +1766,6 @@ test_30()
 	print_test_header 30 "Arbitrary characters in job IDs" \
 		"30 IDs covering glob/quote/injection-shaped characters"
 
-	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
-
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	DO_JOB_CB=test_30_do_job \
@@ -1842,18 +1776,20 @@ test_30()
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
-	if [ "${rv}" = 0 ] &&
+	if [ "${sched_rv}" = 0 ] &&
 		verify_recorded_set expected_do_jobs  actual_do_jobs   expected_do_cnt   actual_do_cnt   "${ARGS_FILE}" "${jobs}" &&
 		verify_recorded_set        _          actual_done_jobs expected_done_cnt actual_done_cnt "${DONE_FILE}" "${jobs}" &&
 		[ ! -e "${INJECT_FILE}" ]
 	then
+		rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 		printf '%s\n' "Result: ${PASS} (jobs=${actual_do_cnt})"
-		test_pass=0
+		return 0
 	else
+		rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 		printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-			"Result: ${FAIL} (rv=${rv})" \
+			"Result: ${FAIL} (sched_rv=${sched_rv})" \
 			"expected_do_cnt=${expected_do_cnt}, actual_do_cnt=${actual_do_cnt}" \
 			"expected_done_cnt=${expected_done_cnt}, actual_done_cnt=${actual_done_cnt}" \
 			"inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)" \
@@ -1866,12 +1802,8 @@ test_30()
 			"" \
 			"actual_done_jobs:" \
 			"${actual_done_jobs}"
-		test_pass=1
+		return 1
 	fi
-
-	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify forged completion records (glob "*", or shell-injection-shaped
@@ -1880,7 +1812,7 @@ test_31()
 {
 	test_31_touch_inject()
 	{
-		touch "${INJECT_FILE}"
+		touch "${INJECT_FILE:?}"
 	}
 
 	test_31_do_job()
@@ -1896,14 +1828,14 @@ test_31()
 
 	test_31_fail_msg_handler()
 	{
-		printf '%s\n' "$*" >> "${FAIL_MSG_FILE}"
+		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
 	test_31_check_forgery()
 	{
-		local job_id="${1:?}" spoof_id="${2:?}" rv
+		local job_id="${1:?}" spoof_id="${2:?}" sched_rv
 
-		rm -f "${INJECT_FILE}"
+		rm -f "${INJECT_FILE:?}"
 
 		SCHED_FINALIZE_CB=finalize_handler \
 		JOB_DONE_CB=done_handler \
@@ -1916,17 +1848,17 @@ test_31()
 			schedule_jobs "${job_id}" &
 
 		wait "$!"
-		rv=$?
+		sched_rv=$?
 
 		total_cnt=$((total_cnt + 1))
 
-		if [ "${rv}" = 1 ] &&
+		if [ "${sched_rv}" = 1 ] &&
 			[ ! -e "${INJECT_FILE}" ]
 		then
 			pass_cnt=$((pass_cnt + 1))
 		else
-			printf 'sub-check failed for job_id=%s spoof_id=%s (rv=%s, inject_marker_exists=%s)\n' \
-				"${job_id}" "${spoof_id}" "${rv}" \
+			printf 'sub-check failed for job_id=%s spoof_id=%s (sched_rv=%s, inject_marker_exists=%s)\n' \
+				"${job_id}" "${spoof_id}" "${sched_rv}" \
 				"$([ -e "${INJECT_FILE}" ] && echo yes || echo no)" >&2
 		fi
 	}
@@ -1935,17 +1867,16 @@ test_31()
 		TEST_NUM=31 \
 		pass_cnt=0 \
 		total_cnt=0 \
-		test_pass \
 		msg_cnt=0
 
 	local \
 		INJECT_FILE="/tmp/sched.forge.inject.${TEST_NUM}.$$" \
 		FAIL_MSG_FILE="/tmp/sched.forge.msg.${TEST_NUM}.$$"
 
+	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
+
 	print_test_header 31 "Job-ID forgery / injection resistance" \
 		"spoofed completion records with glob and shell-metacharacter IDs"
-
-	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
 
 	test_31_check_forgery "realjob" "*"
 	test_31_check_forgery "realjob" "\$(test_31_touch_inject)"
@@ -1955,19 +1886,17 @@ test_31()
 	[ -f "${FAIL_MSG_FILE}" ] &&
 		msg_cnt=$(wc -l < "${FAIL_MSG_FILE}")
 
+	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
+
 	if [ "${pass_cnt}" = "${total_cnt}" ] &&
 		[ "${msg_cnt}" = "${total_cnt}" ]
 	then
 		printf '%s\n' "Result: ${PASS} (passed=${pass_cnt}/${total_cnt})"
-		test_pass=0
+		return 0
 	else
 		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/${total_cnt}, messages=${msg_cnt})"
-		test_pass=1
+		return 1
 	fi
-
-	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that additional arguments passed to schedule_jobs() preserve exact
@@ -1987,25 +1916,23 @@ test_32()
 				printf '<%s>\037' "${arg//$'\n'/$'\035'}"
 			done
 		)"
-		printf '%s\n' "${rec}" >> "${ARGS_FILE}"
+		printf '%s\n' "${rec}" >> "${ARGS_FILE:?}"
 
 		return 0
 	}
 
 	local \
 		TEST_NUM=32 \
-		rv \
+		sched_rv \
 		expected \
 		actual \
-		test_pass \
 		jobs='1 2 3'
 
 	local ARGS_FILE="/tmp/sched.args32.${TEST_NUM:?}.$$"
+	rm -f "${ARGS_FILE}"
 
 	print_test_header 32 "Extra-argument boundary/content integrity" \
 		"${jobs}"
-
-	rm -f "${ARGS_FILE}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2017,7 +1944,7 @@ test_32()
 		schedule_jobs "${jobs}" '' 'a b' '*' '-x' c$'\n'd &
 
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
 	expected="$(
 		for id in 1 2 3
@@ -2031,14 +1958,16 @@ test_32()
 	[ -f "${ARGS_FILE}" ] &&
 		actual="$(sort "${ARGS_FILE}")"
 
-	if [ "${rv}" = 0 ] &&
+	rm -f "${ARGS_FILE}"
+
+	if [ "${sched_rv}" = 0 ] &&
 		[ "${actual}" = "${expected}" ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
 		printf '%s\n' \
-			"Result: ${FAIL} (rv=${rv})" \
+			"Result: ${FAIL} (sched_rv=${sched_rv})" \
 			"expected:" \
 			"'${expected}'" \
 			"actual:" \
@@ -2053,12 +1982,8 @@ test_32()
 			printf '%s\n' "Can not show expected vs actual hex because hexdump util is not found."
 		fi
 
-		test_pass=1
+		return 1
 	fi
-
-	rm -f "${ARGS_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that SIGINT and SIGTERM both terminate the scheduler with SCHED_RV_INT_TERM,
@@ -2069,11 +1994,11 @@ test_33()
 	{
 		local rv="${1}" pids="${2}"
 
-		printf '%s\n' "${rv}" > "${SIG_RV_FILE}"
+		printf '%s\n' "${rv}" > "${SIG_RV_FILE:?}"
 
 		if [ -n "${pids}" ]
 		then
-			printf '%s\n' "${pids}" > "${SIG_PIDS_FILE}"
+			printf '%s\n' "${pids}" > "${SIG_PIDS_FILE:?}"
 		fi
 
 		finalize_handler_default "${rv}" "${pids}"
@@ -2082,12 +2007,11 @@ test_33()
 	local \
 		TEST_NUM=33 \
 		sig \
-		rv \
+		sched_rv \
 		expect_rv=84 \
 		callback_rv \
 		pids \
 		schedule_pid \
-		test_pass \
 		all_ok=1
 
 	local \
@@ -2142,11 +2066,11 @@ test_33()
 				)
 		esac
 
-		rv=$?
+		sched_rv=$?
 
 		read_first_line pids "${SIG_PIDS_FILE}"
 
-		if [ "${rv}" = "${expect_rv}" ] &&
+		if [ "${sched_rv}" = "${expect_rv}" ] &&
 			read_first_line callback_rv "${SIG_RV_FILE}" &&
 			[ "${callback_rv}" = "${expect_rv}" ] &&
 			[ -n "${pids}" ]
@@ -2154,23 +2078,21 @@ test_33()
 			printf 'SIG%s: %s\n' "${sig}" "${PASS}"
 		else
 			all_ok=0
-			printf 'SIG%s: %s (expect_rv=%s, rv=%s, callback_rv=%s, pids=%s)\n' \
-				"${sig}" "${FAIL}" "${expect_rv}" "${rv}" "${callback_rv}" "${pids}"
+			printf 'SIG%s: %s (expect_rv=%s, sched_rv=%s, callback_rv=%s, pids=%s)\n' \
+				"${sig}" "${FAIL}" "${expect_rv}" "${sched_rv}" "${callback_rv}" "${pids}"
 		fi
 	done
+
+	rm -f "${SIG_RV_FILE}" "${SIG_PIDS_FILE}"
 
 	if [ "${all_ok}" = 1 ]
 	then
 		printf '%s\n' "Result: ${PASS}"
-		test_pass=0
+		return 0
 	else
 		printf '%s\n' "Result: ${FAIL}"
-		test_pass=1
+		return 1
 	fi
-
-	rm -f "${SIG_RV_FILE}" "${SIG_PIDS_FILE}"
-
-	return "${test_pass}"
 }
 
 # Verify that the idle timeout correctly accounts for time elapsed during job completion callbacks,
@@ -2186,11 +2108,10 @@ test_34()
 
 	local \
 		TEST_NUM=34 \
-		rv \
+		sched_rv \
 		start_time \
 		end_time \
 		elapsed \
-		test_pass \
 		jobs="instant hang"
 
 	print_test_header 34 "Idle timeout accounts for elapsed callback time" "${jobs}"
@@ -2207,23 +2128,21 @@ test_34()
 	SCHED_IDLE_TIMEOUT_S=5 \
 		schedule_jobs "${jobs}" &
 	wait "$!"
-	rv=$?
+	sched_rv=$?
 
 	end_time=$(date +%s)
 	elapsed=$((end_time - start_time))
 
 	# instant takes 0s, callback takes 3s (total 3s elapsed since start).
 	# Remaining idle timeout is 2s. Expected total ~5s. Adding 1s margin.
-	if [ "${rv}" = 81 ] && [ "${elapsed}" -le 6 ]
+	if [ "${sched_rv}" = 81 ] && [ "${elapsed}" -le 6 ]
 	then
 		printf '%s\n' "Result: ${PASS} (elapsed=${elapsed}s)"
-		test_pass=0
+		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, elapsed=${elapsed}s, expected <= 6s)"
-		test_pass=1
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, elapsed=${elapsed}s, expected <= 6s)"
+		return 1
 	fi
-
-	return "${test_pass}"
 }
 
 
