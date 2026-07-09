@@ -95,9 +95,20 @@ done_handler()
 
 finalize_handler_default()
 {
-	local rv="${1}" pids="${2}"
+	local rv="${1}" pids="${2}" pid_cnt=0
 
-	echo "finalize rv='${rv}' pids='${pids}'"
+	if [ -n "${pids}" ]
+	then
+		set -- ${pids}
+		pid_cnt="${#}"
+	fi
+
+	if [ "${pid_cnt}" -le 20 ]
+	then
+		echo "finalize rv='${rv}' pids='${pids}'"
+	else
+		echo "finalize rv='${rv}' running_pid_count=${pid_cnt} (list suppressed)"
+	fi
 
 	for pid in ${pids}
 	do
@@ -578,6 +589,7 @@ test_10()
 		printf '%s\n' "Result: ${PASS} (completed=${actual_done_cnt})"
 		return 0
 	else
+		rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
 		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, finalize_state=${finalize_state}, expected_cnt=${expected_cnt}, actual_done_cnt=${actual_done_cnt}, actual_done_jobs=${actual_done_jobs})"
 		return 1
 	fi
@@ -601,6 +613,8 @@ test_11()
 
 	local \
 		TEST_NUM=11 \
+		sched_rv \
+		timeout_rv \
 		jobs="ok hang"
 
 	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
@@ -621,13 +635,13 @@ test_11()
 	wait "$!"
 	local sched_rv=$?
 
-	read_first_line rv "${TIMEOUT_FILE}"
+	read_first_line timeout_rv "${TIMEOUT_FILE}"
 	rm -f "${TIMEOUT_FILE}"
 
 	if [ "${sched_rv}" = 82 ] &&
-		[ "${rv}" = 82 ]
+		[ "${timeout_rv}" = 82 ]
 	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv})"
+		printf '%s\n' "Result: ${PASS} (timeout_rv=${timeout_rv})"
 		return 0
 	else
 		printf '%s\n' "Result: ${FAIL}"
@@ -2145,6 +2159,269 @@ test_34()
 	fi
 }
 
+# Verify that SCHED_TIMEOUT_S and SCHED_IDLE_TIMEOUT_S may be left entirely
+# unset (as opposed to explicitly empty, covered separately by test_39) and
+# that sch_check_uint's "not set and not required" branch accepts this,
+# falling back to schedule_jobs()'s built-in PROC_TIMEOUT_S=900/IDLE_TIMEOUT_S=300
+# defaults rather than being rejected. Uses a fast job so the test does not
+# have to wait out either default to prove this.
+test_35()
+{
+	local \
+		TEST_NUM=35 \
+		sched_rv \
+		jobs='ok'
+
+	print_test_header 35 "Unset SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S fall back to built-in defaults" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	if [ "${sched_rv}" = 0 ]
+	then
+		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		return 0
+	else
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 0)"
+		return 1
+	fi
+}
+
+# Verify that SIGUSR1/SIGINT/SIGTERM interrupt the scheduler promptly rather
+# than merely being noticed the next time an unrelated timeout would have
+# fired anyway. SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S are set generously high
+# so a pass can only be explained by the signal handler itself firing, not by
+# either timeout coincidentally expiring around the same time.
+test_36()
+{
+	local \
+		TEST_NUM=36 \
+		sig \
+		expect_rv \
+		sched_rv \
+		start_s \
+		end_s \
+		elapsed \
+		schedule_pid \
+		all_ok=1
+
+	print_test_header 36 "Prompt termination on SIGUSR1/SIGINT/SIGTERM" "hang"
+
+	for sig in USR1 INT TERM
+	do
+		case "${sig}" in
+			USR1) expect_rv=83 ;;
+			INT|TERM) expect_rv=84 ;;
+		esac
+
+		SCHED_FAIL_MSG_CB=echo \
+		SCHED_FINALIZE_CB=finalize_handler \
+		JOB_DONE_CB=done_handler \
+		DO_JOB_CB=do_job_default \
+		SCHED_MAX_JOBS=1 \
+		SCHED_TIMEOUT_S=30 \
+		SCHED_IDLE_TIMEOUT_S=30 \
+			schedule_jobs 'hang' &
+
+		schedule_pid=$!
+
+		sleep 1
+
+		start_s=$(date +%s)
+		kill "-${sig}" "${schedule_pid}"
+
+		wait "${schedule_pid}"
+		sched_rv=$?
+		end_s=$(date +%s)
+
+		elapsed=$((end_s - start_s))
+
+		if [ "${sched_rv}" = "${expect_rv}" ] &&
+			[ "${elapsed}" -le 3 ]
+		then
+			printf 'SIG%s: %s (elapsed=%ss, sched_rv=%s)\n' "${sig}" "${PASS}" "${elapsed}" "${sched_rv}"
+		else
+			all_ok=0
+			printf 'SIG%s: %s (elapsed=%ss, expected <=3s, sched_rv=%s, expected %s)\n' \
+				"${sig}" "${FAIL}" "${elapsed}" "${sched_rv}" "${expect_rv}"
+		fi
+	done
+
+	if [ "${all_ok}" = 1 ]
+	then
+		printf '%s\n' "Result: ${PASS}"
+		return 0
+	else
+		printf '%s\n' "Result: ${FAIL}"
+		return 1
+	fi
+}
+
+# Verify that the idle and global timeouts fire within their configured
+# window - not just that the eventual return code is correct (already
+# covered elsewhere), but that they fire neither implausibly early nor late
+# enough to suggest the wrong timer value is being used.
+test_37()
+{
+	local \
+		TEST_NUM=37 \
+		sched_rv \
+		start_s \
+		end_s \
+		elapsed \
+		all_ok=1
+
+	print_test_header 37 "Timeouts fire within their configured window" "hang"
+
+	start_s=$(date +%s)
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=30 \
+	SCHED_IDLE_TIMEOUT_S=3 \
+		schedule_jobs 'hang' &
+
+	wait "$!"
+	sched_rv=$?
+	end_s=$(date +%s)
+	elapsed=$((end_s - start_s))
+
+	if [ "${sched_rv}" = 81 ] &&
+		[ "${elapsed}" -ge 3 ] &&
+		[ "${elapsed}" -le 6 ]
+	then
+		printf 'idle: %s (elapsed=%ss)\n' "${PASS}" "${elapsed}"
+	else
+		all_ok=0
+		printf 'idle: %s (elapsed=%ss, sched_rv=%s, expected 3<=elapsed<=6 and sched_rv=81)\n' "${FAIL}" "${elapsed}" "${sched_rv}"
+	fi
+
+	start_s=$(date +%s)
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=30 \
+		schedule_jobs 'hang' &
+
+	wait "$!"
+	sched_rv=$?
+	end_s=$(date +%s)
+	elapsed=$((end_s - start_s))
+
+	if [ "${sched_rv}" = 82 ] &&
+		[ "${elapsed}" -ge 3 ] &&
+		[ "${elapsed}" -le 6 ]
+	then
+		printf 'global: %s (elapsed=%ss)\n' "${PASS}" "${elapsed}"
+	else
+		all_ok=0
+		printf 'global: %s (elapsed=%ss, sched_rv=%s, expected 3<=elapsed<=6 and sched_rv=82)\n' "${FAIL}" "${elapsed}" "${sched_rv}"
+	fi
+
+	if [ "${all_ok}" = 1 ]
+	then
+		printf '%s\n' "Result: ${PASS}"
+		return 0
+	else
+		printf '%s\n' "Result: ${FAIL}"
+		return 1
+	fi
+}
+
+# Verify that process_done_record()'s rounding of remaining time up to the
+# next whole second (for its `read -t` call) does not compound into a large
+# overshoot, even at the minimum legal SCHED_IDLE_TIMEOUT_S=1: elapsed time
+# must still be close to 1s, not several seconds.
+test_38()
+{
+	local \
+		TEST_NUM=38 \
+		sched_rv \
+		start_s \
+		end_s \
+		elapsed \
+		jobs='hang'
+
+	print_test_header 38 "Read-timeout rounding does not compound at SCHED_IDLE_TIMEOUT_S=1" "${jobs}"
+
+	start_s=$(date +%s)
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=30 \
+	SCHED_IDLE_TIMEOUT_S=1 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+	end_s=$(date +%s)
+	elapsed=$((end_s - start_s))
+
+	if [ "${sched_rv}" = 81 ] &&
+		[ "${elapsed}" -ge 1 ] &&
+		[ "${elapsed}" -le 3 ]
+	then
+		printf '%s\n' "Result: ${PASS} (elapsed=${elapsed}s)"
+		return 0
+	else
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, elapsed=${elapsed}s, expected 1<=elapsed<=3 and sched_rv=81)"
+		return 1
+	fi
+}
+
+# Verify that explicitly empty SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S (as
+# opposed to entirely unset, covered by test_35) are accepted and fall back
+# to the built-in defaults. Complements test_17, which only exercises the
+# rejection path for these vars and deliberately skips '' since it is
+# documented as a valid value.
+test_39()
+{
+	local \
+		TEST_NUM=39 \
+		sched_rv \
+		jobs='ok'
+
+	print_test_header 39 "Explicitly empty SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S accepted" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S='' \
+	SCHED_IDLE_TIMEOUT_S='' \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	if [ "${sched_rv}" = 0 ]
+	then
+		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		return 0
+	else
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 0)"
+		return 1
+	fi
+}
+
 
 #
 # Inline test code starts here.
@@ -2169,7 +2446,7 @@ if [ -n "${RUN_TESTS}" ]; then
 	TESTS_PASSED=0
 
 	[ "${RUN_TESTS}" = "run" ] &&
-		RUN_TESTS="$(seq 1 34)"
+		RUN_TESTS="$(seq 1 40)"
 
 	for RUN_TEST in ${RUN_TESTS}; do
 		TESTS_RUN=$((TESTS_RUN + 1))
