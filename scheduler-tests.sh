@@ -172,9 +172,13 @@ run_test()
 	
 	print_test_header "${TEST_NUM:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
 
+	SCHED_FAIL_MSG_CB="${SCHED_FAIL_MSG_CB:-echo}" \
+	SCHED_FINALIZE_CB="${SCHED_FINALIZE_CB-finalize_handler}" \
+	JOB_DONE_CB="${JOB_DONE_CB-done_handler}" \
+	DO_JOB_CB="${DO_JOB_CB:-do_job_default}" \
 	SCHED_MAX_JOBS="${TEST_SCHED_MAX_JOBS:?}" \
-	SCHED_TIMEOUT_S="${SCHED_TIMEOUT_S:-20}" \
-	SCHED_IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-5}" \
+	SCHED_TIMEOUT_S="${SCHED_TIMEOUT_S:-3}" \
+	SCHED_IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-2}" \
 		schedule_jobs "${TEST_JOBS}" &
 
 	wait "$!"
@@ -251,7 +255,12 @@ run_parallelism_test()
 
 	exec 8>"${fifo}"
 
+	SCHED_FAIL_MSG_CB="${SCHED_FAIL_MSG_CB:-echo}" \
+	SCHED_FINALIZE_CB="${SCHED_FINALIZE_CB-finalize_handler}" \
+	JOB_DONE_CB="${JOB_DONE_CB-done_handler}" \
 	SCHED_MAX_JOBS="${TEST_SCHED_MAX_JOBS:?}" \
+	SCHED_TIMEOUT_S="${SCHED_TIMEOUT_S:-3}" \
+	SCHED_IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-2}" \
 	DO_JOB_CB=do_job_parallel \
 		schedule_jobs "${TEST_JOBS:?}" &
 
@@ -402,8 +411,14 @@ test_8()
 
 	print_test_header 8 "Failure status propagation to done_handler" "${jobs}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	DONE_HANDLER_CB=test_8_done_handler \
 	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
@@ -458,9 +473,13 @@ test_9()
 	DONE_COUNT_FILE="/tmp/sched.queue.${TEST_NUM:?}.$$"
 	rm -f "${DONE_COUNT_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 	DONE_HANDLER_CB=test_9_done_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=6 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 	DO_JOB_CB=test_9_do_job \
 		schedule_jobs "${jobs}" &
 
@@ -545,10 +564,14 @@ test_10()
 
 	rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 	DONE_HANDLER_CB=test_10_done_handler \
 	FINALIZE_HANDLER_CB=test_10_finalize_handler \
 	SCHED_MAX_JOBS=10 \
 	SCHED_TIMEOUT_S=20 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 	DO_JOB_CB=test_10_do_job \
 		schedule_jobs "${jobs}" &
 
@@ -606,6 +629,10 @@ test_11()
 	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	FINALIZE_HANDLER_CB=test_11_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=3 \
@@ -678,9 +705,15 @@ test_12()
 
 	rm -f "${EMPTY_DONE_FILE}" "${EMPTY_FINALIZE_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	DONE_HANDLER_CB=test_12_done_handler \
 	FINALIZE_HANDLER_CB=test_12_finalize_handler \
 	SCHED_MAX_JOBS=3 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs '' &
 
 	wait "$!"
@@ -742,6 +775,10 @@ test_13()
 
 	rm -f "${SIGUSR1_RV_FILE}" "${SIGUSR1_PIDS_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	FINALIZE_HANDLER_CB=test_13_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=10 \
@@ -790,6 +827,10 @@ test_14()
 		"Missing completion record with active writer" \
 		"${jobs}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=8 \
 	SCHED_IDLE_TIMEOUT_S=3 \
@@ -840,16 +881,23 @@ test_15()
 
 	rm -f "${FINALIZE_RV_FILE}"
 
+	local \
+		SCHED_FAIL_MSG_CB=echo \
+		SCHED_FINALIZE_CB=finalize_handler \
+		JOB_DONE_CB=done_handler \
+		DO_JOB_CB=do_job_default \
+		FINALIZE_HANDLER_CB=test_15_finalize_handler
+
 	# Successful scheduler run: callback RV should become scheduler RV.
-	FINALIZE_HANDLER_CB=test_15_finalize_handler \
 	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs 'ok' &
 
 	wait "$!"
 	rv_success=$?
 
 	# Scheduler error: callback failure must not overwrite scheduler RV.
-	FINALIZE_HANDLER_CB=test_15_finalize_handler \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=30 \
 	SCHED_IDLE_TIMEOUT_S=2 \
@@ -904,7 +952,7 @@ test_16()
 		\
 		SCHED_FINALIZE_CB_def=finalize_handler \
 		DO_JOB_CB_def=test_16_do_job \
-		JOB_DONE_CB_def="${JOB_DONE_CB}" \
+		JOB_DONE_CB_def=done_handler \
 		SCHED_FAIL_MSG_CB_def=test_16_fail_msg_handler \
 		\
 		cb_list=" \
@@ -937,7 +985,10 @@ test_16()
 			fi
 		done
 
-		schedule_jobs '1' &
+		SCHED_MAX_JOBS=1 \
+		SCHED_TIMEOUT_S=3 \
+		SCHED_IDLE_TIMEOUT_S=2 \
+			schedule_jobs '1' &
 		wait "$!"
 		rv=$?
 
@@ -986,12 +1037,16 @@ test_17()
 	# them (means "use default") and must not be included as a bad value.
 	test_17_check_bad_value()
 	{
-		local var="${1}" bad_val="${2}" rv
+		local var="${1}" bad_val="${2}" rv \
+			SCHED_MAX_JOBS=1 \
+			SCHED_TIMEOUT_S=3 \
+			SCHED_IDLE_TIMEOUT_S=2
 
 		local "${var}=${bad_val}"
 
 		SCHED_FAIL_MSG_CB=test_17_fail_msg_handler \
 		SCHED_FINALIZE_CB=finalize_handler \
+		JOB_DONE_CB=done_handler \
 		DO_JOB_CB=test_17_do_job \
 			schedule_jobs '1' &
 
@@ -1095,9 +1150,13 @@ test_19()
 	ARGS_FILE="/tmp/sched.args.${TEST_NUM:?}.$$"
 	rm -f "${ARGS_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
 	DO_JOB_CB=test_19_do_job \
 	JOB_DONE_CB='' \
 	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs "${jobs}" foo bar &
 
 	wait "$!"
@@ -1201,6 +1260,9 @@ test_20()
 		jobs="${jobs} ${i}"
 	done
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 	SCHED_MAX_JOBS=20 \
 	SCHED_TIMEOUT_S=30 \
 	SCHED_IDLE_TIMEOUT_S=10 \
@@ -1264,6 +1326,9 @@ test_21()
 
 	rm -f "${STATUS_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 	DONE_HANDLER_CB=test_21_done_handler \
 	SCHED_MAX_JOBS=3 \
 	SCHED_TIMEOUT_S=20 \
@@ -1321,6 +1386,10 @@ test_22()
 
 	print_test_header 22 "FIFO disappearance during execution" "${jobs}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=20 \
 	SCHED_IDLE_TIMEOUT_S=10 \
@@ -1374,6 +1443,10 @@ test_23()
 	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	FINALIZE_HANDLER_CB=test_23_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=10 \
@@ -1425,6 +1498,10 @@ test_24()
 	TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	FINALIZE_HANDLER_CB=test_24_finalize_handler \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=3 \
@@ -1461,6 +1538,10 @@ test_25()
 
 	print_test_header 25 "Simultaneous global/idle timeout - global wins" "${jobs}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=2 \
 	SCHED_IDLE_TIMEOUT_S=2 \
@@ -1520,7 +1601,13 @@ test_28()
 
 	print_test_header 28 "FIFO cleanup after successful completion" "${jobs}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs "${jobs}" &
 
 	scheduler_pid=$!
@@ -1608,10 +1695,15 @@ test_29()
 
 		parent_pre="${mode}"
 
+		SCHED_FAIL_MSG_CB=echo \
+		SCHED_FINALIZE_CB=finalize_handler \
+		JOB_DONE_CB=done_handler \
 		DO_JOB_CB=test_29_do_job \
 		DONE_HANDLER_CB=test_29_done_handler \
 		FINALIZE_HANDLER_CB=test_29_finalize_handler \
 		SCHED_MAX_JOBS=2 \
+		SCHED_TIMEOUT_S=3 \
+		SCHED_IDLE_TIMEOUT_S=2 \
 			schedule_jobs 'ok ok ok' &
 
 		wait "$!"
@@ -1740,6 +1832,8 @@ test_30()
 
 	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
 	DO_JOB_CB=test_30_do_job \
 	JOB_DONE_CB=test_30_done_handler \
 	SCHED_MAX_JOBS=5 \
@@ -1811,6 +1905,8 @@ test_31()
 
 		rm -f "${INJECT_FILE}"
 
+		SCHED_FINALIZE_CB=finalize_handler \
+		JOB_DONE_CB=done_handler \
 		DO_JOB_CB=test_31_do_job \
 		SCHED_FAIL_MSG_CB=test_31_fail_msg_handler \
 		SPOOF_DONE_ID="${spoof_id}" \
@@ -1911,9 +2007,13 @@ test_32()
 
 	rm -f "${ARGS_FILE}"
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
 	DO_JOB_CB=test_32_do_job \
 	JOB_DONE_CB='' \
 	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs "${jobs}" '' 'a b' '*' '-x' c$'\n'd &
 
 	wait "$!"
@@ -1995,6 +2095,10 @@ test_33()
 		SIG_PIDS_FILE="/tmp/sched.sigintterm.pids.${TEST_NUM:?}.$$"
 
 	local \
+		SCHED_FAIL_MSG_CB=echo \
+		SCHED_FINALIZE_CB=finalize_handler \
+		JOB_DONE_CB=done_handler \
+		DO_JOB_CB=do_job_default \
 		FINALIZE_HANDLER_CB=test_33_finalize_handler \
 		SCHED_MAX_JOBS=2 \
 		SCHED_TIMEOUT_S=10 \
@@ -2091,11 +2195,15 @@ test_34()
 
 	start_time=$(date +%s)
 
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
 	DONE_HANDLER_CB=test_34_done_handler \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=20 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-	schedule_jobs "${jobs}" &
+		schedule_jobs "${jobs}" &
 	wait "$!"
 	rv=$?
 
@@ -2132,16 +2240,6 @@ FAIL="${red}FAIL${n_c}"
 
 
 RUN_TESTS="${*}"
-
-export -n \
-	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=do_job_default \
-	\
-	SCHED_TIMEOUT_S=3 \
-	SCHED_IDLE_TIMEOUT_S=2 \
-	SCHED_MAX_JOBS=1
 
 if [ -n "${RUN_TESTS}" ]; then
 	printf 'Scheduler tests\n'
