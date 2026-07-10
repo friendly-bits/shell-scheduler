@@ -46,8 +46,6 @@ is_valid_param() {
 }
 
 check_var_chars() {
-	local quiet
-	[ "${1}" = -q ] && { quiet=1; shift; }
 	case "${2}" in
 		''|*[!a-zA-Z0-9_]*) false ;;
 		*) : ;;
@@ -61,7 +59,7 @@ check_var_chars() {
 	} &&
 	return 0
 
-	[ -n "${quiet}" ] || sch_fail_msg "${3}${3:+": "}${1}${1:+ }'${2}' is empty string or contains incompatible characters."
+	sch_fail_msg "${3}${3:+": "}${1}${1:+ }'${2}' is empty string or contains incompatible characters."
 	return 1
 }
 
@@ -106,8 +104,10 @@ job_set_params() {
 job_get_params() {
 	local sch_me=job_get_params \
 		sch_param \
+		sch_job_id="${1}"
+
 	[ -n "${sch_job_id+x}" ] && shift
-	check_var_chars -q "job ID" "${sch_job_id}" "${sch_me}" || return 1
+	check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 	for sch_param; do
 		is_valid_param "${sch_param}" "${sch_me}" || return 1
 		eval "${sch_param}=\"\${SCH_JOB_${sch_job_id}_${sch_param}}\""
