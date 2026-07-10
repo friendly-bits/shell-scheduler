@@ -107,8 +107,6 @@ job_set_params() {
 
 	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
-	eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
-
 	for sch_pair; do
 		case "${sch_pair}" in
 			*=*) ;;
@@ -121,6 +119,7 @@ job_set_params() {
 		sch_val="${sch_pair#"${sch_param}="}"
 		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
 
+		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 		sch_is_included "${sch_param}" "${sch_cur_params}" ||
 		sch_append "SCH_JOB_PARAMS_${sch_job_id}" "${sch_param}" ||
 			return 1
