@@ -35,8 +35,31 @@
 
 ### Helpers
 
-is_valid_param() {
-	check_var_chars "param" "${1}" "${2}" || return 1
+sch_is_included() {
+	local delim="${3:-" "}"
+	case "${delim}${2}${delim}" in
+		*"${delim}${1}${delim}"*)
+			return 0 ;;
+		*)
+			return 1
+	esac
+}
+
+# 1: out var
+# 2: element
+# 3: cur list
+# 4 (optional): delim
+sch_rm_elem() {
+	local sre_out_var="${1}" sre_e="${2}" sre_d="${4:- }"
+	local sre_l="${sre_d}${3}${sre_d}"
+	sre_l="${sre_l%%"${sre_d}${sre_e}${sre_d}"*}${sre_d}${sre_l##*"${sre_d}${sre_e}${sre_d}"}"
+	sre_l="${sre_l%"${sre_l##*[!"${sre_d}"]}"}"
+	sre_l="${sre_l#"${sre_l%%[!"${sre_d}"]*}"}"
+	export -n "${sre_out_var}=${sre_l}"
+}
+
+sch_is_valid_param() {
+	sch_check_var_chars "param" "${1}" "${2}" || return 1
 	case "${1}" in
 		sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS)
 			sch_fail_msg "${2}${2:+": "}param '${1}' is reserved for internal use."
@@ -45,7 +68,7 @@ is_valid_param() {
 	:
 }
 
-check_var_chars() {
+sch_check_var_chars() {
 	case "${2}" in
 		''|*[!a-zA-Z0-9_]*) false ;;
 		*) : ;;
@@ -71,9 +94,9 @@ job_set_params() {
 		sch_pair \
 		sch_job_id="${1}"
 
-	[ -n "${sch_job_id+x}" ] && shift
+	[ -n "${1+x}" ] && shift
 
-	check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
+	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 
@@ -87,13 +110,11 @@ job_set_params() {
 
 		sch_param="${sch_pair%%=*}"
 		sch_val="${sch_pair#"${sch_param}="}"
-		is_valid_param "${sch_param}" "${sch_me}" || return 1
+		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
 
-		export -n "SCH_JOB_${sch_job_id}_${sch_param}=${sch_val}"
-		case " ${sch_cur_params} " in
-			*" ${sch_param} "*) : ;;
-			*) sch_cur_params="${sch_cur_params}${sch_cur_params:+ }${sch_param}"
-		esac
+		export -n "SCH_JOB_PARAM_${sch_job_id}_${sch_param}=${sch_val}"
+		sch_is_included "${sch_cur_params}" "${sch_param}" ||
+			sch_cur_params="${sch_cur_params}${sch_cur_params:+ }${sch_param}"
 	done
 	export -n "SCH_JOB_PARAMS_${sch_job_id}=${sch_cur_params}"
 }
@@ -104,13 +125,17 @@ job_set_params() {
 job_get_params() {
 	local sch_me=job_get_params \
 		sch_param \
+		sch_cur_params \
 		sch_job_id="${1}"
 
-	[ -n "${sch_job_id+x}" ] && shift
-	check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
+	[ -n "${1+x}" ] && shift
+	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
+	eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 	for sch_param; do
-		is_valid_param "${sch_param}" "${sch_me}" || return 1
-		eval "${sch_param}=\"\${SCH_JOB_${sch_job_id}_${sch_param}}\""
+		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
+		sch_is_included "${sch_param}" "${sch_cur_params}" ||
+			{ sch_fail_msg "Param '${sch_param}' was never registered for job '${sch_job_id}'."; return 1; }
+		eval "${sch_param}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
 	done
 	:
 }
@@ -263,7 +288,6 @@ process_done_record() {
 		_sch_remain_time_cs \
 		_sch_cur_time_cs \
 		_sch_running_pids \
-		sch_running_padded \
 		_sch_running_cnt \
 		sch_read_t_s \
 		sch_rem_time_var="${1:?}" \
@@ -295,24 +319,14 @@ process_done_record() {
 	sch_is_uint "${sch_done_pid}" &&
 	sch_is_uint "${sch_done_rv}" &&
 	[ -n "${sch_done_id}" ] &&
-	case " ${sch_job_ids} " in
-		*" ${sch_done_id} "*) : ;;
-		*) false ;;
-	esac ||
-	sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}'."
+	sch_is_included "${sch_done_id}" "${sch_job_ids}" ||
+		sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}'."
 
-	sch_running_padded=" ${_sch_running_pids} "
-	case "${sch_running_padded}" in
-		*" ${sch_done_pid} "*) ;;
-		*) sch_finalize 1 "Unknown PID '${sch_done_pid}'." ;;
-	esac
+	sch_is_included "${sch_done_pid}" "${_sch_running_pids}" ||
+		sch_finalize 1 "Unknown PID '${sch_done_pid}'."
 
 	# Remove done pid from list
-	_sch_running_pids="${sch_running_padded%%" ${sch_done_pid} "*} ${sch_running_padded##*" ${sch_done_pid} "}"
-
-	# Remove leading/trailing whitespaces
-	_sch_running_pids="${_sch_running_pids%"${_sch_running_pids##*[! ]}"}"
-	_sch_running_pids="${_sch_running_pids#"${_sch_running_pids%%[! ]*}"}"
+	sch_rm_elem _sch_running_pids "${sch_done_pid}" "${_sch_running_pids}"
 
 	_sch_running_cnt=$((_sch_running_cnt - 1))
 	export -n \
@@ -356,22 +370,24 @@ sch_fail_msg() {
 	fi
 }
 
-# 1: var name (for messages)
-# 2: value
-# 3: required(1/empty)
+# 1: var name
+# 2: required(1/empty)
 sch_check_cb() {
-	[ -z "${2}" ] && [ -z "${3}" ] && return 0
-	[ -z "${2}" ] && { sch_fail_msg "Required callback is missing (set via \${${1}})."; return 1; }
-	sch_is_cmd "${2}" || { sch_fail_msg "Invalid value of ${1} '${2}'."; return 1; }
+	local val
+	eval "val=\"\${${1}}\""
+	[ -z "${val}" ] && [ -z "${2}" ] && return 0
+	[ -z "${val}" ] && { sch_fail_msg "Required callback is missing (set via \${${1}})."; return 1; }
+	sch_is_cmd "${val}" || { sch_fail_msg "Invalid value of ${1} '${val}'."; return 1; }
 }
 
-# 1: var name (for messages)
-# 2: value
-# 3: required(1/empty)
+# 1: var name
+# 2: required(1/empty)
 sch_check_uint() {
-	[ -z "${2}" ] && [ -z "${3}" ] && return 0
-	sch_is_uint "${2}" && [ "${2}" -ge 1 ] ||
-		{ sch_fail_msg "Invalid value '${2}' of env var ${1}."; return 1; }
+	local val
+	eval "val=\"\${${1}}\""
+	[ -z "${val}" ] && [ -z "${2}" ] && return 0
+	sch_is_uint "${val}" && [ "${val}" -ge 1 ] ||
+		{ sch_fail_msg "Invalid value '${val}' of env var ${1}."; return 1; }
 }
 
 
@@ -407,16 +423,16 @@ schedule_jobs() {
 	# !!! Any additional arguments are passed as-is to user-defined ${DO_JOB_CB} via sch_start_job()
 
 	# Check callbacks
-	sch_check_cb SCHED_FAIL_MSG_CB "${SCHED_FAIL_MSG_CB}" &&
-	sch_check_cb SCHED_FINALIZE_CB "${SCHED_FINALIZE_CB}" &&
-	sch_check_cb DO_JOB_CB "${DO_JOB_CB}" required &&
-	sch_check_cb JOB_DONE_CB "${JOB_DONE_CB}" &&
-	sch_check_cb SCHED_DISPATCH_TICK_CB "${SCHED_DISPATCH_TICK_CB}" || return 1
+	sch_check_cb SCHED_FAIL_MSG_CB &&
+	sch_check_cb SCHED_FINALIZE_CB &&
+	sch_check_cb DO_JOB_CB required &&
+	sch_check_cb JOB_DONE_CB &&
+	sch_check_cb SCHED_DISPATCH_TICK_CB || return 1
 
 	# Check env vars
-	sch_check_uint SCHED_MAX_JOBS "${SCHED_MAX_JOBS}" 1 &&
-	sch_check_uint SCHED_TIMEOUT_S "${SCHED_TIMEOUT_S}" &&
-	sch_check_uint SCHED_IDLE_TIMEOUT_S "${SCHED_IDLE_TIMEOUT_S}" || return 1
+	sch_check_uint SCHED_MAX_JOBS required &&
+	sch_check_uint SCHED_TIMEOUT_S &&
+	sch_check_uint SCHED_IDLE_TIMEOUT_S || return 1
 
 	# Removing trailing '/'
 	sch_dir="${sch_dir%"${sch_dir##*[!/]}"}"
