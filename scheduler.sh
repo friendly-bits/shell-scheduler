@@ -35,6 +35,17 @@
 
 ### Helpers
 
+is_valid_param()
+{
+	check_var_chars "param" "${1}" "${2}" || return 1
+	case "${1}" in
+		ssj_*|DO_JOB_CB|SCHED_FAIL_MSG_CB|IFS)
+			sch_fail_msg "${2}${2:+": "}param '${1}' is reserved for internal use."
+			return 1
+	esac
+	:
+}
+
 check_var_chars()
 {
 	local quiet
@@ -76,7 +87,7 @@ job_set_param()
 
 	param="${pair%%=*}"
 	val="${pair#"${param}="}"
-	check_var_chars "param" "${param}" "${me}" || return 1
+	is_valid_param "${param}" "${me}" || return 1
 
 	export -n "SCH_JOB_${job_id}_${param}=${val}"
 	eval "SCH_JOB_PARAMS_${job_id}=\"\${SCH_JOB_PARAMS_${job_id}}\${SCH_JOB_PARAMS_${job_id}:+ }${param}\""
@@ -196,12 +207,7 @@ sch_start_job()
 	eval "ssj_params=\"\${SCH_JOB_PARAMS_${ssj_job_id}}\""
 	for ssj_param in ${ssj_params}
 	do
-		check_var_chars "param" "${ssj_param}" "${ssj_me}" || exit 1
-		case "${ssj_param}" in
-			ssj_*|DO_JOB_CB|SCHED_FAIL_MSG_CB|IFS)
-				sch_fail_msg "${ssj_me}: param '${ssj_param}' is reserved for internal use."
-				exit 1
-		esac
+		is_valid_param "${ssj_param}" "${ssj_me}" || exit 1
 		eval "export ${ssj_param}=\"\${SCH_JOB_${ssj_job_id}_${ssj_param}}\""
 	done
 
