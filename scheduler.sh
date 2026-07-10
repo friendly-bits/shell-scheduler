@@ -101,6 +101,7 @@ job_set_params() {
 	local sch_me=job_set_params \
 		sch_param sch_val sch_cur_params \
 		sch_pair \
+		sch_pair_seen \
 		sch_job_id="${1}"
 
 	[ -n "${1+x}" ] && shift
@@ -108,6 +109,7 @@ job_set_params() {
 	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	for sch_pair; do
+		sch_pair_seen=1
 		case "${sch_pair}" in
 			*=*) ;;
 			*)
@@ -125,7 +127,12 @@ job_set_params() {
 			return 1
 		export -n "SCH_JOB_PARAM_${sch_job_id}_${sch_param}=${sch_val}"
 	done
-	:
+
+	[ -n "${sch_pair_seen}" ] &&
+		return 0
+
+	sch_fail_msg "${sch_me}: no params specified."
+	return 1
 }
 
 # For each param <P> assigns corresponding param value to variable named <P>
@@ -135,18 +142,25 @@ job_get_params() {
 	local sch_me=job_get_params \
 		sch_param \
 		sch_cur_params \
+		sch_param_seen \
 		sch_job_id="${1}"
 
 	[ -n "${1+x}" ] && shift
 	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 	eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 	for sch_param; do
+		sch_param_seen=1
 		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
 		sch_is_included "${sch_param}" "${sch_cur_params}" ||
 			{ sch_fail_msg "Param '${sch_param}' was never registered for job '${sch_job_id}'."; return 1; }
 		eval "${sch_param}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
 	done
-	:
+
+	[ -n "${sch_param_seen}" ] &&
+		return 0
+
+	sch_fail_msg "${sch_me}: no params specified."
+	return 1
 }
 
 sch_is_uint() {
