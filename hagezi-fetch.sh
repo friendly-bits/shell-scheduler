@@ -11,24 +11,18 @@ SCHEDULER_LIB="${SCHEDULER_LIB:-./scheduler.sh}"
 
 # --- Job list: one numeric ID per list, per-job data via JOB_*_<id> ---
 
-export -n \
-	JOB_NAME_1=pro \
-	JOB_URL_1="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt" \
-	JOB_NAME_2=proplus \
-	JOB_URL_2="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus.txt" \
-	JOB_NAME_3=multi \
-	JOB_URL_3="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi.txt" \
-	JOB_NAME_4=tif \
-	JOB_URL_4="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.txt" \
-	JOB_NAME_5=invalid \
-	JOB_URL_5="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/invalid.txt" \
-	JOB_NAME_6=gambling \
-	JOB_URL_6="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling.txt"
+job_set_param pro      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt"
+job_set_param proplus  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus.txt"
+job_set_param multi    "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi.txt"
+job_set_param tif      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.txt"
+job_set_param invalid  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/invalid.txt"
+job_set_param gambling "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling.txt"
+
 
 JOBS_CNT=6
 SUCCESS_CNT=0
 
-ids="1 2 3 4 5 6"
+IDS="pro proplus multi tif invalid gambling"
 
 OUT_DIR="/tmp/lists"
 mkdir -p "${OUT_DIR}" || exit 1
@@ -39,14 +33,11 @@ mkdir -p "${OUT_DIR}" || exit 1
 # Downloads one list; returns wget's exit code.
 download_list()
 {
-	local id="${1}" name url rv
-
-	eval \
-		"name=\"\${JOB_NAME_${id}}\" \
-		url=\"\${JOB_URL_${id}}\""
+	local name="${1}" rv
 
 	printf 'Downloading: %s\n' "${name}"
 
+	# shellcheck disable=SC2154
 	wget -q -O "${OUT_DIR}/${name}.txt" "${url}"
 	rv=$?
 
@@ -60,9 +51,7 @@ download_list()
 #   per-job completion bookkeeping.
 job_done()
 {
-	local id="${1}" rv="${2}" name
-
-	eval "name=\"\${JOB_NAME_${id}}\""
+	local name="${1}" rv="${2}"
 
 	if [ "${rv}" = 0 ]
 	then
@@ -121,7 +110,7 @@ SCHED_FAIL_MSG_CB=sched_error \
 SCHED_FINALIZE_CB=finalize_dl \
 SCHED_MAX_JOBS=4 \
 SCHED_TIMEOUT_S=120 \
-	schedule_jobs "${ids}" &
+	schedule_jobs "${IDS}" &
 sched_pid=$!
 
 # Forward Ctrl-C/TERM as the scheduler's own cancellation signal (USR1), so
