@@ -29,6 +29,8 @@
 #                       Will be called like so:
 #                         <cmd> <job_id> <job_return_code>
 
+# SCHED_DISPATCH_TICK_CB  Optional, for testing only: called with <job_id> right after each job is dispatched in the initial scheduling loop.
+
 
 
 ### Helpers
@@ -340,7 +342,8 @@ schedule_jobs()
 	sch_check_cb SCHED_FAIL_MSG_CB "${SCHED_FAIL_MSG_CB}" &&
 	sch_check_cb SCHED_FINALIZE_CB "${SCHED_FINALIZE_CB}" &&
 	sch_check_cb DO_JOB_CB "${DO_JOB_CB}" required &&
-	sch_check_cb JOB_DONE_CB "${JOB_DONE_CB}" || return 1
+	sch_check_cb JOB_DONE_CB "${JOB_DONE_CB}" &&
+	sch_check_cb SCHED_DISPATCH_TICK_CB "${SCHED_DISPATCH_TICK_CB}" || return 1
 
 	# Check env vars
 	sch_check_uint SCHED_MAX_JOBS "${SCHED_MAX_JOBS}" 1 &&
@@ -405,6 +408,9 @@ schedule_jobs()
 		pid="${!}"
 
 		running_pids="${running_pids}${running_pids:+ }${pid}"
+
+		[ -z "${SCHED_DISPATCH_TICK_CB}" ] ||
+			"${SCHED_DISPATCH_TICK_CB}" "${id}"
 	done
 
 	[ -n "${had_f}" ] || set +f
