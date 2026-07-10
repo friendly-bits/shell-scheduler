@@ -291,16 +291,16 @@ For a real-world integration example, check out [`hagezi-fetch.sh`](hagezi-fetch
 Implementation highlights you will likely need in your own projects utilizing this library:
 
 ### 1. Passing Parameters to Jobs
-As explained in the [Job Parameters](#job-parameters) section above, this example stores job-specific parameters in variables named after the job ID **before starting the scheduler**, then uses the `eval` indirection pattern inside the **job execution callback** (`DO_JOB_CB`) to unpack them.
+As explained in the [Job Parameters](#job-parameters) section above, this example sets jobs-specific parameters via `job_set_param`. This parameters are then immediately available as variables inside the **job execution callback** (`DO_JOB_CB`).
 
 ```sh
-# Setup in main script
-export -n JOB_NAME_1=pro JOB_URL_1="https://..."
+# Job-specific parameters are assigned in the main script
+job_set_param pro "url=https://..."
 
 # Job execution callback
 download_list() {
-    local id="${1}" name url
-    eval "name=\"\${JOB_NAME_${id}}\" url=\"\${JOB_URL_${id}}\""
+    local name="${1}"
+    # Note: the ${url} variable is set by the scheduler before callback invocation, so this variable *must not be declared local or reset* inside the callback
     wget -q -O "${OUT_DIR}/${name}.txt" "${url}"
 }
 ```
@@ -311,7 +311,7 @@ Because the scheduler is designed to run asynchronously (in the background), ter
 To handle this reliably, the example script traps signals `INT` and `TERM` and translates these signals into `USR1` sent to the scheduler's PID. This ensures the scheduler's native cleanup path is triggered and the **scheduler termination callback** (`SCHED_FINALIZE_CB`) is invoked and gets the chance to perform application-specific cleanup and/or to kill orphaned child processes, regardless of whether the interruption came from `Ctrl-C` or a direct `kill` command. The scheduler behaves identically when receiving signals `USR1`, `INT`, or `TERM`, except it exits with code `83` for `USR1` and with code `84` for `INT` or `TERM`.
 
 ```sh
-schedule_jobs "${ids}" &
+schedule_jobs "${IDS}" &
 sched_pid=$!
 
 trap '
