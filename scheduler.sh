@@ -72,7 +72,7 @@ check_var_chars()
 job_set_param()
 {
 	local me=job_set_param \
-		param val \
+		param val cur_params \
 		job_id="${1}" \
 		pair="${2}"
 
@@ -90,7 +90,11 @@ job_set_param()
 	is_valid_param "${param}" "${me}" || return 1
 
 	export -n "SCH_JOB_${job_id}_${param}=${val}"
-	eval "SCH_JOB_PARAMS_${job_id}=\"\${SCH_JOB_PARAMS_${job_id}}\${SCH_JOB_PARAMS_${job_id}:+ }${param}\""
+	eval "cur_params=\"\${SCH_JOB_PARAMS_${job_id}}\""
+	case " ${cur_params} " in
+		*" ${param} "*) : ;;
+		*) export -n "SCH_JOB_PARAMS_${job_id}=${cur_params}${cur_params:+ }${param}"
+	esac
 }
 
 sch_is_uint()
