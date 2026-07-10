@@ -35,19 +35,17 @@
 
 ### Helpers
 
-is_valid_param()
-{
+is_valid_param() {
 	check_var_chars "param" "${1}" "${2}" || return 1
 	case "${1}" in
-		ssj_*|DO_JOB_CB|SCHED_FAIL_MSG_CB|IFS)
+		sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS)
 			sch_fail_msg "${2}${2:+": "}param '${1}' is reserved for internal use."
 			return 1
 	esac
 	:
 }
 
-check_var_chars()
-{
+check_var_chars() {
 	local quiet
 	[ "${1}" = -q ] && { quiet=1; shift; }
 	case "${2}" in
@@ -68,40 +66,58 @@ check_var_chars()
 }
 
 # 1: job ID
-# 2: <param=value>
-job_set_param()
-{
-	local me=job_set_param \
-		param val cur_params \
-		job_id="${1}" \
-		pair="${2}"
+# 2: any number of <param=value> pairs
+job_set_params() {
+	local sch_me=job_set_params \
+		sch_param sch_val sch_cur_params \
+		sch_pair \
+		sch_job_id="${1}"
 
-	check_var_chars "job ID" "${job_id}" "${me}" || return 1
+	[ -n "${sch_job_id+x}" ] && shift
 
-	case "${pair}" in
-		*=*) ;;
-		*)
-			sch_fail_msg "${me}: Invalid key-value pair '${pair}'."
-			return 1
-	esac
+	check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
-	param="${pair%%=*}"
-	val="${pair#"${param}="}"
-	is_valid_param "${param}" "${me}" || return 1
+	eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 
-	export -n "SCH_JOB_${job_id}_${param}=${val}"
-	eval "cur_params=\"\${SCH_JOB_PARAMS_${job_id}}\""
-	case " ${cur_params} " in
-		*" ${param} "*) : ;;
-		*) export -n "SCH_JOB_PARAMS_${job_id}=${cur_params}${cur_params:+ }${param}"
-	esac
+	for sch_pair; do
+		case "${sch_pair}" in
+			*=*) ;;
+			*)
+				sch_fail_msg "${sch_me}: Invalid key-value pair '${sch_pair}'."
+				return 1
+		esac
+
+		sch_param="${sch_pair%%=*}"
+		sch_val="${sch_pair#"${sch_param}="}"
+		is_valid_param "${sch_param}" "${sch_me}" || return 1
+
+		export -n "SCH_JOB_${sch_job_id}_${sch_param}=${sch_val}"
+		case " ${sch_cur_params} " in
+			*" ${sch_param} "*) : ;;
+			*) sch_cur_params="${sch_cur_params}${sch_cur_params:+ }${sch_param}"
+		esac
+	done
+	export -n "SCH_JOB_PARAMS_${sch_job_id}=${sch_cur_params}"
 }
 
-sch_is_uint()
-{
+# For each param <P> assigns corresponding param value to variable named <P>
+# 1: job ID
+# 2: list of params
+job_get_params() {
+	local sch_me=job_get_params \
+		sch_param \
+	[ -n "${sch_job_id+x}" ] && shift
+	check_var_chars -q "job ID" "${sch_job_id}" "${sch_me}" || return 1
+	for sch_param; do
+		is_valid_param "${sch_param}" "${sch_me}" || return 1
+		eval "${sch_param}=\"\${SCH_JOB_${sch_job_id}_${sch_param}}\""
+	done
+	:
+}
+
+sch_is_uint() {
 	local _v
-	for _v in "${@}"
-	do
+	for _v; do
 		case "${_v}" in
 			''|*[!0-9]*) return 1
 		esac
@@ -109,8 +125,7 @@ sch_is_uint()
 	:
 }
 
-sch_is_cmd()
-{
+sch_is_cmd() {
 	command -v "${1}" 1>/dev/null 2>&1
 }
 
@@ -146,13 +161,11 @@ sch_get_uptime_cs() {
 
 # Get PID of current shell process
 # 1 - var name for output
-sch_get_cur_pid()
-{
+sch_get_cur_pid() {
 	local __pid line
 	export -n "${1:?}="
 
-	while IFS= read -r line
-	do
+	while IFS= read -r line; do
 		case "${line}" in
 			Pid:*)
 				__pid="${line##*[^0-9]}"
@@ -165,194 +178,176 @@ sch_get_cur_pid()
 	export -n "${1}=${__pid}"
 }
 
-sch_finalize()
-{
-	local cb_rv rv="${1}"
+sch_finalize() {
+	local sch_cb_rv sch_rv="${1}"
 
 	trap ':' USR1 INT TERM
 
-	[ -n "${2}" ] && [ "${rv}" != 0 ] && sch_fail_msg "${2}"
+	[ -n "${2}" ] && [ "${sch_rv}" != 0 ] && sch_fail_msg "${2}"
 
 	exec 3>&-
-	rm -f "${sched_ipc_fifo}"
+	rm -f "${sch_ipc_fifo}"
 
 	[ -z "${SCHED_FINALIZE_CB}" ] ||
-		"${SCHED_FINALIZE_CB}" "${rv}" "${running_pids}" ||
+		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" ||
 		{
-			cb_rv=${?}
-			[ "${rv}" = 0 ] && rv="${cb_rv}"
+			sch_cb_rv=${?}
+			[ "${sch_rv}" = 0 ] && sch_rv="${sch_cb_rv}"
 		}
 
-	exit "${rv}"
+	exit "${sch_rv}"
 }
 
-sch_start_job()
-{
+sch_start_job() {
 	local \
-		ssj_me=sch_start_job \
-		ssj_job_pid \
-		ssj_rv \
-		ssj_param \
-		ssj_params \
-		ssj_job_id="${1:?}"
+		sch_job_pid \
+		sch_job_rv \
+		sch_job_id="${1:?}"
 
 	shift
 
 	trap '
-		ssj_rv=${?}
-		printf "%s %s %s\n" "${ssj_job_pid}" "${ssj_rv}" "${ssj_job_id}" >&3 2>/dev/null
-		exit "${ssj_rv}"
+		sch_job_rv=${?}
+		printf "%s %s %s\n" "${sch_job_pid}" "${sch_job_rv}" "${sch_job_id}" >&3 2>/dev/null
+		exit "${sch_job_rv}"
 	' EXIT
 
-	sch_get_cur_pid ssj_job_pid || exit 1
+	sch_get_cur_pid sch_job_pid || exit 1
 
-	# Fetch job params
-	check_var_chars -q "job ID" "${ssj_job_id}" "${ssj_me}" &&
-	eval "ssj_params=\"\${SCH_JOB_PARAMS_${ssj_job_id}}\""
-	for ssj_param in ${ssj_params}
-	do
-		is_valid_param "${ssj_param}" "${ssj_me}" || exit 1
-		eval "export ${ssj_param}=\"\${SCH_JOB_${ssj_job_id}_${ssj_param}}\""
-	done
-
-	"${DO_JOB_CB:?}" "${ssj_job_id}" "${@}"
+	"${DO_JOB_CB:?}" "${sch_job_id}" "${@}"
 	exit "${?}"
 }
 
 # 1 = var name
-refresh_remaining_time() 
-{
-	get_remaining_time "${1}" || sch_finalize "${?}"
+refresh_remain_time()  {
+	get_remain_time "${1}" || sch_finalize "${?}"
 }
 
-# Sets var named $1 to remaining time to ${PROC_TIMEOUT_S} or to ${IDLE_TIMEOUT_S}, whichever is lower
-# If timeout is hit, returns code ${SCHED_RV_GLOBAL_TIMEOUT} or ${SCHED_RV_IDLE_TIMEOUT}
+# Sets var named $1 to remaining time to ${SCH_PROC_TIMEOUT_S} or to ${SCH_IDLE_TIMEOUT_S}, whichever is lower
+# If timeout is hit, returns code ${SCH_RV_GLOBAL_TIMEOUT} or ${SCH_RV_IDLE_TIMEOUT}
 # 1 - var name to output remaining time
-get_remaining_time()
-{
-	local gt_cur_time_cs gt_total_time_cs gt_remaining_time_cs idle_remaining_time_cs rv
+get_remain_time() {
+	local gt_cur_time_cs gt_total_time_cs gt_remain_time_cs gt_idle_remain_time_cs rv
 	export -n "${1}"=0
 
 	sch_get_uptime_cs gt_cur_time_cs || return 1
-	gt_total_time_cs=$((gt_cur_time_cs - SCHED_INIT_UPTIME_CS))
+	gt_total_time_cs=$((gt_cur_time_cs - SCH_INIT_UPTIME_CS))
 
-	gt_remaining_time_cs=$((PROC_TIMEOUT_S*100 - gt_total_time_cs))
-	idle_remaining_time_cs=$(( IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-LAST_PROGRESS_TIME_CS) ))
+	gt_remain_time_cs=$((SCH_PROC_TIMEOUT_S*100 - gt_total_time_cs))
+	gt_idle_remain_time_cs=$(( SCH_IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-SCH_LAST_PROGRESS_TIME_CS) ))
 
-	if [ ! "${gt_remaining_time_cs}" -gt 0 ]
+	if [ ! "${gt_remain_time_cs}" -gt 0 ]
 	then
-		sch_fail_msg "Processing timeout (${PROC_TIMEOUT_S} s) for scheduler (PID: ${SCHEDULER_PID})."
-		rv="${SCHED_RV_GLOBAL_TIMEOUT}"
-	elif [ ! "${idle_remaining_time_cs}" -gt 0 ]
+		sch_fail_msg "Processing timeout (${SCH_PROC_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
+		rv="${SCH_RV_GLOBAL_TIMEOUT}"
+	elif [ ! "${gt_idle_remain_time_cs}" -gt 0 ]
 	then
-		sch_fail_msg "Idle timeout (${IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCHEDULER_PID})."
-		rv="${SCHED_RV_IDLE_TIMEOUT}"
+		sch_fail_msg "Idle timeout (${SCH_IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
+		rv="${SCH_RV_IDLE_TIMEOUT}"
 	fi
 
-	if [ "${idle_remaining_time_cs}" -lt "${gt_remaining_time_cs}" ]; then
-		gt_remaining_time_cs="${idle_remaining_time_cs}"
+	if [ "${gt_idle_remain_time_cs}" -lt "${gt_remain_time_cs}" ]; then
+		gt_remain_time_cs="${gt_idle_remain_time_cs}"
 	fi
 
-	export -n "${1}=${gt_remaining_time_cs}"
+	export -n "${1}=${gt_remain_time_cs}"
 
 	return "${rv:-0}"
 }
 
-process_done_record()
-{
+process_done_record() {
 	local \
-		done_pid \
-		done_rv \
-		done_id \
-		_remaining_time_cs \
-		_cur_time_cs \
-		_running_pids \
-		_running_padded \
-		_running_cnt \
-		rem_time_var="${1:?}" \
-		pids_var="${2:?}" \
-		running_cnt_var="${3:?}" \
-		last_progress_time_var="${4:?}" \
-		job_ids="${5:?}" \
-		ipc_fifo="${6:?}" \
-		job_done_cb="${7}"
+		sch_done_pid \
+		sch_done_rv \
+		sch_done_id \
+		_sch_remain_time_cs \
+		_sch_cur_time_cs \
+		_sch_running_pids \
+		sch_running_padded \
+		_sch_running_cnt \
+		sch_read_t_s \
+		sch_rem_time_var="${1:?}" \
+		sch_pids_var="${2:?}" \
+		sch_running_cnt_var="${3:?}" \
+		sch_last_progr_time_var="${4:?}" \
+		sch_job_ids="${5:?}" \
+		sch_ipc_fifo="${6:?}" \
+		sch_job_done_cb="${7}"
 
 	eval \
-		"_remaining_time_cs=\"\${${rem_time_var}}\"" \
-		"_running_pids=\"\${${pids_var}}\"" \
-		"_running_cnt=\"\${${running_cnt_var}}\""
+		"_sch_remain_time_cs=\"\${${sch_rem_time_var}}\"" \
+		"_sch_running_pids=\"\${${sch_pids_var}}\"" \
+		"_sch_running_cnt=\"\${${sch_running_cnt_var}}\""
 
-	[ -e "${ipc_fifo}" ] ||
-		sch_finalize 1 "FIFO file '${ipc_fifo}' does not exist."
+	[ -e "${sch_ipc_fifo}" ] ||
+		sch_finalize 1 "FIFO file '${sch_ipc_fifo}' does not exist."
 
-	local _read_t_s=$(( (_remaining_time_cs + 99) / 100 ))
-	[ "${_read_t_s}" -gt 0 ] &&
-	read -t "${_read_t_s}" -r done_pid done_rv done_id < "${ipc_fifo}"
+	sch_read_t_s=$(( (_sch_remain_time_cs + 99) / 100 ))
+	[ "${sch_read_t_s}" -gt 0 ] &&
+	read -t "${sch_read_t_s}" -r sch_done_pid sch_done_rv sch_done_id < "${sch_ipc_fifo}"
 
-	refresh_remaining_time "${rem_time_var}"
+	refresh_remain_time "${sch_rem_time_var}"
 
 	# Empty completion record: read -t timed out with nothing to report
 	# Next call to process_done_record() will trigger timeout
-	[ -n "${done_pid}${done_rv}${done_id}" ] || return 0
+	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] || return 0
 
-	sch_is_uint "${done_pid}" &&
-	sch_is_uint "${done_rv}" &&
-	[ -n "${done_id}" ] &&
-	case " ${job_ids} " in
-		*" ${done_id} "*) : ;;
+	sch_is_uint "${sch_done_pid}" &&
+	sch_is_uint "${sch_done_rv}" &&
+	[ -n "${sch_done_id}" ] &&
+	case " ${sch_job_ids} " in
+		*" ${sch_done_id} "*) : ;;
 		*) false ;;
 	esac ||
-	sch_finalize 1 "Malformed completion record: either bad PID '${done_pid}' or bad RV '${done_rv}' or bad job ID '${done_id}'."
+	sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}'."
 
-	_running_padded=" ${_running_pids} "
-	case "${_running_padded}" in
-		*" ${done_pid} "*) ;;
-		*) sch_finalize 1 "Unknown PID '${done_pid}'." ;;
+	sch_running_padded=" ${_sch_running_pids} "
+	case "${sch_running_padded}" in
+		*" ${sch_done_pid} "*) ;;
+		*) sch_finalize 1 "Unknown PID '${sch_done_pid}'." ;;
 	esac
 
 	# Remove done pid from list
-	_running_pids="${_running_padded%%" ${done_pid} "*} ${_running_padded##*" ${done_pid} "}"
+	_sch_running_pids="${sch_running_padded%%" ${sch_done_pid} "*} ${sch_running_padded##*" ${sch_done_pid} "}"
 
 	# Remove leading/trailing whitespaces
-	_running_pids="${_running_pids%"${_running_pids##*[! ]}"}"
-	_running_pids="${_running_pids#"${_running_pids%%[! ]*}"}"
+	_sch_running_pids="${_sch_running_pids%"${_sch_running_pids##*[! ]}"}"
+	_sch_running_pids="${_sch_running_pids#"${_sch_running_pids%%[! ]*}"}"
 
-	_running_cnt=$((_running_cnt - 1))
+	_sch_running_cnt=$((_sch_running_cnt - 1))
 	export -n \
-		"${running_cnt_var}=${_running_cnt}" \
-		"${pids_var}=${_running_pids}"
+		"${sch_running_cnt_var}=${_sch_running_cnt}" \
+		"${sch_pids_var}=${_sch_running_pids}"
 
-	sch_get_uptime_cs _cur_time_cs || sch_finalize 1
-	export -n "${last_progress_time_var}=${_cur_time_cs}"
+	sch_get_uptime_cs _sch_cur_time_cs || sch_finalize 1
+	export -n "${sch_last_progr_time_var}=${_sch_cur_time_cs}"
 
-	[ -z "${job_done_cb}" ] ||
-	"${job_done_cb}" "${done_id}" "${done_rv}" ||
+	[ -z "${sch_job_done_cb}" ] ||
+	"${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
 		sch_finalize ${?}
 
 	return 0
 }
 
 # Convert any mix of spaces/tabs/newlines to single-space separators
-sch_normalize_ids()
-{
+sch_normalize_ids() {
 	local \
-		had_f \
+		sch_had_f \
 		IFS=" "$'\t'$'\n' \
 		out_var="${1}"
 
 	case "${-}" in
-		*f*) had_f=1 ;;
+		*f*) sch_had_f=1 ;;
 	esac
 
 	set -f
 	set -- ${2}
 	IFS=" "
 	export -n "${out_var}=${*}"
-	[ -n "${had_f}" ] || set +f
+	[ -n "${sch_had_f}" ] || set +f
 }
 
-sch_fail_msg()
-{
+sch_fail_msg() {
 	if [ -n "${SCHED_FAIL_MSG_CB}" ] && sch_is_cmd "${SCHED_FAIL_MSG_CB}"
 	then
 		"${SCHED_FAIL_MSG_CB}" "${@}"
@@ -364,8 +359,7 @@ sch_fail_msg()
 # 1: var name (for messages)
 # 2: value
 # 3: required(1/empty)
-sch_check_cb()
-{
+sch_check_cb() {
 	[ -z "${2}" ] && [ -z "${3}" ] && return 0
 	[ -z "${2}" ] && { sch_fail_msg "Required callback is missing (set via \${${1}})."; return 1; }
 	sch_is_cmd "${2}" || { sch_fail_msg "Invalid value of ${1} '${2}'."; return 1; }
@@ -374,8 +368,7 @@ sch_check_cb()
 # 1: var name (for messages)
 # 2: value
 # 3: required(1/empty)
-sch_check_uint()
-{
+sch_check_uint() {
 	[ -z "${2}" ] && [ -z "${3}" ] && return 0
 	sch_is_uint "${2}" && [ "${2}" -ge 1 ] ||
 		{ sch_fail_msg "Invalid value '${2}' of env var ${1}."; return 1; }
@@ -383,32 +376,31 @@ sch_check_uint()
 
 
 ### Entry point
-schedule_jobs()
-{
+schedule_jobs() {
 	local \
-		SCHED_RV_IDLE_TIMEOUT=81 \
-		SCHED_RV_GLOBAL_TIMEOUT=82 \
-		SCHED_RV_USR1=83 \
-		SCHED_RV_INT_TERM=84
+		SCH_RV_IDLE_TIMEOUT=81 \
+		SCH_RV_GLOBAL_TIMEOUT=82 \
+		SCH_RV_USR1=83 \
+		SCH_RV_INT_TERM=84
 
 	local \
 		IFS=" "$'\t'$'\n' \
-		SCHEDULER_PID \
-		remaining_time_cs \
-		SCHED_INIT_UPTIME_CS \
-		id \
-		pid \
-		running_pids \
-		running_jobs_cnt=0 \
-		LAST_PROGRESS_TIME_CS \
-		sched_ipc_fifo \
-		sched_dir="${SCHED_DIR:-/tmp}" \
-		PROC_TIMEOUT_S="${SCHED_TIMEOUT_S:-900}" \
-		IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-300}" \
+		SCH_PID \
+		sch_remain_time_cs \
+		SCH_INIT_UPTIME_CS \
+		sch_id \
+		sch_pid \
+		sch_running_jobs_cnt=0 \
+		sch_ipc_fifo \
+		sch_dir="${SCHED_DIR:-/tmp}" \
+		SCH_RUNNING_PIDS \
+		SCH_LAST_PROGRESS_TIME_CS \
+		SCH_PROC_TIMEOUT_S="${SCHED_TIMEOUT_S:-900}" \
+		SCH_IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-300}" \
 		\
-		job_ids="${1?}"
+		sch_job_ids="${1?}"
 	
-	: "${remaining_time_cs}" # Silence shellcheck warning
+	: "${sch_remain_time_cs}" # Silence shellcheck warning
 
 	shift 1
 
@@ -427,87 +419,86 @@ schedule_jobs()
 	sch_check_uint SCHED_IDLE_TIMEOUT_S "${SCHED_IDLE_TIMEOUT_S}" || return 1
 
 	# Removing trailing '/'
-	sched_dir="${sched_dir%"${sched_dir##*[!/]}"}"
+	sch_dir="${sch_dir%"${sch_dir##*[!/]}"}"
 
-	[ -n "${sched_dir}" ] ||
+	[ -n "${sch_dir}" ] ||
 		{ sch_fail_msg "Invalid value '${SCHED_DIR}' of env var SCHED_DIR."; return 1; }
 
-	# Convert ${job_ids} to space-separated list
-	sch_normalize_ids job_ids "${job_ids}" || return 1
+	# Convert ${sch_job_ids} to space-separated list
+	sch_normalize_ids sch_job_ids "${sch_job_ids}" || return 1
 
 	# Main logic
 
-	sch_get_uptime_cs SCHED_INIT_UPTIME_CS &&
-	sch_get_cur_pid SCHEDULER_PID ||
+	sch_get_uptime_cs SCH_INIT_UPTIME_CS &&
+	sch_get_cur_pid SCH_PID ||
 		return 1
 
-	LAST_PROGRESS_TIME_CS="${SCHED_INIT_UPTIME_CS}"
+	SCH_LAST_PROGRESS_TIME_CS="${SCH_INIT_UPTIME_CS}"
 
-	sched_ipc_fifo="${sched_dir}/sched_ipc_${SCHEDULER_PID}"
+	sch_ipc_fifo="${sch_dir}/sched_ipc_${SCH_PID}"
 
-	mkdir -p "${sched_dir}" &&
-	rm -f "${sched_ipc_fifo}" &&
-	mkfifo "${sched_ipc_fifo}" &&
-	exec 3<>"${sched_ipc_fifo}" ||
-		sch_finalize 1 "Failed to create FIFO '${sched_ipc_fifo}'."
+	mkdir -p "${sch_dir}" &&
+	rm -f "${sch_ipc_fifo}" &&
+	mkfifo "${sch_ipc_fifo}" &&
+	exec 3<>"${sch_ipc_fifo}" ||
+		sch_finalize 1 "Failed to create FIFO '${sch_ipc_fifo}'."
 
-	trap 'sch_finalize "${SCHED_RV_USR1}"' USR1
-	trap 'sch_finalize "${SCHED_RV_INT_TERM}"' INT TERM
+	trap 'sch_finalize "${SCH_RV_USR1}"' USR1
+	trap 'sch_finalize "${SCH_RV_INT_TERM}"' INT TERM
 
-	local had_f=
+	local sch_had_f=
 	case "${-}" in
-		*f*) had_f=1 ;;
+		*f*) sch_had_f=1 ;;
 	esac
 	set -f
 
-	for id in ${job_ids}
-	do
-		[ -n "${had_f}" ] || set +f
-		while [ "${running_jobs_cnt}" -ge "${SCHED_MAX_JOBS}" ] &&
-			[ -e "${sched_ipc_fifo}" ]
+	for sch_id in ${sch_job_ids}; do
+		[ -n "${sch_had_f}" ] || set +f
+		while [ "${sch_running_jobs_cnt}" -ge "${SCHED_MAX_JOBS}" ] &&
+			[ -e "${sch_ipc_fifo}" ]
 		do
 			process_done_record \
-				remaining_time_cs \
-				running_pids \
-				running_jobs_cnt \
-				LAST_PROGRESS_TIME_CS \
-				"${job_ids}" \
-				"${sched_ipc_fifo}" \
+				sch_remain_time_cs \
+				SCH_RUNNING_PIDS \
+				sch_running_jobs_cnt \
+				SCH_LAST_PROGRESS_TIME_CS \
+				"${sch_job_ids}" \
+				"${sch_ipc_fifo}" \
 				"${JOB_DONE_CB}"
 		done
 
-		refresh_remaining_time remaining_time_cs
+		refresh_remain_time sch_remain_time_cs
 
-		running_jobs_cnt=$((running_jobs_cnt + 1))
+		sch_running_jobs_cnt=$((sch_running_jobs_cnt + 1))
 
-		sch_start_job "${id}" "${@}" &
-		pid="${!}"
+		sch_start_job "${sch_id}" "${@}" &
+		sch_pid="${!}"
 
-		running_pids="${running_pids}${running_pids:+ }${pid}"
+		SCH_RUNNING_PIDS="${SCH_RUNNING_PIDS}${SCH_RUNNING_PIDS:+ }${sch_pid}"
 
 		[ -z "${SCHED_DISPATCH_TICK_CB}" ] ||
-			"${SCHED_DISPATCH_TICK_CB}" "${id}"
+			"${SCHED_DISPATCH_TICK_CB}" "${sch_id}"
 	done
 
-	[ -n "${had_f}" ] || set +f
+	[ -n "${sch_had_f}" ] || set +f
 
-	while [ "${running_jobs_cnt}" -gt 0 ] &&
-		[ -e "${sched_ipc_fifo}" ]
+	while [ "${sch_running_jobs_cnt}" -gt 0 ] &&
+		[ -e "${sch_ipc_fifo}" ]
 	do
 		process_done_record \
-			remaining_time_cs \
-			running_pids \
-			running_jobs_cnt \
-			LAST_PROGRESS_TIME_CS \
-			"${job_ids}" \
-			"${sched_ipc_fifo}" \
+			sch_remain_time_cs \
+			SCH_RUNNING_PIDS \
+			sch_running_jobs_cnt \
+			SCH_LAST_PROGRESS_TIME_CS \
+			"${sch_job_ids}" \
+			"${sch_ipc_fifo}" \
 			"${JOB_DONE_CB}"
 	done
 
-	[ "${running_jobs_cnt}" = 0 ] ||
+	[ "${sch_running_jobs_cnt}" = 0 ] ||
 	{
-		refresh_remaining_time remaining_time_cs
-		sch_finalize 1 "Not all jobs are done: running_jobs_cnt=${running_jobs_cnt}"
+		refresh_remain_time sch_remain_time_cs
+		sch_finalize 1 "Not all jobs are done: sch_running_jobs_cnt=${sch_running_jobs_cnt}"
 	}
 
 	sch_finalize 0
