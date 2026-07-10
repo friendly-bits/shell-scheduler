@@ -44,7 +44,7 @@ check_var_chars()
 		*) : ;;
 	esac &&
 	{
-		[ "${1}" != key ] ||
+		[ "${1}" != param ] ||
 		case "${2}" in
 			[a-zA-Z_]*) : ;;
 			*) false
@@ -62,7 +62,7 @@ job_set_param()
 {
 	local me=job_set_param \
 		param val \
-		job_id="${1}"
+		job_id="${1}" \
 		pair="${2}"
 
 	check_var_chars "job ID" "${job_id}" "${me}" || return 1
@@ -174,31 +174,38 @@ sch_finalize()
 sch_start_job()
 {
 	local \
-		me=sch_start_job \
-		job_pid rv \
-		param params \
-		job_id="${1:?}"
+		ssj_me=sch_start_job \
+		ssj_job_pid \
+		ssj_rv \
+		ssj_param \
+		ssj_params \
+		ssj_job_id="${1:?}"
 
 	shift
 
 	trap '
-		rv=${?}
-		printf "%s %s %s\n" "${job_pid}" "${rv}" "${job_id}" >&3 2>/dev/null
-		exit "${rv}"
+		ssj_rv=${?}
+		printf "%s %s %s\n" "${ssj_job_pid}" "${ssj_rv}" "${ssj_job_id}" >&3 2>/dev/null
+		exit "${ssj_rv}"
 	' EXIT
 
-	sch_get_cur_pid job_pid || exit 1
+	sch_get_cur_pid ssj_job_pid || exit 1
 
 	# Fetch job params
-	check_var_chars -q "job ID" "${job_id}" "${me}" &&
-	eval "params=\"\${SCH_JOB_PARAMS_${job_id}}\""
-	for param in ${params}
+	check_var_chars -q "job ID" "${ssj_job_id}" "${ssj_me}" &&
+	eval "ssj_params=\"\${SCH_JOB_PARAMS_${ssj_job_id}}\""
+	for ssj_param in ${ssj_params}
 	do
-		check_var_chars "param" "${param}" "${me}" || exit 1
-		eval "export ${param}=\"\${SCH_JOB_${job_id}_${param}}\""
+		check_var_chars "param" "${ssj_param}" "${ssj_me}" || exit 1
+		case "${ssj_param}" in
+			ssj_me|ssj_job_pid|ssj_rv|ssj_param|ssj_params|ssj_job_id|DO_JOB_CB|SCHED_FAIL_MSG_CB)
+				sch_fail_msg "${me}: param '${ssj_param}' is reserved for internal use."
+				exit 1
+		esac
+		eval "export ${ssj_param}=\"\${SCH_JOB_${ssj_job_id}_${ssj_param}}\""
 	done
 
-	"${DO_JOB_CB:?}" "${job_id}" "${@}"
+	"${DO_JOB_CB:?}" "${ssj_job_id}" "${@}"
 	exit "${?}"
 }
 
