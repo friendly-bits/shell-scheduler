@@ -196,7 +196,8 @@ job_set_param B "extension=.gz"
 # Start the scheduler
 DO_JOB_CB=process_file \
 SCHED_MAX_JOBS=3 \
-    schedule_jobs "A B C"
+    schedule_jobs "A B C" &
+wait ${!}
 ```
 
 Output:
