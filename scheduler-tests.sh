@@ -2212,6 +2212,15 @@ test_36()
 		schedule_pid \
 		all_ok=1
 
+	local \
+		SCHED_FAIL_MSG_CB=echo \
+		SCHED_FINALIZE_CB=finalize_handler \
+		JOB_DONE_CB=done_handler \
+		DO_JOB_CB=do_job_default \
+		SCHED_MAX_JOBS=1 \
+		SCHED_TIMEOUT_S=12 \
+		SCHED_IDLE_TIMEOUT_S=10
+
 	print_test_header 36 "Prompt termination on SIGUSR1/SIGINT/SIGTERM" "hang"
 
 	for sig in USR1 INT TERM
@@ -2221,23 +2230,40 @@ test_36()
 			INT|TERM) expect_rv=84 ;;
 		esac
 
-		SCHED_FAIL_MSG_CB=echo \
-		SCHED_FINALIZE_CB=finalize_handler \
-		JOB_DONE_CB=done_handler \
-		DO_JOB_CB=do_job_default \
-		SCHED_MAX_JOBS=1 \
-		SCHED_TIMEOUT_S=30 \
-		SCHED_IDLE_TIMEOUT_S=30 \
-			schedule_jobs 'hang' &
-
-		schedule_pid=$!
-
-		sleep 1
-
 		start_s=$(date +%s)
-		kill "-${sig}" "${schedule_pid}"
 
-		wait "${schedule_pid}"
+		case "${sig}" in
+			USR1|TERM)
+				# Send TERM signal to background scheduler process
+				(
+					schedule_jobs 'hang' &
+					schedule_pid=$!
+
+					sleep 1
+
+					kill "-${sig}" "${schedule_pid}"
+
+					wait "${schedule_pid}"
+				)
+				;;
+			INT)
+				# Send INT signal to foreground scheduler process
+				(
+					local pid killer_pid
+
+					get_test_pid pid
+					(
+						sleep 1
+						kill "-${sig}" "${pid}"
+					) &
+					killer_pid=${!}
+
+					trap 'kill "${killer_pid}" 2>/dev/null' EXIT
+
+					schedule_jobs 'hang'
+				)
+		esac
+
 		sched_rv=$?
 		end_s=$(date +%s)
 
@@ -2418,6 +2444,66 @@ test_39()
 		return 0
 	else
 		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 0)"
+		return 1
+	fi
+}
+
+# scheduler.sh's SCHED_DISPATCH_TICK_CB is a testing-only hook with no role in normal operation.
+# It's called with <job_id> right after each job is dispatched in the initial scheduling loop.
+# test_40 uses it to stall dispatch deterministically.
+# That avoids racing host fork speed against a timeout, which isn't portable across environments.
+
+# Verify the global timeout can fire inside the initial dispatch loop itself,
+#   not only via process_done_record()'s checks.
+# SCHED_MAX_JOBS equals the job count, so the capacity-wait loop is skipped entirely.
+# SCHED_DISPATCH_TICK_CB stalls past SCHED_TIMEOUT_S right after the first job dispatches.
+# Only the dispatch loop's own refresh_remaining_time() call can catch it then.
+# A marker file confirms the second job was never dispatched.
+test_40()
+{
+	test_40_do_job()
+	{
+		[ "${1}" = second ] && printf 'dispatched\n' > "${SECOND_DISPATCHED_FILE}"
+		return 0
+	}
+
+	test_40_dispatch_tick()
+	{
+		[ "${1}" = first ] && sleep 2
+	}
+
+	local \
+		TEST_NUM=40 \
+		sched_rv \
+		jobs='first second'
+
+	local SECOND_DISPATCHED_FILE="/tmp/sched.dispatch_timeout.${TEST_NUM:?}.$$"
+	rm -f "${SECOND_DISPATCHED_FILE}"
+
+	print_test_header 40 "Global timeout can fire during initial dispatch" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=test_40_do_job \
+	SCHED_DISPATCH_TICK_CB=test_40_dispatch_tick \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=1 \
+	SCHED_IDLE_TIMEOUT_S=30 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	if [ "${sched_rv}" = 82 ] &&
+		[ ! -e "${SECOND_DISPATCHED_FILE}" ]
+	then
+		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		rm -f "${SECOND_DISPATCHED_FILE}"
+		return 0
+	else
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 82, second_dispatched=$([ -e "${SECOND_DISPATCHED_FILE}" ] && echo yes || echo no))"
+		rm -f "${SECOND_DISPATCHED_FILE}"
 		return 1
 	fi
 }
