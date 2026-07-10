@@ -45,6 +45,12 @@ sch_is_included() {
 	esac
 }
 
+sch_append()
+{
+	sch_check_var_chars "var" "${1}" || return 1
+	eval "${1}=\"\${${1}}\${${1}:+\"\${3:-" "}\"}${2}\""
+}
+
 # 1: out var
 # 2: element
 # 3: cur list
@@ -74,7 +80,10 @@ sch_check_var_chars() {
 		*) : ;;
 	esac &&
 	{
-		[ "${1}" != param ] ||
+		case "${1}" in
+			param|var) false ;;
+			*) : ;;
+		esac ||
 		case "${2}" in
 			[a-zA-Z_]*) : ;;
 			*) false
@@ -112,11 +121,12 @@ job_set_params() {
 		sch_val="${sch_pair#"${sch_param}="}"
 		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
 
+		sch_is_included "${sch_param}" "${sch_cur_params}" ||
+		sch_append "SCH_JOB_PARAMS_${sch_job_id}" "${sch_param}" ||
+			return 1
 		export -n "SCH_JOB_PARAM_${sch_job_id}_${sch_param}=${sch_val}"
-		sch_is_included "${sch_cur_params}" "${sch_param}" ||
-			sch_cur_params="${sch_cur_params}${sch_cur_params:+ }${sch_param}"
 	done
-	export -n "SCH_JOB_PARAMS_${sch_job_id}=${sch_cur_params}"
+	:
 }
 
 # For each param <P> assigns corresponding param value to variable named <P>
@@ -490,7 +500,7 @@ schedule_jobs() {
 		sch_start_job "${sch_id}" "${@}" &
 		sch_pid="${!}"
 
-		SCH_RUNNING_PIDS="${SCH_RUNNING_PIDS}${SCH_RUNNING_PIDS:+ }${sch_pid}"
+		sch_append SCH_RUNNING_PIDS "${sch_pid}" || return 1
 
 		[ -z "${SCHED_DISPATCH_TICK_CB}" ] ||
 			"${SCHED_DISPATCH_TICK_CB}" "${sch_id}"
