@@ -1,6 +1,7 @@
 ## shell-scheduler
 The goal of this project is to implement a reliable, reusable, flexible and reasonably comprehensive library for parallelization in shell scripts, which would allow to keep application code separate from scheduler infrastructure - and keep it small, lightweight and self-contained.
 
+
 ## Main Features
 
 - Parallel job scheduling: execute independent jobs concurrently with a configurable maximum number of running jobs.
@@ -9,11 +10,13 @@ The goal of this project is to implement a reliable, reusable, flexible and reas
 - Supports Bash and BusyBox ash. Simpler shells (like dash) are not supported.
 - Configurable global and idle timeouts: automatically terminate the scheduler and call termination callback when total allowed runtime is exceeded or no job completions have been observed for N seconds.
 
+
 ## Dependencies
 
 - Linux: required because of reliance on `/proc`, used to get PIDs and system uptime (for precise'ish time measurement). Should be not too complicated to port to any other Unix-like system.
 - Bash or BusyBox ash. Other shells are not supported. Could be conceivably ported to POSIX-compliant code.
 - Utilities: `mkfifo`, `mkdir`, `rm`. No other binary utilies are used by the code.
+
 
 ## Quick start
 
@@ -112,77 +115,6 @@ On success, `schedule_jobs()` returns `0`.
 If configuration validation fails, callback execution fails, a timeout is reached, or the scheduler is terminated by a signal, it returns a non-zero code. The complete list of scheduler return codes is documented in the [Return Codes](#return-codes) section.
 
 
-## Job Parameters
-
-The scheduler passes exactly one job-specific argument to the job execution callback: the job ID. Any additional arguments passed to `schedule_jobs()` are forwarded unchanged to every job and are therefore shared by all jobs.
-
-Passing arbitrary job-specific data structures to each job execution callback via positional parameters is impossible because of shell limitations. For this reason, the scheduler hands over to each job its own job ID and leaves it to the application to associate each job ID with whatever parameters it requires and to implement fetching job-specific parameters within each job.
-
-If your jobs only need configuration shared by every job, simply pass it as additional arguments to `schedule_jobs()`. These arguments are forwarded unchanged to every invocation of the job execution callback.
-
-For applications using consecutive integer job IDs, another possibility is to encode job-specific parameters in the extra arguments passed to `schedule_jobs()` (e.g. `schedule_jobs "1 2 3" [job_1_param] [job_2_param] [job_3_param]`) and let each job derive the location of its own parameters from its job ID. This can be convenient for simple cases.
-
-The recommended approach for more complex cases is prior to starting the scheduler, store job-specific parameters in variables whose names contain the corresponding job ID. The job execution callback can then retrieve parameters for the current job by indirection: on Bash, use `val=${!var_name}`; on Busybox ash, use `eval val=\"\${${var_name}}\"`.
-
-Example:
-
-```sh
-process_job()
-{
-	local \
-		job_id="${1}" \
-		file
-
-    # Get job-specific parameter via indirection
-
-    # Bash
-    local file_var="JOB_FILE_${job_id}"
-    file="${!file_var}"
-
-    # Busybox ash
-	eval "file=\"\${JOB_FILE_${job_id}}\""
-
-	printf 'Processing %s...\n' "${file}"
-
-    # Placeholer for actual processing
-}
-
-# Generate variables storing parameters
-id=0
-ids=
-for file in *.txt
-do
-    id=$((id + 1))
-    ids="${ids}${ids:+ }${id}"
-
-    export -n "JOB_FILE_${id}=${file}" # avoids 'eval' for this assignment
-done
-
-# Call the scheduler
-DO_JOB_CB=process_job \
-SCHED_MAX_JOBS=4 \
-    schedule_jobs "${ids}"
-```
-
-**Note:** This technique constructs shell variable names from job IDs. Therefore, when using it, job IDs should consist only of characters allowed by the shell for variable names, specifically: letters (`A-Z`, `a-z`), digits (`0-9`) and underscores (`_`).
-
-**Special note about `eval`**:
-
-On Busybox ash, this technique requires the use of `eval` to expand variables via indirection. `eval` may introduce security concerns because it reparses its argument as shell code and executes the result. Make sure to use it correctly in order to avoid creating security holes. When applying the **exact** pattern
-
-```
-<var_name_1>=\"\${<var_name_3_prefix>${var_name_2}}\"
-```
-
-with **a fixed destination variable** (`var_name_1`), **correctly escaped double-quotes** (`=\"...\"`) and **correctly escaped parameter expansion** (`\${...}`) inside the string passed to `eval`, this pattern is believed to be safe from arbitrary code execution. ShellCheck recommends this as the portable technique for indirect variable expansion in POSIX shells (see [shellcheck article](https://www.shellcheck.net/wiki/SC2082)).
-
-As an additional precaution, also make sure that the value of `${var_name_2}` is sanitized or under your code's control. Here this will be job ID passed from the scheduler, i.e. one of the job IDs originally passed by your code to `schedule_jobs()`. Making sure no funny characters are included in that value is enough for sanitization. As long as you followed the recommendation for allowed characters in the note above, you probably don't need to do anything else but if you want to be extra ultra safe - you can sanitize it inside the job execution callback with e.g.:
-
-```
-case "$job_id" in
-    *[!a-zA-Z0-9_]*) echo "Bad job ID '$job_id'"; exit 1 ;;
-esac
-```
 ## Callbacks
 
 All callbacks are specified by assigning the callback name to the corresponding environment variable before calling `schedule_jobs()`. Callback values must be command names only - arguments are not allowed. In practice, this will normally be the name of a shell function implemented by your script. The section [Job Parameters](#job-parameters) explains how to pass parameters to each individual job.
@@ -235,6 +167,50 @@ ${SCHED_FAIL_MSG_CB} <message>
 ```
 
 If this callback is not defined, error messages are written to standard error.
+
+
+## Job Parameters
+
+Any extra arguments passed to `schedule_jobs()` (after the list of job ID's in the first argument) are forwarded unchanged to every job and are therefore shared by all jobs, available as positional parameters inside the **job execution callback** (`DO_JOB_CB`).
+
+Assigning **per-job parameters** can be done via a dedicated helper: `job_set_param()`. Syntax:
+
+```sh
+job_set_param <job_ID> <param_name>=<value>
+```
+
+When initializing each job, the scheduler fetches the list of params set by this helper for the specific job and for each assigned param, sets a variable whose name matches the param's name to value assigned to the param. E.g.:
+
+```sh
+# Job execution callback
+process_file() {
+    echo "For job ${1}, file is '${filename}${extension}'."
+}
+
+# Assign params
+job_set_param A "filename=foo"
+job_set_param A "extension=.bz2"
+job_set_param B "filename=bar"
+job_set_param B "extension=.gz"
+
+# Start the scheduler
+DO_JOB_CB=process_file \
+SCHED_MAX_JOBS=3 \
+    schedule_jobs "A B C"
+```
+
+Output:
+```
+For job A, file is 'foo.bz2'.
+For job B, file is 'bar.gz'.
+For job C, file is ''.
+```
+
+**Notes**:
+- Params are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
+- Assigning and fetching params is internally implemented via indirection. In order to keep the implementation compatible with Busybox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_param()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
+- Setting job-specific params via `job_set_param` requires corresponding **job ID** to contain only following characters: `a-z`, `A-Z`, `0-9`, `_`. It also requires corresponding **param name** to contain only the same set of characters, and not start with a digit (for compliance with POSIX specification of valid variable names). When either of these requirements is not met, `job_set_param()` will print an error, return code 1, and the parameter will not be set.
+
 
 ## Environment variables
 
