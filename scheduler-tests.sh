@@ -2509,12 +2509,13 @@ test_40()
 }
 
 
-# Verify that a single param registered via job_set_param() is delivered to
+# Verify that a single param registered via job_set_params() is delivered to
 # DO_JOB_CB as a real environment variable with the exact value.
 test_41()
 {
 	test_41_do_job()
 	{
+		job_get_params "${1}" FOO
 		printf '%s\n' "${FOO-<unset>}" > "${OUT_FILE:?}"
 		return 0
 	}
@@ -2529,7 +2530,7 @@ test_41()
 
 	print_test_header 41 "Single job param delivered as env var" "job1"
 
-	job_set_param job1 "FOO=bar123"
+	job_set_params job1 "FOO=bar123"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2561,6 +2562,7 @@ test_42()
 {
 	test_42_do_job()
 	{
+		job_get_params "${1}" PARAM_A PARAM_B PARAM_C
 		{
 			printf 'A=%s\n' "${PARAM_A-<unset>}"
 			printf 'B=%s\n' "${PARAM_B-<unset>}"
@@ -2580,9 +2582,7 @@ test_42()
 
 	print_test_header 42 "Multiple job params delivered" "job1"
 
-	job_set_param job1 "PARAM_A=1"
-	job_set_param job1 "PARAM_B=two"
-	job_set_param job1 "PARAM_C=3three3"
+	job_set_params job1 "PARAM_A=1" "PARAM_B=two" "PARAM_C=3three3"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2616,12 +2616,7 @@ test_43()
 {
 	test_43_do_job()
 	{
-		if [ -z "${UNSET_PARAM+x}" ]
-		then
-			printf 'unset\n' > "${OUT_FILE:?}"
-		else
-			printf 'set:%s\n' "${UNSET_PARAM}" > "${OUT_FILE:?}"
-		fi
+		printf 'unset\n' > "${OUT_FILE:?}"
 		return 0
 	}
 
@@ -2669,7 +2664,7 @@ test_43()
 	fi
 }
 
-# Verify job_set_param() rejects invalid input at assignment time: bad job
+# Verify job_set_params() rejects invalid input at assignment time: bad job
 # ID, pair missing '=', and bad/empty/leading-digit param names - while
 # still accepting a leading-digit job ID (job IDs need not be valid shell
 # identifiers, unlike param names, which are used directly as export
@@ -2679,7 +2674,7 @@ test_44()
 	test_44_check_rejected()
 	{
 		total_cnt=$((total_cnt + 1))
-		SCHED_FAIL_MSG_CB=test_44_fail_msg job_set_param "${1}" "${2}"
+		SCHED_FAIL_MSG_CB=test_44_fail_msg job_set_params "${1}" "${2}"
 		rv=$?
 		if [ "${rv}" != 0 ]
 		then
@@ -2692,7 +2687,7 @@ test_44()
 	test_44_check_accepted()
 	{
 		total_cnt=$((total_cnt + 1))
-		SCHED_FAIL_MSG_CB=test_44_fail_msg job_set_param "${1}" "${2}"
+		SCHED_FAIL_MSG_CB=test_44_fail_msg job_set_params "${1}" "${2}"
 		rv=$?
 		if [ "${rv}" = 0 ]
 		then
@@ -2714,7 +2709,7 @@ test_44()
 	local MSG_FILE="/tmp/sched.params.validate.${TEST_NUM}.$$"
 	rm -f "${MSG_FILE}"
 
-	print_test_header 44 "job_set_param() input validation" "(direct calls, no scheduler run)"
+	print_test_header 44 "job_set_params() input validation" "(direct calls, no scheduler run)"
 
 	test_44_check_rejected ""        "FOO=bar"      # empty job ID
 	test_44_check_rejected "bad id"  "FOO=bar"       # job ID with space
@@ -2741,16 +2736,17 @@ test_44()
 	fi
 }
 
-# Verify job_set_param() rejects every reserved param name immediately
-# (ssj_* prefix, DO_JOB_CB, SCHED_FAIL_MSG_CB, IFS): rv=1, one specific
-# message emitted per case, and nothing is stored - a later job run never
-# sees the param.
+# Verify job_set_params() rejects every reserved param name immediately
+# (sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS): rv=1,
+# one specific message emitted per case, and nothing is stored -
+# a later job run never sees the param.
 test_45()
 {
 	test_45_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
 	test_45_do_job()
 	{
+		job_get_params "${1}" GOOD
 		printf '%s\n' "${GOOD-<unset>}" > "${OUT_FILE:?}"
 		return 0
 	}
@@ -2771,12 +2767,18 @@ test_45()
 
 	rm -f "${MSG_FILE}" "${OUT_FILE}"
 
-	print_test_header 45 "Reserved param names rejected at job_set_param() time" "job1"
+	print_test_header 45 "Reserved param names rejected at job_set_params() time" "job1"
 
-	for name in ssj_foo ssj_job_id ssj_me DO_JOB_CB SCHED_FAIL_MSG_CB IFS
+	for name in \
+		sch_foo sch_job_id sch_me \
+		_sch_foo _sch_job_id _sch_me \
+		SCH_JOB_PARAMS_foo SCH_JOB_PARAMS \
+		SCHED_ SCHED_MAX_JOBS SCHED_TIMEOUT_S SCHED_IDLE_TIMEOUT_S SCHED_DIR \
+		SCHED_FAIL_MSG_CB SCHED_FINALIZE_CB SCHED_DISPATCH_TICK_CB \
+		DO_JOB_CB JOB_DONE_CB IFS
 	do
 		total_cnt=$((total_cnt + 1))
-		SCHED_FAIL_MSG_CB=test_45_fail_msg job_set_param job1 "${name}=x"
+		SCHED_FAIL_MSG_CB=test_45_fail_msg job_set_params job1 "${name}=x" 2>/dev/null
 		rv=$?
 		if [ "${rv}" != 0 ]
 		then
@@ -2787,7 +2789,7 @@ test_45()
 	done
 
 	# One legitimate param too, to confirm the job still runs normally.
-	job_set_param job1 "GOOD=fine"
+	job_set_params job1 "GOOD=fine"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2820,8 +2822,7 @@ test_45()
 	fi
 }
 
-# Verify params are scoped per job ID: job1's param must not leak into
-# job2's environment.
+# Verify params are scoped per job ID: job1's param must not leak into job2's environment.
 test_46()
 {
 	test_46_do_job()
@@ -2832,6 +2833,7 @@ test_46()
 			job2) out="${J2_FILE:?}" ;;
 			*) return 1 ;;
 		esac
+		job_get_params "${1}" SHARED_NAME
 		if [ -z "${SHARED_NAME+x}" ]
 		then
 			printf 'unset\n' > "${out}"
@@ -2855,7 +2857,7 @@ test_46()
 
 	print_test_header 46 "Params are scoped per job ID" "job1 job2"
 
-	job_set_param job1 "SHARED_NAME=only_job1"
+	job_set_params job1 "SHARED_NAME=only_job1"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2885,13 +2887,13 @@ test_46()
 	fi
 }
 
-# Verify that registering the same param key twice for a job keeps the
-# last value (last write wins) without error, despite the internal
-# tracking list containing the key twice.
+# Verify that registering the same param key twice for a job
+#   keeps the last value (last write wins) without error
 test_47()
 {
 	test_47_do_job()
 	{
+		job_get_params "${1}" DUPKEY
 		printf '%s\n' "${DUPKEY-<unset>}" > "${OUT_FILE:?}"
 		return 0
 	}
@@ -2899,6 +2901,7 @@ test_47()
 	local \
 		TEST_NUM=47 \
 		sched_rv \
+		error_seen \
 		seen
 
 	local OUT_FILE="/tmp/sched.params.dup.${TEST_NUM}.$$"
@@ -2906,8 +2909,7 @@ test_47()
 
 	print_test_header 47 "Duplicate param key: last write wins" "job1"
 
-	job_set_param job1 "DUPKEY=first"
-	job_set_param job1 "DUPKEY=second"
+	job_set_params job1 "DUPKEY=first" "DUPKEY=second" || error_seen=1
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2924,12 +2926,12 @@ test_47()
 	read_first_line seen "${OUT_FILE}"
 	rm -f "${OUT_FILE}"
 
-	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "second" ]
+	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "second" ] && [ -z "${error_seen}" ]
 	then
 		printf '%s\n' "Result: ${PASS} (DUPKEY='${seen}')"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, DUPKEY='${seen}', expected 'second')"
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, DUPKEY='${seen}', expected 'second', error_seen='${error_seen}')"
 		return 1
 	fi
 }
@@ -2940,6 +2942,7 @@ test_48()
 {
 	test_48_do_job()
 	{
+		job_get_params "${1}" URL
 		printf '%s\n' "${URL-<unset>}" > "${OUT_FILE:?}"
 		return 0
 	}
@@ -2955,7 +2958,7 @@ test_48()
 
 	print_test_header 48 "Value containing embedded '=' preserved intact" "job1"
 
-	job_set_param job1 "URL=${expected}"
+	job_set_params job1 "URL=${expected}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2991,6 +2994,7 @@ test_49()
 
 	test_49_do_job()
 	{
+		job_get_params "${1}" SPACEY QUOTY CMDSUB BACKTICK GLOBBY EMPTYV
 		{
 			printf 'SPACEY=%s\n' "${SPACEY-<unset>}"
 			printf 'QUOTY=%s\n' "${QUOTY-<unset>}"
@@ -3016,12 +3020,17 @@ test_49()
 
 	print_test_header 49 "Param value fidelity / no injection via value content" "job1"
 
-	job_set_param job1 'SPACEY=hello world'
-	job_set_param job1 "QUOTY=a'b\"c"
-	job_set_param job1 'CMDSUB=$(test_49_touch_inject)'
-	job_set_param job1 'BACKTICK=`test_49_touch_inject`'
-	job_set_param job1 'GLOBBY=*.txt'
-	job_set_param job1 'EMPTYV='
+	# shellcheck disable=SC2016
+	job_set_params job1 \
+		'SPACEY=hello world' \
+		"QUOTY=a'b\"c" \
+		'CMDSUB=$(test_49_touch_inject)' \
+		'BACKTICK=`test_49_touch_inject`' \
+		'GLOBBY=*.txt' \
+		'EMPTYV='
+
+	# shellcheck disable=SC2016
+	expected="SPACEY=hello world"$'\n'"QUOTY=a'b\"c"$'\n'"CMDSUB="'$(test_49_touch_inject)'$'\n'"BACKTICK="'`test_49_touch_inject`'$'\n'"GLOBBY=*.txt"$'\n'"EMPTYV=[]"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -3036,13 +3045,6 @@ test_49()
 	sched_rv=$?
 
 	actual="$([ -f "${OUT_FILE}" ] && cat "${OUT_FILE}")"
-
-	expected="SPACEY=hello world"$'\n'
-	expected="${expected}QUOTY=a'b\"c"$'\n'
-	expected="${expected}CMDSUB="'$(test_49_touch_inject)'$'\n'
-	expected="${expected}BACKTICK="'`test_49_touch_inject`'$'\n'
-	expected="${expected}GLOBBY=*.txt"$'\n'
-	expected="${expected}EMPTYV=[]"
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${actual}" = "${expected}" ] &&
@@ -3060,12 +3062,12 @@ test_49()
 	fi
 }
 
-# Verify job params (env vars) and forwarded positional args to DO_JOB_CB
-# coexist without interference.
+# Verify job params and forwarded positional args to DO_JOB_CB coexist without interference.
 test_50()
 {
 	test_50_do_job()
 	{
+		job_get_params "${1}" COMBOPARAM
 		{
 			printf 'PARAM=%s\n' "${COMBOPARAM-<unset>}"
 			printf 'ARGS=%s\n' "$*"
@@ -3084,7 +3086,7 @@ test_50()
 
 	print_test_header 50 "Job params coexist with forwarded extra args" "job1"
 
-	job_set_param job1 "COMBOPARAM=paramval"
+	job_set_params job1 "COMBOPARAM=paramval"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -3111,233 +3113,6 @@ test_50()
 		return 1
 	fi
 }
-
-# Verify sch_start_job()'s own is_valid_param() check still guards against
-# malformed/reserved param names even when SCH_JOB_PARAMS_*/SCH_JOB_*_* are
-# set directly, bypassing job_set_param()'s own (assignment-time) gate
-# entirely. Confirms defense-in-depth: DO_JOB_CB never runs, the job still
-# completes (rv=1) via the EXIT trap rather than hanging/timing out, and the
-# scheduler overall still succeeds.
-test_51()
-{
-	test_51_do_job() { touch "${RAN_FILE:?}"; return 0; }
-
-	test_51_done() { printf '%s %s\n' "$1" "$2" >> "${DONE_FILE:?}"; return 0; }
-
-	test_51_check_case()
-	{
-		local job_id="${1:?}" param_name="${2:?}" store_val="${3:?}" sched_rv
-
-		rm -f "${RAN_FILE}" "${DONE_FILE}"
-
-		export "SCH_JOB_PARAMS_${job_id}=${param_name}" \
-			"SCH_JOB_${job_id}_${param_name}=${store_val}"
-
-		SCHED_FAIL_MSG_CB=echo \
-		SCHED_FINALIZE_CB=finalize_handler \
-		JOB_DONE_CB=test_51_done \
-		DO_JOB_CB=test_51_do_job \
-		SCHED_MAX_JOBS=1 \
-		SCHED_TIMEOUT_S=5 \
-		SCHED_IDLE_TIMEOUT_S=5 \
-			schedule_jobs "${job_id}" &
-
-		wait "$!"
-		sched_rv=$?
-
-		unset "SCH_JOB_PARAMS_${job_id}" "SCH_JOB_${job_id}_${param_name}" 2>/dev/null
-
-		total_cnt=$((total_cnt + 1))
-
-		if [ "${sched_rv}" = 0 ] &&
-			[ ! -e "${RAN_FILE}" ] &&
-			[ -f "${DONE_FILE}" ] &&
-			[ "$(cat "${DONE_FILE}")" = "${job_id} 1" ]
-		then
-			pass_cnt=$((pass_cnt + 1))
-		else
-			printf 'sub-check failed for job_id=%s param_name=%s (sched_rv=%s, ran=%s, done=%s)\n' \
-				"${job_id}" "${param_name}" "${sched_rv}" \
-				"$([ -e "${RAN_FILE}" ] && echo yes || echo no)" \
-				"$([ -f "${DONE_FILE}" ] && cat "${DONE_FILE}" || echo '<none>')" >&2
-		fi
-	}
-
-	local \
-		TEST_NUM=51 \
-		pass_cnt=0 \
-		total_cnt=0
-
-	local \
-		RAN_FILE="/tmp/sched.params.bypass.ran.${TEST_NUM}.$$" \
-		DONE_FILE="/tmp/sched.params.bypass.done.${TEST_NUM}.$$"
-
-	rm -f "${RAN_FILE}" "${DONE_FILE}"
-
-	print_test_header 51 "sch_start_job()'s own validation catches bypassed bad/reserved param names" "bypass1 bypass2"
-
-	test_51_check_case bypass1 "1bad" "x"
-	test_51_check_case bypass2 "ssj_job_id" "x"
-
-	rm -f "${RAN_FILE}" "${DONE_FILE}"
-
-	if [ "${pass_cnt}" = "${total_cnt}" ]
-	then
-		printf '%s\n' "Result: ${PASS} (${pass_cnt}/${total_cnt})"
-		return 0
-	else
-		printf '%s\n' "Result: ${FAIL} (${pass_cnt}/${total_cnt})"
-		return 1
-	fi
-}
-
-# Verify that even with SCH_JOB_PARAMS_* bypassing job_set_param() entirely,
-# a shell-metacharacter-shaped param "name" can never trigger command
-# execution via the eval-based lookup/export machinery in sch_start_job().
-test_52()
-{
-	test_52_touch_inject() { touch "${INJECT_FILE:?}"; }
-
-	test_52_do_job() { touch "${RAN_FILE:?}"; return 0; }
-
-	test_52_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
-
-	local \
-		TEST_NUM=52 \
-		sched_rv \
-		bad_name='$(test_52_touch_inject)'
-
-	local \
-		RAN_FILE="/tmp/sched.params.inject.ran.${TEST_NUM}.$$" \
-		INJECT_FILE="/tmp/sched.params.inject.marker.${TEST_NUM}.$$" \
-		MSG_FILE="/tmp/sched.params.inject.msg.${TEST_NUM}.$$"
-
-	rm -f "${RAN_FILE}" "${INJECT_FILE}" "${MSG_FILE}"
-
-	print_test_header 52 "Injection-shaped bypassed param name can't execute code" "bypassjob"
-
-	export "SCH_JOB_PARAMS_bypassjob=${bad_name}"
-
-	SCHED_FAIL_MSG_CB=test_52_fail_msg \
-	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=test_52_do_job \
-	SCHED_MAX_JOBS=1 \
-	SCHED_TIMEOUT_S=5 \
-	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'bypassjob' &
-
-	wait "$!"
-	sched_rv=$?
-
-	unset SCH_JOB_PARAMS_bypassjob
-
-	if [ "${sched_rv}" = 0 ] &&
-		[ ! -e "${INJECT_FILE}" ] &&
-		[ ! -e "${RAN_FILE}" ] &&
-		[ -f "${MSG_FILE}" ]
-	then
-		rm -f "${RAN_FILE}" "${INJECT_FILE}" "${MSG_FILE}"
-		printf '%s\n' "Result: ${PASS}"
-		return 0
-	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, inject_marker=$([ -e "${INJECT_FILE}" ] && echo yes || echo no), ran=$([ -e "${RAN_FILE}" ] && echo yes || echo no))"
-		rm -f "${RAN_FILE}" "${INJECT_FILE}" "${MSG_FILE}"
-		return 1
-	fi
-}
-
-# Verify job IDs containing glob/injection-shaped characters do not crash or
-# misdirect the params-fetch guard (check_var_chars -q "job ID" ...): each
-# such job runs normally with no params (silent skip, no fail messages),
-# while a normal job registered with a real param still gets it correctly.
-test_53()
-{
-	test_53_do_job()
-	{
-		printf '%s\n' "$1" >> "${RAN_FILE:?}"
-		if [ "$1" = cleanjob ]
-		then
-			printf '%s\n' "${CLEANPARAM-<unset>}" > "${CLEAN_OUT_FILE:?}"
-		fi
-		sleep 1
-		return 0
-	}
-
-	test_53_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
-
-	local \
-		TEST_NUM=53 \
-		sched_rv \
-		expected_do_jobs \
-		expected_do_cnt \
-		actual_do_jobs \
-		actual_do_cnt=0 \
-		recorded_ok \
-		seen \
-		msg_cnt \
-		jobs=''
-
-	local \
-		RAN_FILE="/tmp/sched.params.idedge.ran.${TEST_NUM}.$$" \
-		CLEAN_OUT_FILE="/tmp/sched.params.idedge.clean.${TEST_NUM}.$$" \
-		MSG_FILE="/tmp/sched.params.idedge.msg.${TEST_NUM}.$$"
-
-	rm -f "${RAN_FILE}" "${CLEAN_OUT_FILE}" "${MSG_FILE}"
-
-	# Glob/quote/injection-shaped IDs alongside a normal one. Multi-line
-	# literal (not a bash array); whitespace from continuation/indentation
-	# is stripped below - same technique as test_30.
-	jobs="
-		cleanjob \
-		star*id \
-		dollarsign\$x \
-		semi;colon \
-		dotdot.x \
-		quest?id \
-	"
-	jobs="${jobs//[$'\n'$'\t']/}"
-
-	print_test_header 53 "Odd-character job IDs don't disrupt the params-fetch guard" \
-		"cleanjob plus glob/injection-shaped IDs"
-
-	job_set_param cleanjob "CLEANPARAM=itworked"
-
-	SCHED_FAIL_MSG_CB=test_53_fail_msg \
-	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=test_53_do_job \
-	SCHED_MAX_JOBS=3 \
-	SCHED_TIMEOUT_S=10 \
-	SCHED_IDLE_TIMEOUT_S=8 \
-		schedule_jobs "${jobs}" &
-
-	wait "$!"
-	sched_rv=$?
-
-	verify_recorded_set expected_do_jobs actual_do_jobs expected_do_cnt actual_do_cnt "${RAN_FILE}" "${jobs}"
-	recorded_ok=$?
-
-	read_first_line seen "${CLEAN_OUT_FILE}"
-
-	msg_cnt=0
-	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
-
-	rm -f "${RAN_FILE}" "${CLEAN_OUT_FILE}" "${MSG_FILE}"
-
-	if [ "${sched_rv}" = 0 ] &&
-		[ "${recorded_ok}" = 0 ] &&
-		[ "${seen}" = "itworked" ] &&
-		[ "${msg_cnt}" = 0 ]
-	then
-		printf '%s\n' "Result: ${PASS} (jobs_ran=${actual_do_cnt}, CLEANPARAM='${seen}')"
-		return 0
-	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, recorded_ok=${recorded_ok}, CLEANPARAM='${seen}', msg_cnt=${msg_cnt})"
-		return 1
-	fi
-}
-
 
 
 #
