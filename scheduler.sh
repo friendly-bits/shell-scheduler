@@ -198,8 +198,8 @@ sch_start_job()
 	do
 		check_var_chars "param" "${ssj_param}" "${ssj_me}" || exit 1
 		case "${ssj_param}" in
-			ssj_me|ssj_job_pid|ssj_rv|ssj_param|ssj_params|ssj_job_id|DO_JOB_CB|SCHED_FAIL_MSG_CB)
-				sch_fail_msg "${me}: param '${ssj_param}' is reserved for internal use."
+			ssj_*|DO_JOB_CB|SCHED_FAIL_MSG_CB|IFS)
+				sch_fail_msg "${ssj_me}: param '${ssj_param}' is reserved for internal use."
 				exit 1
 		esac
 		eval "export ${ssj_param}=\"\${SCH_JOB_${ssj_job_id}_${ssj_param}}\""
