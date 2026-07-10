@@ -84,7 +84,7 @@ sch_get_uptime_cs() {
 
 # Get PID of current shell process
 # 1 - var name for output
-sch_get_curr_pid()
+sch_get_cur_pid()
 {
 	local __pid line
 	export -n "${1:?}="
@@ -137,7 +137,7 @@ sch_start_job()
 		exit "${rv}"
 	' EXIT
 
-	sch_get_curr_pid job_pid || exit 1
+	sch_get_cur_pid job_pid || exit 1
 
 	"${DO_JOB_CB:?}" "${job_id}" "${@}"
 	exit "${?}"
@@ -362,7 +362,7 @@ schedule_jobs()
 	# Main logic
 
 	sch_get_uptime_cs SCHED_INIT_UPTIME_CS &&
-	sch_get_curr_pid SCHEDULER_PID ||
+	sch_get_cur_pid SCHEDULER_PID ||
 		return 1
 
 	LAST_PROGRESS_TIME_CS="${SCHED_INIT_UPTIME_CS}"
