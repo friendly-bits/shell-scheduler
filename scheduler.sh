@@ -35,6 +35,53 @@
 
 ### Helpers
 
+check_var_chars()
+{
+	local quiet
+	[ "${1}" = -q ] && { quiet=1; shift; }
+	case "${2}" in
+		''|*[!a-zA-Z0-9_]*) false ;;
+		*) : ;;
+	esac &&
+	{
+		[ "${1}" != key ] ||
+		case "${2}" in
+			[a-zA-Z_]*) : ;;
+			*) false
+		esac
+	} &&
+	return 0
+
+	[ -n "${quiet}" ] || sch_fail_msg "${3}${3:+": "}${1}${1:+ }'${2}' is empty string or contains incompatible characters."
+	return 1
+}
+
+# 1: job ID
+# 2: <param=value>
+job_set_param()
+{
+	local me=job_set_param \
+		param val \
+		job_id="${1}"
+		pair="${2}"
+
+	check_var_chars "job ID" "${job_id}" "${me}" || return 1
+
+	case "${pair}" in
+		*=*) ;;
+		*)
+			sch_fail_msg "${me}: Invalid key-value pair '${pair}'."
+			return 1
+	esac
+
+	param="${pair%%=*}"
+	val="${pair#"${param}="}"
+	check_var_chars "param" "${param}" "${me}" || return 1
+
+	export -n "SCH_JOB_${job_id}_${param}=${val}"
+	eval "SCH_JOB_PARAMS_${job_id}=\"\${SCH_JOB_PARAMS_${job_id}}\${SCH_JOB_PARAMS_${job_id}:+ }${param}\""
+}
+
 sch_is_uint()
 {
 	local _v
@@ -126,7 +173,10 @@ sch_finalize()
 
 sch_start_job()
 {
-	local job_pid rv \
+	local \
+		me=sch_start_job \
+		job_pid rv \
+		param params \
 		job_id="${1:?}"
 
 	shift
@@ -138,6 +188,15 @@ sch_start_job()
 	' EXIT
 
 	sch_get_cur_pid job_pid || exit 1
+
+	# Fetch job params
+	check_var_chars -q "job ID" "${job_id}" "${me}" &&
+	eval "params=\"\${SCH_JOB_PARAMS_${job_id}}\""
+	for param in ${params}
+	do
+		check_var_chars "param" "${param}" "${me}" || exit 1
+		eval "export ${param}=\"\${SCH_JOB_${job_id}_${param}}\""
+	done
 
 	"${DO_JOB_CB:?}" "${job_id}" "${@}"
 	exit "${?}"
