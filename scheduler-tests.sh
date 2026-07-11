@@ -3177,7 +3177,7 @@ test_51()
 
 	print_test_header 51 "job_get_params() rejects reserved/malformed param names" "(direct calls, no scheduler run)"
 
-	job_set_params "${job_id}" "REALPARAM=fine"
+	job_set_params "${job_id}" "REALPARAM=fine" "AAA=1" "BBB=2"
 
 	# "IFS" is deliberately included below: job_get_params() must reject it
 	# before ever reaching its eval-assignment line. local IFS="${IFS}"
@@ -3185,7 +3185,16 @@ test_51()
 	# a regression here would clobber the shell's field separator globally
 	# and silently break every test that runs after this one, rather than
 	# just failing this test's own assertion.
-	for name in SCH_FOO sch_foo _sch_foo SCHED_MAX_JOBS DO_JOB_CB JOB_DONE_CB IFS 1bad "bad name"
+	#
+	# "AAA BBB" is deliberately built from two names that are ALREADY
+	# registered: this is what actually exercises the word-splitting
+	# regression. "bad name" alone doesn't - its split halves ("bad",
+	# "name") are rejected anyway for being unregistered, so it passes
+	# this loop whether or not job_get_params() incorrectly word-splits a
+	# single malformed argument. Registered halves are required to prove
+	# the argument is rejected as one malformed token rather than silently
+	# split into two valid ones.
+	for name in SCH_FOO sch_foo _sch_foo SCHED_MAX_JOBS DO_JOB_CB JOB_DONE_CB IFS 1bad "bad name" "AAA BBB"
 	do
 		total_cnt=$((total_cnt + 1))
 		SCHED_FAIL_MSG_CB=test_51_fail_msg job_get_params "${job_id}" "${name}"
@@ -3507,6 +3516,198 @@ test_57()
 }
 
 
+# Verify that job_get_params() "all" mode is a no-op success (rv=0, no
+# params assigned) when the job has never had any params registered -
+# regression test for a bug where "all" on an empty set incorrectly fell
+# through to job_get_params()'s "no params specified" failure path.
+test_58()
+{
+	local \
+		TEST_NUM=58 \
+		rv \
+		job_id=job_58_noparams
+
+	print_test_header 58 \
+		"job_get_params() 'all' on a job with zero registered params is a no-op success" \
+		"(direct call, no scheduler run)"
+
+	job_get_params "${job_id}" all
+	rv=$?
+
+	if [ "${rv}" = 0 ]
+	then
+		PASS "rv=${rv}"
+		return 0
+	else
+		FAIL "rv=${rv}, expected 0"
+		return 1
+	fi
+}
+
+# Verify that job_get_params() "all" mode returns the complete, correct set
+# of registered params, matching an explicit multi-param fetch of the same
+# job. Also verifies "all" mode's internal word-splitting of the
+# registered-params list does not leak or lose the caller's noglob state.
+test_59()
+{
+	local \
+		TEST_NUM=59 \
+		job_id=job_59 \
+		P1 P2 P3 \
+		explicit_ok=0 \
+		all_ok=0 \
+		noglob_ok=1
+
+	print_test_header 59 "job_get_params() 'all' mode returns the full registered set" \
+		"(direct calls, no scheduler run)"
+
+	job_set_params "${job_id}" "P1=one" "P2=two" "P3=three"
+
+	job_get_params "${job_id}" P1 P2 P3
+	[ "${P1}" = one ] && [ "${P2}" = two ] && [ "${P3}" = three ] &&
+		explicit_ok=1
+
+	unset P1 P2 P3
+	job_get_params "${job_id}" all
+	[ "${P1}" = one ] && [ "${P2}" = two ] && [ "${P3}" = three ] &&
+		all_ok=1
+
+	# Noglob preservation around "all" mode's internal set -f handling:
+	# caller's set -f/+f state must survive the call unchanged either way.
+	set +f
+	job_get_params "${job_id}" all >/dev/null
+	case "${-}" in *f*) noglob_ok=0 ;; esac
+
+	set -f
+	job_get_params "${job_id}" all >/dev/null
+	case "${-}" in *f*) ;; *) noglob_ok=0 ;; esac
+	set +f
+
+	if [ "${explicit_ok}" = 1 ] && [ "${all_ok}" = 1 ] && [ "${noglob_ok}" = 1 ]
+	then
+		PASS "P1='${P1}', P2='${P2}', P3='${P3}'"
+		return 0
+	else
+		FAIL "explicit_ok=${explicit_ok}, all_ok=${all_ok}, noglob_ok=${noglob_ok}, P1='${P1}', P2='${P2}', P3='${P3}'"
+		return 1
+	fi
+}
+
+# Verify that job_get_params() with the "-export" flag genuinely exports
+# into the process environment (visible to a real child process), while
+# the default (no "-export") mode only assigns in the caller's own shell
+# scope. Checked via a separately exec'd child (sh -c ...): a plain
+# subshell would not distinguish this, since a subshell forks and so
+# shares the full (exported and non-exported) variable table with its
+# parent - only a genuine exec only ever inherits vars actually exported.
+test_60()
+{
+	local \
+		TEST_NUM=60 \
+		job_id=job_60 \
+		EXPORTPARAM \
+		default_exported \
+		flag_exported
+
+	print_test_header 60 "job_get_params() '-export' flag exports to the real environment" \
+		"(direct calls, no scheduler run)"
+
+	job_set_params "${job_id}" "EXPORTPARAM=exported_val"
+
+	unset EXPORTPARAM
+	job_get_params "${job_id}" EXPORTPARAM
+	default_exported="$(sh -c 'printf "%s" "${EXPORTPARAM-<unset>}"')"
+
+	unset EXPORTPARAM
+	job_get_params -export "${job_id}" EXPORTPARAM
+	flag_exported="$(sh -c 'printf "%s" "${EXPORTPARAM-<unset>}"')"
+
+	if [ "${default_exported}" = '<unset>' ] &&
+		[ "${flag_exported}" = exported_val ]
+	then
+		PASS "default='${default_exported}', -export='${flag_exported}'"
+		return 0
+	else
+		FAIL "default='${default_exported}', expected '<unset>'; -export='${flag_exported}', expected 'exported_val'"
+		return 1
+	fi
+}
+
+# Verify SCHED_AUTO_PARAMS=1's core promise end-to-end: DO_JOB_CB sees its
+# own job's registered params as already-exported env vars without calling
+# job_get_params() itself, jobs with different params stay isolated from
+# each other, and - regression test for a bug where job_get_params() "all"
+# on an empty set made sch_start_job() exit 1 before DO_JOB_CB ever ran -
+# a job with zero registered params still runs normally.
+test_61()
+{
+	test_61_do_job()
+	{
+		case "${1}" in
+			withparam1)
+				[ "${MYPARAM-}" = aaa ] && printf 'ok\n' > "${WP1_FILE:?}"
+			;;
+			withparam2)
+				[ "${MYPARAM-}" = bbb ] && printf 'ok\n' > "${WP2_FILE:?}"
+			;;
+			noparam)
+				printf 'started\n' > "${NOPARAM_STARTED_FILE:?}"
+				[ -z "${MYPARAM-}" ] && printf 'ok\n' > "${NOPARAM_FILE:?}"
+			;;
+		esac
+
+		return 0
+	}
+
+	local \
+		TEST_NUM=61 \
+		sched_rv \
+		jobs='withparam1 withparam2 noparam'
+
+	local \
+		WP1_FILE="/tmp/sched.autoparams.wp1.${TEST_NUM}.$$" \
+		WP2_FILE="/tmp/sched.autoparams.wp2.${TEST_NUM}.$$" \
+		NOPARAM_FILE="/tmp/sched.autoparams.noparam.${TEST_NUM}.$$" \
+		NOPARAM_STARTED_FILE="/tmp/sched.autoparams.noparam_started.${TEST_NUM}.$$"
+
+	rm -f "${WP1_FILE}" "${WP2_FILE}" "${NOPARAM_FILE}" "${NOPARAM_STARTED_FILE}"
+
+	print_test_header 61 "SCHED_AUTO_PARAMS=1: auto-export, per-job isolation, and jobs with no params" "${jobs}"
+
+	job_set_params withparam1 "MYPARAM=aaa"
+	job_set_params withparam2 "MYPARAM=bbb"
+	# "noparam" deliberately has no job_set_params() call at all.
+
+	SCHED_AUTO_PARAMS=1 \
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=test_61_do_job \
+	SCHED_MAX_JOBS=3 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	if [ "${sched_rv}" = 0 ] &&
+		[ -f "${WP1_FILE}" ] &&
+		[ -f "${WP2_FILE}" ] &&
+		[ -f "${NOPARAM_STARTED_FILE}" ] &&
+		[ -f "${NOPARAM_FILE}" ]
+	then
+		rm -f "${WP1_FILE}" "${WP2_FILE}" "${NOPARAM_FILE}" "${NOPARAM_STARTED_FILE}"
+		PASS "sched_rv=${sched_rv}"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, wp1=$([ -f "${WP1_FILE}" ] && echo ok || echo missing), wp2=$([ -f "${WP2_FILE}" ] && echo ok || echo missing), noparam_started=$([ -f "${NOPARAM_STARTED_FILE}" ] && echo ok || echo missing), noparam=$([ -f "${NOPARAM_FILE}" ] && echo ok || echo missing)"
+		rm -f "${WP1_FILE}" "${WP2_FILE}" "${NOPARAM_FILE}" "${NOPARAM_STARTED_FILE}"
+		return 1
+	fi
+}
+
+
 #
 # Inline test code starts here.
 #
@@ -3530,7 +3731,7 @@ if [ -n "${RUN_TESTS}" ]; then
 	TESTS_PASSED=0
 
 	[ "${RUN_TESTS}" = "run" ] &&
-		RUN_TESTS="$(seq 1 57)"
+		RUN_TESTS="$(seq 1 61)"
 
 	for RUN_TEST in ${RUN_TESTS}; do
 		TESTS_RUN=$((TESTS_RUN + 1))
