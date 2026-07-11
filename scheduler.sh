@@ -147,7 +147,6 @@ job_get_params() {
 	local sch_me=job_get_params \
 		sch_had_f \
 		sch_param \
-		sch_params \
 		sch_cur_params \
 		sch_param_seen \
 		sch_set_all_params \
@@ -156,24 +155,25 @@ job_get_params() {
 	[ -n "${1+x}" ] && shift
 	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 	eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
-	sch_params="${*}"
-	[ "${*}" = all ] && { sch_set_all_params=1; sch_params="${sch_cur_params}"; }
 
-	case "${-}" in
-		*f*) sch_had_f=1 ;;
-	esac
-
-	set -f
-	for sch_param in ${sch_params}; do
+	[ "${*}" = all ] && {
+		[ -n "${sch_cur_params}" ] || return 0
+		sch_set_all_params=1
+		case "${-}" in
+			*f*) sch_had_f=1 ;;
+		esac
+		set -f
+		set -- ${sch_cur_params}
 		[ -n "${sch_had_f}" ] || set +f
+	}
+
+	for sch_param; do
 		sch_param_seen=1
 		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
 		[ -n "${sch_set_all_params}" ] || sch_is_included "${sch_param}" "${sch_cur_params}" ||
 			{ sch_fail_msg "Param '${sch_param}' was never registered for job '${sch_job_id}'."; return 1; }
 		eval "${sch_export}${sch_param}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
 	done
-
-	[ -n "${sch_had_f}" ] || set +f
 
 	[ -n "${sch_param_seen}" ] &&
 		return 0
