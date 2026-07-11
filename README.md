@@ -173,34 +173,72 @@ If this callback is not defined, error messages are written to standard error.
 
 Any extra arguments passed to `schedule_jobs()` (after the list of job ID's in the first argument) are forwarded unchanged to every job and are therefore shared by all jobs, available as positional parameters inside the **job execution callback** (`DO_JOB_CB`).
 
-Assigning **per-job parameters** can be done via a dedicated helper: `job_set_param()`. Syntax:
+Assigning **per-job parameters** can be done via a dedicated helper: `job_set_params()`. Syntax:
 
 ```sh
-job_set_param <job_ID> <param_name>=<value>
+job_set_params <job_ID> <param_name_1>="<value_1>" <param_name_2>="<value_2>" ...
 ```
 
-When initializing each job, the scheduler fetches the list of params set by this helper for the specific job and for each assigned param, sets a variable whose name matches the param's name to value assigned to the param. E.g.:
+To retrieve values of previously set params, use the helper `job_get_params()`:
 
 ```sh
+job_get_params <job_ID> <param_name_1> <param_name_2> ...
+```
+
+`job_get_params` will assign the value for each specified parameter to same-named variable, e.g.:
+
+```
+local filename
+local url
+job_get_params "job_1" filename url
+echo "filename is '${filename}', url is '${url}'"
+```
+
+This works in every callback and in your application script.
+
+If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job, including if the job is implemented as an external command (rather than as a shell function). Note that in that case, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
+
+Example with `SCHED_AUTO_PARAMS=1`:
+```sh
+. ./scheduler.sh
+
 # Job execution callback
 process_file() {
     echo "For job ${1}, file is '${filename}${extension}'."
 }
 
-# Assign params
-job_set_param A "filename=foo"
-job_set_param A "extension=.bz2"
-job_set_param B "filename=bar"
-job_set_param B "extension=.gz"
+job_set_params A "filename=foo" "extension=.bz2"
+job_set_params B "filename=bar" "extension=.gz"
 
-# Start the scheduler
+DO_JOB_CB=process_file \
+SCHED_MAX_JOBS=3 \
+SCHED_AUTO_PARAMS=1 \
+    schedule_jobs "A B C" &
+wait ${!}
+```
+
+Example with `SCHED_AUTO_PARAMS` unset:
+```sh
+. ./scheduler.sh
+
+# Job execution callback
+process_file() {
+    local filename
+    local extension
+    job_get_params "${1}" filename extension || exit 1
+    echo "For job ${1}, file is '${filename}${extension}'."
+}
+
+job_set_params A "filename=foo" "extension=.bz2"
+job_set_params B "filename=bar" "extension=.gz"
+
 DO_JOB_CB=process_file \
 SCHED_MAX_JOBS=3 \
     schedule_jobs "A B C" &
 wait ${!}
 ```
 
-Output:
+Output in both cases:
 ```
 For job A, file is 'foo.bz2'.
 For job B, file is 'bar.gz'.
@@ -209,8 +247,8 @@ For job C, file is ''.
 
 **Notes**:
 - Params are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
-- Assigning and fetching params is internally implemented via indirection. In order to keep the implementation compatible with Busybox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_param()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
-- Setting job-specific params via `job_set_param` requires corresponding **job ID** to contain only following characters: `a-z`, `A-Z`, `0-9`, `_`. It also requires corresponding **param name** to contain only the same set of characters, and not start with a digit (for compliance with POSIX specification of valid variable names). When either of these requirements is not met, `job_set_param()` will print an error, return code 1, and the parameter will not be set.
+- Assigning and fetching params is internally implemented via indirection. In order to keep the implementation compatible with Busybox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_params()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
+- Setting job-specific params via `job_set_params` requires corresponding **job ID** to contain only following characters: `a-z`, `A-Z`, `0-9`, `_`. It also requires corresponding **param name** to contain only the same set of characters, and not start with a digit (for compliance with POSIX specification of valid variable names). When either of these requirements is not met, `job_set_params()` will print an error, return code 1, and the parameter will not be set.
 
 
 ## Environment variables
@@ -227,6 +265,7 @@ The scheduler is configured entirely through environment variables. Required var
 | SCHED_TIMEOUT_S           |          |  `900`  | Global scheduler timeout in seconds ( integer >= 1 ).                                                                            |
 | SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job completions ( integer >= 1 ).                                                  |
 | SCHED_DIR                 |          |  `/tmp` | Directory in which the scheduler creates its FIFO used for communication with running jobs. Trailing `/` characters are ignored. |
+| SCHED_AUTO_PARAMS         |          |  unset  | Whether to export job-specific params when initializing each job ( 1 to enable, any other value to disable ).                    |
 
 Notes:
 
@@ -291,18 +330,31 @@ For a real-world integration example, check out [`hagezi-fetch.sh`](hagezi-fetch
 Implementation highlights you will likely need in your own projects utilizing this library:
 
 ### 1. Passing Parameters to Jobs
-As explained in the [Job Parameters](#job-parameters) section above, this example sets jobs-specific parameters via `job_set_param`. This parameters are then immediately available as variables inside the **job execution callback** (`DO_JOB_CB`).
+As explained in the [Job Parameters](#job-parameters) section above, this example sets job-specific parameters via `job_set_params`. Setting `SCHED_AUTO_PARAMS=1` makes it so these parameters are immediately available to each job as variables inside the **job execution callback** (`DO_JOB_CB`).
 
 ```sh
 # Job-specific parameters are assigned in the main script
-job_set_param pro "url=https://..."
+job_set_params pro "url=https://..."
 
-# Job execution callback
+# Job execution callback (only param-related details)
 download_list() {
-    local name="${1}"
-    # Note: the ${url} variable is set by the scheduler before callback invocation, so this variable *must not be declared local or reset* inside the callback
-    wget -q -O "${OUT_DIR}/${name}.txt" "${url}"
+	local name="${1:?}"
+
+    # Note: with SCHED_AUTO_PARAMS=1, the ${url} variable is set by the scheduler before callback invocation,
+    #   so this variable *must not be declared local or reset* inside the callback
+
+    # Without SCHED_AUTO_PARAMS=1, declare the variable local and get its value from job_get_param:
+    # local url
+    # job_get_param "${name}" url || exit 1
+
+    wget -q -O "${OUT_DIR}/${name}.txt" "${url:?}"
 }
+
+# Setting SCHED_AUTO_PARAMS=1 tells the scheduler to fetch and export job-specific params when initializing each job
+# <...>
+SCHED_AUTO_PARAMS=1 \  
+    schedule_jobs "${IDS}" &
+
 ```
 
 ### 2. Signal Forwarding
