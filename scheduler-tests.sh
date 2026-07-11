@@ -81,19 +81,14 @@ verify_recorded_set()
 		[ "${vrs_expected_items}" = "${vrs_actual_items}" ]
 }
 
-done_handler_default()
+done_handler()
 {
 	echo "done idx='$1' rv='$2'"
 
 	return 0
 }
 
-done_handler()
-{
-	"${DONE_HANDLER_CB:-done_handler_default}" "$@"
-}
-
-finalize_handler_default()
+finalize_handler()
 {
 	local finalize_rv="${1}" pids="${2}" pid_cnt=0
 
@@ -116,11 +111,6 @@ finalize_handler_default()
 	done
 
 	return 0
-}
-
-finalize_handler()
-{
-	"${FINALIZE_HANDLER_CB:-finalize_handler_default}" "$@"
 }
 
 do_job_default()
@@ -183,13 +173,11 @@ run_generic_test()
 	
 	print_test_header "${TEST_NUM:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
 
-	SCHED_FAIL_MSG_CB="${SCHED_FAIL_MSG_CB:-echo}" \
-	SCHED_FINALIZE_CB="${SCHED_FINALIZE_CB-finalize_handler}" \
-	JOB_DONE_CB="${JOB_DONE_CB-done_handler}" \
-	DO_JOB_CB="${DO_JOB_CB:-do_job_default}" \
+	SCHED_FAIL_MSG_CB=echo \
+	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS="${TEST_SCHED_MAX_JOBS:?}" \
 	SCHED_TIMEOUT_S="${SCHED_TIMEOUT_S:-3}" \
-	SCHED_IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-2}" \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs "${TEST_JOBS}" &
 
 	wait "$!"
@@ -266,12 +254,10 @@ run_parallelism_test()
 
 	exec 8>"${fifo}"
 
-	SCHED_FAIL_MSG_CB="${SCHED_FAIL_MSG_CB:-echo}" \
-	SCHED_FINALIZE_CB="${SCHED_FINALIZE_CB-finalize_handler}" \
-	JOB_DONE_CB="${JOB_DONE_CB-done_handler}" \
+	SCHED_FAIL_MSG_CB=echo \
 	SCHED_MAX_JOBS="${TEST_SCHED_MAX_JOBS:?}" \
 	SCHED_TIMEOUT_S="${SCHED_TIMEOUT_S:-3}" \
-	SCHED_IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-2}" \
+	SCHED_IDLE_TIMEOUT_S=2 \
 	DO_JOB_CB=do_job_parallel \
 		schedule_jobs "${TEST_JOBS:?}" &
 
@@ -315,6 +301,8 @@ test_1()
 	TEST_JOBS='ok1 ok2 fail' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 		run_generic_test
 }
 
@@ -328,6 +316,8 @@ test_2()
 	TEST_EXPECT_RV=81 \
 	TEST_SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 		run_generic_test
 }
 
@@ -340,6 +330,8 @@ test_3()
 	TEST_EXPECT_RV=81 \
 	TEST_SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=5 \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 		run_generic_test
 }
 
@@ -351,6 +343,8 @@ test_4()
 	TEST_JOBS='malformed' \
 	TEST_EXPECT_RV=1 \
 	TEST_SCHED_MAX_JOBS=1 \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 		run_generic_test
 }
 
@@ -362,6 +356,8 @@ test_5()
 	TEST_JOBS='1 2 3 4 5' \
 	TEST_SCHED_MAX_JOBS=3 \
 	TEST_EXPECT_MAX_JOBS=3 \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 		run_parallelism_test
 }
 
@@ -374,6 +370,8 @@ test_6()
 	TEST_SCHED_MAX_JOBS=1 \
 	TEST_EXPECT_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=7 \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 		run_parallelism_test
 }
 
@@ -386,6 +384,8 @@ test_7()
 	TEST_JOBS='ok ok ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 		run_generic_test
 }
 
@@ -418,9 +418,8 @@ test_8()
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
+	JOB_DONE_CB=test_8_done_handler \
 	DO_JOB_CB=do_job_default \
-	DONE_HANDLER_CB=test_8_done_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=3 \
 	SCHED_IDLE_TIMEOUT_S=2 \
@@ -476,8 +475,7 @@ test_9()
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
-	DONE_HANDLER_CB=test_9_done_handler \
+	JOB_DONE_CB=test_9_done_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=6 \
 	SCHED_IDLE_TIMEOUT_S=2 \
@@ -527,7 +525,7 @@ test_10()
 	{
 		local rv="${1}" pids="${2}"
 
-		finalize_handler_default "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}" || return $?
 
 		if [ -z "${pids}" ]
 		then
@@ -559,10 +557,8 @@ test_10()
 	jobs=$(seq 1 100)
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
-	DONE_HANDLER_CB=test_10_done_handler \
-	FINALIZE_HANDLER_CB=test_10_finalize_handler \
+	SCHED_FINALIZE_CB=test_10_finalize_handler \
+	JOB_DONE_CB=test_10_done_handler \
 	SCHED_MAX_JOBS=10 \
 	SCHED_TIMEOUT_S=20 \
 	SCHED_IDLE_TIMEOUT_S=2 \
@@ -604,7 +600,7 @@ test_11()
 	{
 		local rv="${1}" pids="${2}"
 
-		finalize_handler_default "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}" || return $?
 
 		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
@@ -623,10 +619,9 @@ test_11()
 	print_test_header 11 "Processing timeout" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
+	SCHED_FINALIZE_CB=test_11_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
-	FINALIZE_HANDLER_CB=test_11_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=3 \
 	SCHED_IDLE_TIMEOUT_S=10 \
@@ -666,7 +661,7 @@ test_12()
 	{
 		local rv="${1}" pids="${2}"
 
-		finalize_handler_default "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}" || return $?
 
 		if [ -z "${pids}" ]
 		then
@@ -694,11 +689,9 @@ test_12()
 	print_test_header 12 "Empty job list" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
+	SCHED_FINALIZE_CB=test_12_finalize_handler \
+	JOB_DONE_CB=test_12_done_handler \
 	DO_JOB_CB=do_job_default \
-	DONE_HANDLER_CB=test_12_done_handler \
-	FINALIZE_HANDLER_CB=test_12_finalize_handler \
 	SCHED_MAX_JOBS=3 \
 	SCHED_TIMEOUT_S=3 \
 	SCHED_IDLE_TIMEOUT_S=2 \
@@ -743,7 +736,7 @@ test_13()
 			printf '%s\n' "${pids}" > "${SIGUSR1_PIDS_FILE:?}"
 		fi
 
-		finalize_handler_default "${rv}" "${pids}"
+		finalize_handler "${rv}" "${pids}"
 	}
 
 	local \
@@ -762,10 +755,9 @@ test_13()
 	print_test_header 13 "SIGUSR1 termination" "1 2"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
+	SCHED_FINALIZE_CB=test_13_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
-	FINALIZE_HANDLER_CB=test_13_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=10 \
 	SCHED_IDLE_TIMEOUT_S=5 \
@@ -840,7 +832,7 @@ test_15()
 	{
 		local rv="${1}" pids="${2}"
 
-		finalize_handler_default "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}" || return $?
 
 		printf '%s\n' "${rv}" >> "${FINALIZE_RV_FILE}"
 
@@ -863,10 +855,9 @@ test_15()
 
 	local \
 		SCHED_FAIL_MSG_CB=echo \
-		SCHED_FINALIZE_CB=finalize_handler \
+		SCHED_FINALIZE_CB=test_15_finalize_handler \
 		JOB_DONE_CB=done_handler \
-		DO_JOB_CB=do_job_default \
-		FINALIZE_HANDLER_CB=test_15_finalize_handler
+		DO_JOB_CB=do_job_default
 
 	# Successful scheduler run: callback RV should become scheduler RV.
 	SCHED_MAX_JOBS=2 \
@@ -1092,6 +1083,7 @@ test_17()
 test_18()
 {
 	JOB_DONE_CB='' \
+	SCHED_FINALIZE_CB=finalize_handler \
 	TEST_NUM=18 \
 	TEST_NAME='Empty JOB_DONE_CB' \
 	TEST_JOBS='ok ok ok' \
@@ -1294,8 +1286,7 @@ test_21()
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
-	DONE_HANDLER_CB=test_21_done_handler \
+	JOB_DONE_CB=test_21_done_handler \
 	SCHED_MAX_JOBS=3 \
 	SCHED_TIMEOUT_S=20 \
 	SCHED_IDLE_TIMEOUT_S=10 \
@@ -1387,7 +1378,7 @@ test_23()
 	{
 		local rv="${1}" pids="${2}"
 
-		finalize_handler_default "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}" || return $?
 
 		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
@@ -1405,10 +1396,9 @@ test_23()
 	print_test_header 23 "Idle timeout" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
+	SCHED_FINALIZE_CB=test_23_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
-	FINALIZE_HANDLER_CB=test_23_finalize_handler \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=10 \
 	SCHED_IDLE_TIMEOUT_S=3 \
@@ -1440,7 +1430,7 @@ test_24()
 	{
 		local rv="${1}" pids="${2}"
 
-		finalize_handler_default "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}" || return $?
 
 		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
@@ -1458,10 +1448,9 @@ test_24()
 	print_test_header 24 "Global timeout despite continuous progress" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
+	SCHED_FINALIZE_CB=test_24_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
-	FINALIZE_HANDLER_CB=test_24_finalize_handler \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=3 \
 	SCHED_IDLE_TIMEOUT_S=20 \
@@ -1526,6 +1515,8 @@ test_26()
 	TEST_JOBS='ok ok ok' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=10 \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
 		run_generic_test
 }
 
@@ -1534,6 +1525,7 @@ test_26()
 test_27()
 {
 	SCHED_FINALIZE_CB='' \
+	JOB_DONE_CB=done_handler \
 	TEST_NUM=27 \
 	TEST_NAME='Empty SCHED_FINALIZE_CB' \
 	TEST_JOBS='ok ok ok ok ok' \
@@ -1647,11 +1639,9 @@ test_29()
 		parent_pre="${mode}"
 
 		SCHED_FAIL_MSG_CB=echo \
-		SCHED_FINALIZE_CB=finalize_handler \
-		JOB_DONE_CB=done_handler \
+		SCHED_FINALIZE_CB=test_29_finalize_handler \
+		JOB_DONE_CB=test_29_done_handler \
 		DO_JOB_CB=test_29_do_job \
-		DONE_HANDLER_CB=test_29_done_handler \
-		FINALIZE_HANDLER_CB=test_29_finalize_handler \
 		SCHED_MAX_JOBS=2 \
 		SCHED_TIMEOUT_S=3 \
 		SCHED_IDLE_TIMEOUT_S=2 \
@@ -2015,7 +2005,7 @@ test_33()
 			printf '%s\n' "${pids}" > "${SIG_PIDS_FILE:?}"
 		fi
 
-		finalize_handler_default "${rv}" "${pids}"
+		finalize_handler "${rv}" "${pids}"
 	}
 
 	local \
@@ -2034,10 +2024,9 @@ test_33()
 
 	local \
 		SCHED_FAIL_MSG_CB=echo \
-		SCHED_FINALIZE_CB=finalize_handler \
+		SCHED_FINALIZE_CB=test_33_finalize_handler \
 		JOB_DONE_CB=done_handler \
 		DO_JOB_CB=do_job_default \
-		FINALIZE_HANDLER_CB=test_33_finalize_handler \
 		SCHED_MAX_JOBS=2 \
 		SCHED_TIMEOUT_S=10 \
 		SCHED_IDLE_TIMEOUT_S=5
@@ -2134,9 +2123,8 @@ test_34()
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
+	JOB_DONE_CB=test_34_done_handler \
 	DO_JOB_CB=do_job_default \
-	DONE_HANDLER_CB=test_34_done_handler \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=20 \
 	SCHED_IDLE_TIMEOUT_S=5 \
