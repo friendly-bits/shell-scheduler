@@ -23,7 +23,7 @@
 
 # SCHED_FINALIZE_CB     Optional command invoked when the scheduler exits.
 #                       Will be called like so:
-#                         <cmd> <scheduler_return_code> <running_pids>
+#                         <cmd> <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <undispatched_job_ids>
 #                       <running_pids> will normally be empty string, except when a timeout is reached or when scheduler is terminated before jobs complete
 
 # JOB_DONE_CB           Optional command invoked after each completed job:
@@ -247,7 +247,6 @@ job_get_params() {
 	[ "${1}" = '-export' ] && { sch_export="export "; shift; }
 
 	local sch_me=job_get_params \
-		sch_had_f \
 		sch_param \
 		sch_job_params \
 		sch_param_seen \
@@ -259,12 +258,10 @@ job_get_params() {
 	[ "${*}" = sch_all ] && {
 		eval "sch_job_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 		[ -n "${sch_job_params}" ] || return 0
-		case "${-}" in
-			*f*) sch_had_f=1 ;;
-		esac
+
 		set -f
 		set -- ${sch_job_params}
-		[ -n "${sch_had_f}" ] || set +f
+		[ -n "${SCH_HAD_F}" ] || set +f
 	}
 
 	for sch_param; do
@@ -281,7 +278,8 @@ job_get_params() {
 }
 
 sch_finalize() {
-	local sch_cb_rv sch_rv="${1}"
+	local sch_cb_rv sch_fail_ids \
+		sch_rv="${1}"
 
 	trap ':' USR1 INT TERM
 
@@ -290,8 +288,16 @@ sch_finalize() {
 	exec 3>&-
 	rm -f "${sch_ipc_fifo}"
 
+	# Compute sch_fail_ids
+	set -f
+	for sch_id in ${SCH_JOB_IDS}; do
+		sch_is_included "${sch_id}" "${SCH_OK_IDS} ${SCH_UNDISPATCHED_IDS}" ||
+			sch_append sch_fail_ids "${sch_id}"
+	done
+	[ -n "${SCH_HAD_F}" ] || set +f
+
 	[ -z "${SCHED_FINALIZE_CB}" ] ||
-		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" ||
+		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${sch_fail_ids}" "${SCH_UNDISPATCHED_IDS}" ||
 		{
 			sch_cb_rv=${?}
 			[ "${sch_rv}" = 0 ] && sch_rv="${sch_cb_rv}"
@@ -337,9 +343,8 @@ process_done_record() {
 		sch_pids_var="${2:?}" \
 		sch_running_cnt_var="${3:?}" \
 		sch_last_progr_time_var="${4:?}" \
-		sch_job_ids="${5:?}" \
-		sch_ipc_fifo="${6:?}" \
-		sch_job_done_cb="${7}"
+		sch_ipc_fifo="${5:?}" \
+		sch_job_done_cb="${6}"
 
 	eval \
 		"_sch_remain_time_cs=\"\${${sch_rem_time_var}}\"" \
@@ -362,7 +367,7 @@ process_done_record() {
 	sch_is_uint "${sch_done_pid}" &&
 	sch_is_uint "${sch_done_rv}" &&
 	[ -n "${sch_done_id}" ] &&
-	sch_is_included "${sch_done_id}" "${sch_job_ids}" ||
+	sch_is_included "${sch_done_id}" "${SCH_JOB_IDS}" ||
 		sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}'."
 
 	sch_is_included "${sch_done_pid}" "${_sch_running_pids}" ||
@@ -375,6 +380,10 @@ process_done_record() {
 	export -n \
 		"${sch_running_cnt_var}=${_sch_running_cnt}" \
 		"${sch_pids_var}=${_sch_running_pids}"
+
+	[ "${sch_done_rv}" = 0 ] && {
+		sch_append SCH_OK_IDS "${sch_done_id}" || sch_finalize 1
+	}
 
 	sch_get_uptime_cs _sch_cur_time_cs || sch_finalize 1
 	export -n "${sch_last_progr_time_var}=${_sch_cur_time_cs}"
@@ -389,19 +398,14 @@ process_done_record() {
 # Convert any mix of spaces/tabs/newlines to single-space separators
 sch_normalize_ids() {
 	local \
-		sch_had_f \
 		IFS=" "$'\t'$'\n' \
 		out_var="${1}"
-
-	case "${-}" in
-		*f*) sch_had_f=1 ;;
-	esac
 
 	set -f
 	set -- ${2}
 	IFS=" "
 	export -n "${out_var}=${*}"
-	[ -n "${sch_had_f}" ] || set +f
+	[ -n "${SCH_HAD_F}" ] || set +f
 }
 
 sch_fail_msg() {
@@ -452,18 +456,27 @@ schedule_jobs() {
 		sch_running_jobs_cnt=0 \
 		sch_ipc_fifo \
 		sch_dir="${SCHED_DIR:-/tmp}" \
+		\
+		SCH_HAD_F \
+		SCH_UNDISPATCHED_IDS \
+		SCH_OK_IDS \
 		SCH_RUNNING_PIDS \
 		SCH_LAST_PROGRESS_TIME_CS \
 		SCH_PROC_TIMEOUT_S="${SCHED_TIMEOUT_S:-900}" \
 		SCH_IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-300}" \
 		\
-		sch_job_ids="${1?}"
+		SCH_JOB_IDS="${1?}"
 	
 	: "${sch_remain_time_cs}" # Silence shellcheck warning
 
 	shift 1
 
 	# !!! Any additional arguments are passed as-is to user-defined ${DO_JOB_CB} via sch_start_job()
+
+	# Register nogloba state
+	case "${-}" in
+		*f*) SCH_HAD_F=1 ;;
+	esac
 
 	# Check callbacks
 	sch_check_cb SCHED_FAIL_MSG_CB &&
@@ -483,8 +496,10 @@ schedule_jobs() {
 	[ -n "${sch_dir}" ] ||
 		{ sch_fail_msg "Invalid value '${SCHED_DIR}' of env var SCHED_DIR."; return 1; }
 
-	# Convert ${sch_job_ids} to space-separated list
-	sch_normalize_ids sch_job_ids "${sch_job_ids}" || return 1
+	# Convert ${SCH_JOB_IDS} to space-separated list
+	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || return 1
+
+	SCH_UNDISPATCHED_IDS="${SCH_JOB_IDS}"
 
 	# Main logic
 
@@ -505,14 +520,10 @@ schedule_jobs() {
 	trap 'sch_finalize "${SCH_RV_USR1}"' USR1
 	trap 'sch_finalize "${SCH_RV_INT_TERM}"' INT TERM
 
-	local sch_had_f=
-	case "${-}" in
-		*f*) sch_had_f=1 ;;
-	esac
+	# Start jobs
 	set -f
-
-	for sch_id in ${sch_job_ids}; do
-		[ -n "${sch_had_f}" ] || set +f
+	for sch_id in ${SCH_JOB_IDS}; do
+		[ -n "${SCH_HAD_F}" ] || set +f
 		while [ "${sch_running_jobs_cnt}" -ge "${SCHED_MAX_JOBS}" ] &&
 			[ -e "${sch_ipc_fifo}" ]
 		do
@@ -521,7 +532,6 @@ schedule_jobs() {
 				SCH_RUNNING_PIDS \
 				sch_running_jobs_cnt \
 				SCH_LAST_PROGRESS_TIME_CS \
-				"${sch_job_ids}" \
 				"${sch_ipc_fifo}" \
 				"${JOB_DONE_CB}"
 		done
@@ -534,13 +544,15 @@ schedule_jobs() {
 		sch_pid="${!}"
 
 		sch_append SCH_RUNNING_PIDS "${sch_pid}" || return 1
+		sch_rm_elem SCH_UNDISPATCHED_IDS "${sch_id}"
 
 		[ -z "${SCHED_DISPATCH_TICK_CB}" ] ||
 			"${SCHED_DISPATCH_TICK_CB}" "${sch_id}"
 	done
 
-	[ -n "${sch_had_f}" ] || set +f
+	[ -n "${SCH_HAD_F}" ] || set +f
 
+	# Wait for running jobs
 	while [ "${sch_running_jobs_cnt}" -gt 0 ] &&
 		[ -e "${sch_ipc_fifo}" ]
 	do
@@ -549,7 +561,6 @@ schedule_jobs() {
 			SCH_RUNNING_PIDS \
 			sch_running_jobs_cnt \
 			SCH_LAST_PROGRESS_TIME_CS \
-			"${sch_job_ids}" \
 			"${sch_ipc_fifo}" \
 			"${JOB_DONE_CB}"
 	done
