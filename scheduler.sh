@@ -7,6 +7,7 @@
 # SCHED_TIMEOUT_S       Global scheduler timeout (seconds)
 # SCHED_IDLE_TIMEOUT_S  Maximum allowed time without job completions (seconds)
 # SCHED_DIR             Directory used to store scheduler FIFO. Defaults to /tmp if unset.
+# SCHED_AUTO_PARAMS     Automatically assign and export job-specific param variables before starting each job (1 = on, unset or another value = off)
 
 # Environment variables specifying callbacks:
 #  (command name only - no arguments)
@@ -136,25 +137,43 @@ job_set_params() {
 }
 
 # For each param <P> assigns corresponding param value to variable named <P>
+# 0 (optional): '-export'
 # 1: job ID
-# 2: list of params
+# Any extra args: "all" or a list of params, one per argument
 job_get_params() {
+	local sch_export
+	[ "${1}" = '-export' ] && { sch_export="export "; shift; }
+
 	local sch_me=job_get_params \
+		sch_had_f \
 		sch_param \
+		sch_params \
 		sch_cur_params \
 		sch_param_seen \
+		sch_set_all_params \
 		sch_job_id="${1}"
 
 	[ -n "${1+x}" ] && shift
 	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 	eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
-	for sch_param; do
+	sch_params="${*}"
+	[ "${*}" = all ] && { sch_set_all_params=1; sch_params="${sch_cur_params}"; }
+
+	case "${-}" in
+		*f*) sch_had_f=1 ;;
+	esac
+
+	set -f
+	for sch_param in ${sch_params}; do
+		[ -n "${sch_had_f}" ] || set +f
 		sch_param_seen=1
 		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
-		sch_is_included "${sch_param}" "${sch_cur_params}" ||
+		[ -n "${sch_set_all_params}" ] || sch_is_included "${sch_param}" "${sch_cur_params}" ||
 			{ sch_fail_msg "Param '${sch_param}' was never registered for job '${sch_job_id}'."; return 1; }
-		eval "${sch_param}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
+		eval "${sch_export}${sch_param}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
 	done
+
+	[ -n "${sch_had_f}" ] || set +f
 
 	[ -n "${sch_param_seen}" ] &&
 		return 0
@@ -261,6 +280,9 @@ sch_start_job() {
 	' EXIT
 
 	sch_get_cur_pid sch_job_pid || exit 1
+
+	[ "${SCHED_AUTO_PARAMS}" = 1 ] &&
+		{ job_get_params -export "${sch_job_id}" all || exit 1; }
 
 	"${DO_JOB_CB:?}" "${sch_job_id}" "${@}"
 	exit "${?}"
