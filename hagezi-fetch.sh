@@ -10,13 +10,12 @@ SCHEDULER_LIB="${SCHEDULER_LIB:-./scheduler.sh}"
 . "${SCHEDULER_LIB}"
 
 # --- Job list: one numeric ID per list, per-job data via JOB_*_<id> ---
-
-job_set_param pro      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt"
-job_set_param proplus  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus.txt"
-job_set_param multi    "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi.txt"
-job_set_param tif      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.txt"
-job_set_param invalid  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/invalid.txt"
-job_set_param gambling "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling.txt"
+job_set_params pro      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt"
+job_set_params proplus  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus.txt"
+job_set_params multi    "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi.txt"
+job_set_params tif      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.txt"
+job_set_params invalid  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/invalid.txt"
+job_set_params gambling "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling.txt"
 
 
 JOBS_CNT=6
@@ -33,9 +32,9 @@ mkdir -p "${OUT_DIR}" || exit 1
 # Downloads one list; returns wget's exit code.
 download_list()
 {
-	local name="${1}" rv
+	local name="${1:?}" rv
 
-	printf 'Downloading: %s\n' "${name}"
+	printf 'Downloading: '%s' from %s\n' "${name}" "${url:?}"
 
 	# shellcheck disable=SC2154
 	wget -q -O "${OUT_DIR}/${name}.txt" "${url}"
@@ -110,6 +109,7 @@ SCHED_FAIL_MSG_CB=sched_error \
 SCHED_FINALIZE_CB=finalize_dl \
 SCHED_MAX_JOBS=4 \
 SCHED_TIMEOUT_S=120 \
+SCHED_AUTO_PARAMS=1 \
 	schedule_jobs "${IDS}" &
 sched_pid=$!
 
