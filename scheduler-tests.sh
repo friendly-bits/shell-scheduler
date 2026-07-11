@@ -17,21 +17,17 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 # Testing infrastructure functions
 #
 
-PASS()
-{
+PASS() {
 	printf '%s\n' "Result: ${green}PASS${n_c}${1:+" ("}${1}${1:+")"}"
 }
 
-FAIL()
-{
+FAIL() {
 	printf '%s\n' "Result: ${red}FAIL${n_c}${1:+" ("}${1}${1:+")"}"
 }
 
-is_uint()
-{
+is_uint() {
 	local _v
-	for _v in "${@}"
-	do
+	for _v in "${@}"; do
 		case "${_v}" in
 			''|*[!0-9]*) return 1
 		esac
@@ -39,15 +35,13 @@ is_uint()
 	:
 }
 
-read_first_line()
-{
+read_first_line() {
 	export -n "${1:?}="
 	[ -f "${2:?}" ] || return 1
 	IFS= read -r "${1:?}" < "${2}"
 }
 
-set_ansi()
-{
+set_ansi() {
 	local IFS=" "
 	# shellcheck disable=SC2046
 	set -- $(printf '\033[0;31m \033[0;32m \033[0;34m \033[1;33m \033[0;35m \033[0m')
@@ -59,8 +53,7 @@ print_test_header() {
 	printf 'Running jobs: %s\n' "${blue}${3}${n_c}"
 }
 
-verify_recorded_set()
-{
+verify_recorded_set() {
 	local \
 		expected_items_var="${1:?}" \
 		actual_items_var="${2:?}" \
@@ -91,15 +84,13 @@ verify_recorded_set()
 		[ "${vrs_expected_items}" = "${vrs_actual_items}" ]
 }
 
-done_handler()
-{
+done_handler() {
 	echo "done idx='$1' rv='$2'"
 
 	return 0
 }
 
-finalize_handler()
-{
+finalize_handler() {
 	local finalize_rv="${1}" pids="${2}" pid_cnt=0
 
 	if [ -n "${pids}" ]
@@ -115,16 +106,14 @@ finalize_handler()
 		echo "finalize_rv='${finalize_rv}' running_pid_count=${pid_cnt} (list suppressed)"
 	fi
 
-	for pid in ${pids}
-	do
+	for pid in ${pids}; do
 		kill "${pid}" 2>/dev/null
 	done
 
 	return 0
 }
 
-do_job_default()
-{
+do_job_default() {
 	local self_pid job_name="${1}"
 
 	case "${job_name}" in
@@ -157,14 +146,12 @@ do_job_default()
 	return 0
 }
 
-get_test_pid()
-{
+get_test_pid() {
 	local __pid line
 
 	export -n "${1:?}="
 
-	while IFS= read -r line
-	do
+	while IFS= read -r line; do
 		case "${line}" in
 			Pid:*)
 				__pid="${line##*[^0-9]}"
@@ -177,8 +164,7 @@ get_test_pid()
 	export -n "${1}=${__pid}"
 }
 
-run_generic_test()
-{
+run_generic_test() {
 	local sched_rv
 	
 	print_test_header "${TEST_NUM:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
@@ -203,32 +189,26 @@ run_generic_test()
 	fi
 }
 
-parallel_job_enter()
-{
+parallel_job_enter() {
 	printf 'enter\n' >&8
 }
 
-parallel_job_leave()
-{
+parallel_job_leave() {
 	printf 'leave\n' >&8
 }
 
-run_parallelism_test()
-{
-	do_job_parallel()
-	{
+run_parallelism_test() {
+	do_job_parallel() {
 		parallel_job_enter
 		sleep 1
 		parallel_job_leave
 	}
 
-	monitor_parallel_fifo()
-	{
+	monitor_parallel_fifo() {
 		local active=0 max_active=0 msg \
 			result_file="${1:?}"
 
-		while IFS= read -r msg
-		do
+		while IFS= read -r msg; do
 			case "${msg}" in
 				enter)
 					active=$((active + 1))
@@ -302,8 +282,7 @@ run_parallelism_test()
 
 
 # Verify the scheduler succeeds and calls JOB_DONE_CB for every job, even when one fails.
-test_1()
-{
+test_1() {
 	TEST_NUM=1 \
 	TEST_NAME='Normal completion with failure status propagation' \
 	TEST_JOBS='ok1 ok2 fail' \
@@ -315,8 +294,7 @@ test_1()
 }
 
 # Verify the scheduler terminates on idle timeout while a job is still running.
-test_2()
-{
+test_2() {
 	TEST_NUM=2 \
 	TEST_NAME='Idle timeout' \
 	TEST_JOBS='ok ok hang' \
@@ -329,8 +307,7 @@ test_2()
 }
 
 # Verify the scheduler times out when a worker exits without sending a completion record.
-test_3()
-{
+test_3() {
 	TEST_NUM=3 \
 	TEST_NAME='Child crash before completion record' \
 	TEST_JOBS='ok crash' \
@@ -343,8 +320,7 @@ test_3()
 }
 
 # Verify the scheduler treats malformed completion records as an error.
-test_4()
-{
+test_4() {
 	TEST_NUM=4 \
 	TEST_NAME='Malformed completion record' \
 	TEST_JOBS='malformed' \
@@ -356,8 +332,7 @@ test_4()
 }
 
 # Verify the scheduler never runs more than SCHED_MAX_JOBS workers at once.
-test_5()
-{
+test_5() {
 	TEST_NUM=5 \
 	TEST_NAME='Parallelism limit' \
 	TEST_JOBS='1 2 3 4 5' \
@@ -369,8 +344,7 @@ test_5()
 }
 
 # Verify SCHED_MAX_JOBS=1 causes jobs to execute strictly sequentially.
-test_6()
-{
+test_6() {
 	TEST_NUM=6 \
 	TEST_NAME='Single worker mode' \
 	TEST_JOBS='1 2 3 4' \
@@ -383,8 +357,7 @@ test_6()
 }
 
 # Verify the scheduler succeeds and all JOB_DONE_CB callbacks run when every job succeeds.
-test_7()
-{
+test_7() {
 	TEST_NUM=7 \
 	TEST_NAME='All jobs succeed' \
 	TEST_JOBS='ok ok ok ok ok' \
@@ -396,10 +369,8 @@ test_7()
 }
 
 # Verify a failing JOB_DONE_CB causes the scheduler to terminate with an error.
-test_8()
-{
-	test_8_done_handler()
-	{
+test_8() {
+	test_8_done_handler() {
 		echo "done idx='$1' rv='$2'"
 
 		if [ "$2" != 0 ]
@@ -448,15 +419,12 @@ test_8()
 }
 
 # Verify job completion triggers dispatch of the next queued job until all jobs run.
-test_9()
-{
-	test_9_do_job()
-	{
+test_9() {
+	test_9_do_job() {
 		sleep 1
 	}
 
-	test_9_done_handler()
-	{
+	test_9_done_handler() {
 		echo "done idx='$1' rv='$2'"
 
 		printf '%s\n' "$1" >> "${DONE_COUNT_FILE:?}"
@@ -508,15 +476,12 @@ test_9()
 }
 
 # Verify 100 jobs complete and SCHED_FINALIZE_CB receives an empty running-PID list.
-test_10()
-{
-	test_10_do_job()
-	{
+test_10() {
+	test_10_do_job() {
 		sleep 0
 	}
 
-	test_10_done_handler()
-	{
+	test_10_done_handler() {
 		echo "done idx='$1' rv='$2'"
 
 		printf '%s\n' "$1" >> "${DONE_COUNT_FILE:?}"
@@ -524,8 +489,7 @@ test_10()
 		return 0
 	}
 
-	test_10_finalize_handler()
-	{
+	test_10_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -595,10 +559,8 @@ test_10()
 }
 
 # Verify the global timeout fires while workers are active and idle timeout hasn't elapsed.
-test_11()
-{
-	test_11_finalize_handler()
-	{
+test_11() {
+	test_11_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -646,10 +608,8 @@ test_11()
 }
 
 # Verify an empty job list succeeds, calls no JOB_DONE_CB, and finalizes with empty PIDs.
-test_12()
-{
-	test_12_done_handler()
-	{
+test_12() {
+	test_12_done_handler() {
 		echo "done idx='$1' rv='$2'"
 
 		printf '%s\n' "$1" >> "${EMPTY_DONE_FILE:?}"
@@ -657,8 +617,7 @@ test_12()
 		return 0
 	}
 
-	test_12_finalize_handler()
-	{
+	test_12_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -723,10 +682,8 @@ test_12()
 
 # Verify SIGUSR1 terminates the scheduler, SCHED_FINALIZE_CB gets a non-empty PID list,
 #   and kills the workers.
-test_13()
-{
-	test_13_finalize_handler()
-	{
+test_13() {
+	test_13_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		printf '%s\n' "${rv}" > "${SIGUSR1_RV_FILE:?}"
@@ -790,8 +747,7 @@ test_13()
 }
 
 # Verify a lost completion record with another worker still active causes an idle timeout.
-test_14()
-{
+test_14() {
 	local \
 		TEST_NUM=14 \
 		sched_rv \
@@ -824,10 +780,8 @@ test_14()
 }
 
 # Verify a failing SCHED_FINALIZE_CB overrides rv=0 but not an existing scheduler error.
-test_15()
-{
-	test_15_finalize_handler()
-	{
+test_15() {
+	test_15_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -894,15 +848,12 @@ test_15()
 }
 
 # Verify invalid callback configuration is rejected before any jobs start.
-test_16()
-{
-	test_16_fail_msg_handler()
-	{
+test_16() {
+	test_16_fail_msg_handler() {
 		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
-	test_16_do_job()
-	{
+	test_16_do_job() {
 		printf 'started\n' > "${JOB_STARTED_FILE:?}"
 		return 0
 	}
@@ -941,10 +892,8 @@ test_16()
 
 	print_test_header 16 "Invalid callback configuration" "${cb_list}"
 
-	for bad_cb in ${cb_list}
-	do
-		for cb in ${cb_list}
-		do
+	for bad_cb in ${cb_list}; do
+		for cb in ${cb_list}; do
 			if [ "${cb}" = "${bad_cb}" ]; then
 				local "${cb}=does_not_exist"
 			else
@@ -983,15 +932,12 @@ test_16()
 }
 
 # Verify invalid scheduler numeric env vars are rejected before any jobs start.
-test_17()
-{
-	test_17_fail_msg_handler()
-	{
+test_17() {
+	test_17_fail_msg_handler() {
 		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
-	test_17_do_job()
-	{
+	test_17_do_job() {
 		printf 'started\n' > "${JOB_STARTED_FILE:?}"
 		return 0
 	}
@@ -999,8 +945,7 @@ test_17()
 	# SCHED_MAX_JOBS is required (sch_check_uint's 3rd arg); SCHED_TIMEOUT_S
 	# and SCHED_IDLE_TIMEOUT_S are optional, so '' is a *valid* value for
 	# them (means "use default") and must not be included as a bad value.
-	test_17_check_bad_value()
-	{
+	test_17_check_bad_value() {
 		local var="${1}" bad_val="${2}" sched_rv \
 			SCHED_MAX_JOBS=1 \
 			SCHED_TIMEOUT_S=3 \
@@ -1042,15 +987,12 @@ test_17()
 	print_test_header 17 "Invalid scheduler numeric env var values" \
 		"SCHED_MAX_JOBS('' abc 0 -1), SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S(abc 0 -1)"
 
-	for bad_val in '' abc 0 -1
-	do
+	for bad_val in '' abc 0 -1; do
 		test_17_check_bad_value SCHED_MAX_JOBS "${bad_val}"
 	done
 
-	for var in SCHED_TIMEOUT_S SCHED_IDLE_TIMEOUT_S
-	do
-		for bad_val in abc 0 -1
-		do
+	for var in SCHED_TIMEOUT_S SCHED_IDLE_TIMEOUT_S; do
+		for bad_val in abc 0 -1; do
 			test_17_check_bad_value "${var}" "${bad_val}"
 		done
 	done
@@ -1075,8 +1017,7 @@ test_17()
 
 
 # Verify JOB_DONE_CB may be empty and the scheduler still completes normally.
-test_18()
-{
+test_18() {
 	JOB_DONE_CB='' \
 	SCHED_FINALIZE_CB=finalize_handler \
 	TEST_NUM=18 \
@@ -1088,10 +1029,8 @@ test_18()
 }
 
 # Verify extra args to schedule_jobs() are forwarded unchanged to DO_JOB_CB after the job ID.
-test_19()
-{
-	test_19_do_job()
-	{
+test_19() {
+	test_19_do_job() {
 		printf '%s\n' "$*" >> "${ARGS_FILE:?}"
 		return 0
 	}
@@ -1146,10 +1085,8 @@ EOF
 }
 
 # Verify SCHED_MAX_JOBS caps concurrency under heavy load (300 jobs).
-test_20()
-{
-	test_20_do_job()
-	{
+test_20() {
+	test_20_do_job() {
 		parallel_job_enter
 
 		case $(( $1 % 2 )) in
@@ -1160,13 +1097,11 @@ test_20()
 		parallel_job_leave
 	}
 
-	monitor_stress_fifo()
-	{
+	monitor_stress_fifo() {
 		local active=0 max_active=0 msg \
 			result_file="${1:?}"
 
-		while IFS= read -r msg
-		do
+		while IFS= read -r msg; do
 			case "${msg}" in
 				enter)
 					active=$((active + 1))
@@ -1208,8 +1143,7 @@ test_20()
 
 	# generate large job set
 	jobs=
-	while [ "${i}" -lt "${N}" ]
-	do
+	while [ "${i}" -lt "${N}" ]; do
 		i=$((i + 1))
 		jobs="${jobs} ${i}"
 	done
@@ -1249,15 +1183,12 @@ test_20()
 }
 
 # Verify arbitrary DO_JOB_CB return codes reach JOB_DONE_CB unchanged without failing the scheduler.
-test_21()
-{
-	test_21_do_job()
-	{
+test_21() {
+	test_21_do_job() {
 		return "$1"
 	}
 
-	test_21_done_handler()
-	{
+	test_21_done_handler() {
 		printf '%s %s\n' "$1" "$2" >> "${STATUS_FILE:?}"
 
 		return 0
@@ -1320,8 +1251,7 @@ EOF
 }
 
 # Verify removing the scheduler FIFO during execution causes scheduler failure.
-test_22()
-{
+test_22() {
 	local \
 		TEST_NUM=22 \
 		sched_rv \
@@ -1361,10 +1291,8 @@ test_22()
 }
 
 # Verify idle timeout fires while workers are active and processing timeout hasn't elapsed.
-test_23()
-{
-	test_23_finalize_handler()
-	{
+test_23() {
+	test_23_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -1411,10 +1339,8 @@ test_23()
 }
 
 # Verify the global timeout fires from scheduler start time, not from the last job completion.
-test_24()
-{
-	test_24_finalize_handler()
-	{
+test_24() {
+	test_24_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -1461,8 +1387,7 @@ test_24()
 }
 
 # Verify the global timeout takes priority when it and the idle timeout are due simultaneously.
-test_25()
-{
+test_25() {
 	local \
 		TEST_NUM=25 \
 		sched_rv \
@@ -1493,8 +1418,7 @@ test_25()
 }
 
 # Verify SCHED_MAX_JOBS greater than the job count still completes all jobs normally.
-test_26()
-{
+test_26() {
 	TEST_NUM=26 \
 	TEST_NAME='SCHED_MAX_JOBS exceeds job count' \
 	TEST_JOBS='ok ok ok' \
@@ -1507,8 +1431,7 @@ test_26()
 
 # Verify SCHED_FINALIZE_CB may be empty and the scheduler still completes normally
 #   (test_18).
-test_27()
-{
+test_27() {
 	SCHED_FINALIZE_CB='' \
 	JOB_DONE_CB=done_handler \
 	TEST_NUM=27 \
@@ -1520,8 +1443,7 @@ test_27()
 }
 
 # Verify finalize() removes the scheduler's FIFO after a normal run, no leaked file.
-test_28()
-{
+test_28() {
 	local \
 		TEST_NUM=28 \
 		sched_rv \
@@ -1559,10 +1481,8 @@ test_28()
 }
 
 # Verify DO_JOB_CB, JOB_DONE_CB, and SCHED_FINALIZE_CB observe the caller's noglob state.
-test_29()
-{
-	test_29_do_job()
-	{
+test_29() {
+	test_29_do_job() {
 		case "${-}" in
 			*f*) printf 'noglob\n' ;;
 			*) printf 'glob\n' ;;
@@ -1570,8 +1490,7 @@ test_29()
 		return 0
 	}
 
-	test_29_done_handler()
-	{
+	test_29_done_handler() {
 		case "${-}" in
 			*f*) printf 'noglob\n' ;;
 			*) printf 'glob\n' ;;
@@ -1579,8 +1498,7 @@ test_29()
 		return 0
 	}
 
-	test_29_finalize_handler()
-	{
+	test_29_finalize_handler() {
 		case "${-}" in
 			*f*) printf 'noglob\n' ;;
 			*) printf 'glob\n' ;;
@@ -1606,8 +1524,7 @@ test_29()
 	print_test_header 29 "noglob state preserved in callbacks" \
 		"glob-enabled and glob-disabled callers"
 
-	for mode in glob noglob
-	do
+	for mode in glob noglob; do
 		do_job_glob_file="/tmp/sched.globtest.job.${TEST_NUM:?}.$$"
 		done_glob_file="/tmp/sched.globtest.done.${TEST_NUM:?}.$$"
 		finalize_glob_file="/tmp/sched.globtest.finalize.${TEST_NUM:?}.$$"
@@ -1670,23 +1587,19 @@ test_29()
 }
 
 # Verify job IDs with arbitrary non-whitespace chars reach DO_JOB_CB/JOB_DONE_CB unchanged.
-test_30()
-{
-	test_30_do_job()
-	{
+test_30() {
+	test_30_do_job() {
 		printf '%s\n' "$1" >> "${ARGS_FILE:?}"
 		sleep 1
 		return 0
 	}
 
-	test_30_done_handler()
-	{
+	test_30_done_handler() {
 		printf '%s\n' "$1" >> "${DONE_FILE:?}"
 		return 0
 	}
 
-	test_30_touch_inject()
-	{
+	test_30_touch_inject() {
 		touch "${INJECT_FILE:?}"
 	}
 
@@ -1791,15 +1704,12 @@ test_30()
 }
 
 # Verify forged completion records (glob/injection-shaped IDs) are rejected, never executed.
-test_31()
-{
-	test_31_touch_inject()
-	{
+test_31() {
+	test_31_touch_inject() {
 		touch "${INJECT_FILE:?}"
 	}
 
-	test_31_do_job()
-	{
+	test_31_do_job() {
 		local self_pid
 
 		get_test_pid self_pid || return 1
@@ -1809,13 +1719,11 @@ test_31()
 		return 0
 	}
 
-	test_31_fail_msg_handler()
-	{
+	test_31_fail_msg_handler() {
 		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
-	test_31_check_forgery()
-	{
+	test_31_check_forgery() {
 		local job_id="${1:?}" spoof_id="${2:?}" sched_rv
 
 		rm -f "${INJECT_FILE:?}"
@@ -1884,10 +1792,8 @@ test_31()
 
 # Verify extra args to schedule_jobs() reach DO_JOB_CB with exact boundaries/content intact:
 #   empty string, embedded whitespace, glob metacharacters, leading dash.
-test_32()
-{
-	test_32_do_job()
-	{
+test_32() {
+	test_32_do_job() {
 		local id="${1}" rec
 
 		shift
@@ -1928,8 +1834,7 @@ test_32()
 	sched_rv=$?
 
 	expected="$(
-		for id in 1 2 3
-		do
+		for id in 1 2 3; do
 			printf '%s 5 <>\037<a b>\037<*>\037<-x>\037<c\035d>\037\n' \
 				"${id}"
 		done
@@ -1968,10 +1873,8 @@ test_32()
 }
 
 # Verify SIGINT/SIGTERM terminate the scheduler with SCHED_RV_INT_TERM and a non-empty PID list.
-test_33()
-{
-	test_33_finalize_handler()
-	{
+test_33() {
+	test_33_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		printf '%s\n' "${rv}" > "${SIG_RV_FILE:?}"
@@ -2009,8 +1912,7 @@ test_33()
 
 	print_test_header 33 "SIGINT/SIGTERM termination" "1 2"
 
-	for sig in INT TERM
-	do
+	for sig in INT TERM; do
 		rm -f "${SIG_RV_FILE}" "${SIG_PIDS_FILE}"
 
 		case "${sig}" in
@@ -2075,10 +1977,8 @@ test_33()
 }
 
 # Verify idle timeout accounts for time spent in JOB_DONE_CB, not reset to the full value.
-test_34()
-{
-	test_34_done_handler()
-	{
+test_34() {
+	test_34_done_handler() {
 		# Delay JOB_DONE_CB to consume part of the idle timeout before the next read -t.
 		sleep 3
 		return 0
@@ -2123,8 +2023,7 @@ test_34()
 
 # Verify SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S may be left unset, falling back to defaults
 #   (test_39).
-test_35()
-{
+test_35() {
 	local \
 		TEST_NUM=35 \
 		sched_rv \
@@ -2153,8 +2052,7 @@ test_35()
 }
 
 # Verify SIGUSR1/SIGINT/SIGTERM interrupt the scheduler promptly, not via an unrelated timeout.
-test_36()
-{
+test_36() {
 	local \
 		TEST_NUM=36 \
 		sig \
@@ -2177,8 +2075,7 @@ test_36()
 
 	print_test_header 36 "Prompt termination on SIGUSR1/SIGINT/SIGTERM" "hang"
 
-	for sig in USR1 INT TERM
-	do
+	for sig in USR1 INT TERM; do
 		case "${sig}" in
 			USR1) expect_rv=83 ;;
 			INT|TERM) expect_rv=84 ;;
@@ -2245,8 +2142,7 @@ test_36()
 }
 
 # Verify idle and global timeouts fire within their configured time window, not just eventually.
-test_37()
-{
+test_37() {
 	local \
 		TEST_NUM=37 \
 		sched_rv \
@@ -2321,8 +2217,7 @@ test_37()
 
 # Verify read -t rounding doesn't overshoot at the minimum SCHED_IDLE_TIMEOUT_S=1
 #   (~1s, not more).
-test_38()
-{
+test_38() {
 	local \
 		TEST_NUM=38 \
 		sched_rv \
@@ -2363,8 +2258,7 @@ test_38()
 
 # Verify that explicitly empty-value SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S
 #   are accepted and fall back to defaults.
-test_39()
-{
+test_39() {
 	local \
 		TEST_NUM=39 \
 		sched_rv \
@@ -2396,16 +2290,13 @@ test_39()
 
 # Verify the global timeout can fire inside schedule_jobs()'s initial dispatch loop.
 # SCHED_DISPATCH_TICK_CB stalls past SCHED_TIMEOUT_S so the second job is never dispatched.
-test_40()
-{
-	test_40_do_job()
-	{
+test_40() {
+	test_40_do_job() {
 		[ "${1}" = second ] && printf 'dispatched\n' > "${SECOND_DISPATCHED_FILE}"
 		return 0
 	}
 
-	test_40_dispatch_tick()
-	{
+	test_40_dispatch_tick() {
 		[ "${1}" = first ] && sleep 2
 	}
 
@@ -2448,10 +2339,8 @@ test_40()
 
 # Verify that a single param registered via job_set_params()
 #   is delivered to DO_JOB_CB with the exact value.
-test_41()
-{
-	test_41_do_job()
-	{
+test_41() {
+	test_41_do_job() {
 		job_get_params "${1}" FOO
 		printf '%s\n' "${FOO-<unset>}" > "${OUT_FILE:?}"
 		return 0
@@ -2498,10 +2387,8 @@ test_41()
 }
 
 # Verify multiple params registered for the same job are all delivered.
-test_42()
-{
-	test_42_do_job()
-	{
+test_42() {
+	test_42_do_job() {
 		job_get_params "${1}" PARAM_A PARAM_B PARAM_C
 		{
 			printf 'A=%s\n' "${PARAM_A-<unset>}"
@@ -2557,10 +2444,8 @@ test_42()
 # Verify job_get_params() returns an empty value (rv=0, no error) for a param never
 #   registered for the job, and a multi-name request still fetches every requested name,
 #   including ones after the unregistered one.
-test_43()
-{
-	test_43_do_job()
-	{
+test_43() {
+	test_43_do_job() {
 		local rv
 		job_get_params "${1}" GOOD1 MISSING GOOD2
 		rv=$?
@@ -2620,10 +2505,8 @@ test_43()
 # Verify job_set_params() rejects invalid input at assignment time:
 #   bad job ID, pair missing '=', bad/empty/leading-digit param names,
 #   and accepts a leading-digit job ID (job IDs need not be valid shell identifiers).
-test_44()
-{
-	test_44_check_rejected()
-	{
+test_44() {
+	test_44_check_rejected() {
 		total_cnt=$((total_cnt + 1))
 		SCHED_FAIL_MSG_CB=test_44_fail_msg job_set_params "${1}" "${2}"
 		rv=$?
@@ -2635,8 +2518,7 @@ test_44()
 		fi
 	}
 
-	test_44_check_accepted()
-	{
+	test_44_check_accepted() {
 		total_cnt=$((total_cnt + 1))
 		SCHED_FAIL_MSG_CB=test_44_fail_msg job_set_params "${1}" "${2}"
 		rv=$?
@@ -2692,12 +2574,10 @@ test_44()
 #   (sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS): rv=1,
 #   one specific message emitted per case, and nothing is stored -
 #   a later job run never sees the param.
-test_45()
-{
+test_45() {
 	test_45_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
-	test_45_do_job()
-	{
+	test_45_do_job() {
 		job_get_params "${1}" GOOD
 		printf '%s\n' "${GOOD-<unset>}" > "${OUT_FILE:?}"
 		return 0
@@ -2777,10 +2657,8 @@ test_45()
 
 # Verify a job's params don't leak into another job's environment: two jobs registering
 #   the same param name with different values must each see only their own value.
-test_46()
-{
-	test_46_do_job()
-	{
+test_46() {
+	test_46_do_job() {
 		local out
 		case "${1}" in
 			"${job_id_a}") out="${J1_FILE:?}" ;;
@@ -2841,10 +2719,8 @@ test_46()
 
 # Verify that registering the same param key twice for a job
 #   keeps the last value (last write wins) without error
-test_47()
-{
-	test_47_do_job()
-	{
+test_47() {
+	test_47_do_job() {
 		job_get_params "${1}" DUPKEY
 		printf '%s\n' "${DUPKEY-<unset>}" > "${OUT_FILE:?}"
 		return 0
@@ -2893,10 +2769,8 @@ test_47()
 
 # Verify pair parsing splits only on the first '=':
 #   the value may contain further '=' characters unmodified.
-test_48()
-{
-	test_48_do_job()
-	{
+test_48() {
+	test_48_do_job() {
 		job_get_params "${1}" URL
 		printf '%s\n' "${URL-<unset>}" > "${OUT_FILE:?}"
 		return 0
@@ -2946,12 +2820,10 @@ test_48()
 # Verify param values are stored/delivered as opaque data:
 #   quotes, $(), backticks, globs, spaces, empty value
 #   are preserved and never executed or glob-expanded.
-test_49()
-{
+test_49() {
 	test_49_touch_inject() { touch "${INJECT_FILE:?}"; }
 
-	test_49_do_job()
-	{
+	test_49_do_job() {
 		job_get_params "${1}" SPACEY QUOTY CMDSUB BACKTICK GLOBBY EMPTYV
 		{
 			printf 'SPACEY=%s\n' "${SPACEY-<unset>}"
@@ -3022,10 +2894,8 @@ test_49()
 }
 
 # Verify job params and forwarded positional args to DO_JOB_CB coexist without interference.
-test_50()
-{
-	test_50_do_job()
-	{
+test_50() {
+	test_50_do_job() {
 		job_get_params "${1}" COMBOPARAM
 		{
 			printf 'PARAM=%s\n' "${COMBOPARAM-<unset>}"
@@ -3080,8 +2950,7 @@ test_50()
 
 # Verify job_get_params() runs its own reserved/malformed-name validation on the requested
 #   param name, independent of job_set_params()'s validation at registration time.
-test_51()
-{
+test_51() {
 	test_51_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
 	local \
@@ -3143,8 +3012,7 @@ test_51()
 
 # Verify job_get_params() runs its own job-ID validation,
 #   independent of job_set_params()'s job-ID validation at registration time.
-test_52()
-{
+test_52() {
 	test_52_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
 	local \
@@ -3166,8 +3034,7 @@ test_52()
 
 	job_set_params "${job_id}" "REALPARAM=fine"
 
-	for jid in "" "bad id"
-	do
+	for jid in "" "bad id"; do
 		total_cnt=$((total_cnt + 1))
 		SCHED_FAIL_MSG_CB=test_52_fail_msg job_get_params "${jid}" REALPARAM
 		rv=$?
@@ -3201,8 +3068,7 @@ test_52()
 # Verify job_get_params() rejects a call with a valid job ID but zero requested param names,
 #   and that this failure is reported with its own distinct message
 #   (not conflated with the bad-job-ID message)
-test_53()
-{
+test_53() {
 	test_53_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
 	local \
@@ -3247,8 +3113,7 @@ test_53()
 
 # Verify job_set_params() rejects a call with a valid job ID but zero key=value pairs -
 #   symmetric with equivalent guard above (test_53).
-test_54()
-{
+test_54() {
 	test_54_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
 	local \
@@ -3292,8 +3157,7 @@ test_54()
 # Verify job_get_params() always reflects the current registered value,
 #   not something cached at an earlier point -
 #   re-fetching after a later job_set_params() update picks up the new value.
-test_55()
-{
+test_55() {
 	local \
 		TEST_NUM=55 \
 		first \
@@ -3325,12 +3189,10 @@ test_55()
 # Verify job_get_params() works when called from JOB_DONE_CB,
 #   which runs in the main scheduler process (not the forked per-job subshell that runs
 #   DO_JOB_CB) - confirming params are available in every callback, not just DO_JOB_CB.
-test_56()
-{
+test_56() {
 	test_56_do_job() { return 0; }
 
-	test_56_done()
-	{
+	test_56_done() {
 		job_get_params "${1}" FROMDONE
 		printf '%s\n' "${FROMDONE-<unset>}" > "${OUT_FILE:?}"
 		return 0
@@ -3379,8 +3241,7 @@ test_56()
 # Verify job_get_params() is usable directly in the caller's own top-level scope,
 #   not only from within a scheduler callback -
 #   confirming params are available in the user's application scope
-test_57()
-{
+test_57() {
 	test_57_do_job() { return 0; }
 
 	local \
@@ -3425,8 +3286,7 @@ test_57()
 
 # Verify that job_get_params() "sch_all" mode is a no-op success (rv=0, no params assigned)
 #   when the job has never had any params registered
-test_58()
-{
+test_58() {
 	local \
 		TEST_NUM=58 \
 		rv \
@@ -3453,8 +3313,7 @@ test_58()
 #   matching an explicit multi-param fetch of the same job.
 # Also verifies "sch_all" mode's internal word-splitting of the registered-params list
 #   does not leak or lose the caller's noglob state.
-test_59()
-{
+test_59() {
 	local \
 		TEST_NUM=59 \
 		job_id=job_59 \
@@ -3500,8 +3359,7 @@ test_59()
 
 # Verify that job_get_params() with the "-export" flag exports into the process environment,
 #   while the default (no "-export") mode only assigns in the caller's own shell scope.
-test_60()
-{
+test_60() {
 	local \
 		TEST_NUM=60 \
 		job_id=job_60 \
@@ -3537,10 +3395,8 @@ test_60()
 # - DO_JOB_CB sees its own job's registered params without job_get_params() call
 # - jobs with different params stay isolated from each other
 # - job_get_params() "all" doesn't 'exit 1' on empty params set
-test_61()
-{
-	test_61_do_job()
-	{
+test_61() {
+	test_61_do_job() {
 		case "${1}" in
 			withparam1)
 				[ "${MYPARAM-}" = aaa ] && printf 'ok\n' > "${WP1_FILE:?}"
