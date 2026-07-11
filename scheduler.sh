@@ -23,7 +23,7 @@
 
 # SCHED_FINALIZE_CB     Optional command invoked when the scheduler exits.
 #                       Will be called like so:
-#                         <cmd> <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <undispatched_job_ids>
+#                         <cmd> <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <unfinished_job_ids> <undispatched_job_ids>
 #                       <running_pids> will normally be empty string, except when a timeout is reached or when scheduler is terminated before jobs complete
 
 # JOB_DONE_CB           Optional command invoked after each completed job:
@@ -278,7 +278,7 @@ job_get_params() {
 }
 
 sch_finalize() {
-	local sch_cb_rv sch_fail_ids \
+	local sch_cb_rv sch_unfinished_ids \
 		sch_rv="${1}"
 
 	trap ':' USR1 INT TERM
@@ -288,16 +288,16 @@ sch_finalize() {
 	exec 3>&-
 	rm -f "${sch_ipc_fifo}"
 
-	# Compute sch_fail_ids
+	# Compute sch_unfinished_ids
 	set -f
 	for sch_id in ${SCH_JOB_IDS}; do
-		sch_is_included "${sch_id}" "${SCH_OK_IDS} ${SCH_UNDISPATCHED_IDS}" ||
-			sch_append sch_fail_ids "${sch_id}"
+		sch_is_included "${sch_id}" "${SCH_OK_IDS} ${SCH_UNDISPATCHED_IDS} ${SCH_FAIL_IDS}" ||
+			sch_append sch_unfinished_ids "${sch_id}"
 	done
 	[ -n "${SCH_HAD_F}" ] || set +f
 
 	[ -z "${SCHED_FINALIZE_CB}" ] ||
-		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${sch_fail_ids}" "${SCH_UNDISPATCHED_IDS}" ||
+		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${SCH_FAIL_IDS}" "${sch_unfinished_ids}" "${SCH_UNDISPATCHED_IDS}" ||
 		{
 			sch_cb_rv=${?}
 			[ "${sch_rv}" = 0 ] && sch_rv="${sch_cb_rv}"
@@ -381,9 +381,11 @@ process_done_record() {
 		"${sch_running_cnt_var}=${_sch_running_cnt}" \
 		"${sch_pids_var}=${_sch_running_pids}"
 
-	[ "${sch_done_rv}" = 0 ] && {
-		sch_append SCH_OK_IDS "${sch_done_id}" || sch_finalize 1
-	}
+	if [ "${sch_done_rv}" = 0 ]; then
+		sch_append SCH_OK_IDS "${sch_done_id}"
+	else
+		sch_append SCH_FAIL_IDS "${sch_done_id}"
+	fi || sch_finalize 1
 
 	sch_get_uptime_cs _sch_cur_time_cs || sch_finalize 1
 	export -n "${sch_last_progr_time_var}=${_sch_cur_time_cs}"
@@ -460,6 +462,7 @@ schedule_jobs() {
 		SCH_HAD_F \
 		SCH_UNDISPATCHED_IDS \
 		SCH_OK_IDS \
+		SCH_FAIL_IDS \
 		SCH_RUNNING_PIDS \
 		SCH_LAST_PROGRESS_TIME_CS \
 		SCH_PROC_TIMEOUT_S="${SCHED_TIMEOUT_S:-900}" \
@@ -473,7 +476,7 @@ schedule_jobs() {
 
 	# !!! Any additional arguments are passed as-is to user-defined ${DO_JOB_CB} via sch_start_job()
 
-	# Register nogloba state
+	# Register noglob state
 	case "${-}" in
 		*f*) SCH_HAD_F=1 ;;
 	esac
