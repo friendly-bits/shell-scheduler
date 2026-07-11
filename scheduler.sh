@@ -100,7 +100,9 @@ sch_check_var_chars() {
 # 2: any number of <param=value> pairs
 job_set_params() {
 	local sch_me=job_set_params \
-		sch_param sch_val sch_cur_params \
+		sch_param \
+		sch_val \
+		sch_cur_params \
 		sch_pair \
 		sch_pair_seen \
 		sch_job_id="${1}"
@@ -139,7 +141,7 @@ job_set_params() {
 # For each param <P> assigns corresponding param value to variable named <P>
 # 0 (optional): '-export'
 # 1: job ID
-# Any extra args: "all" or a list of params, one per argument
+# Any extra args: "sch_all" or a list of params, one per argument
 job_get_params() {
 	local sch_export
 	[ "${1}" = '-export' ] && { sch_export="export "; shift; }
@@ -147,31 +149,27 @@ job_get_params() {
 	local sch_me=job_get_params \
 		sch_had_f \
 		sch_param \
-		sch_cur_params \
+		sch_job_params \
 		sch_param_seen \
-		sch_set_all_params \
 		sch_job_id="${1}"
 
 	[ -n "${1+x}" ] && shift
 	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
-	eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 
-	[ "${*}" = all ] && {
-		[ -n "${sch_cur_params}" ] || return 0
-		sch_set_all_params=1
+	[ "${*}" = sch_all ] && {
+		eval "sch_job_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
+		[ -n "${sch_job_params}" ] || return 0
 		case "${-}" in
 			*f*) sch_had_f=1 ;;
 		esac
 		set -f
-		set -- ${sch_cur_params}
+		set -- ${sch_job_params}
 		[ -n "${sch_had_f}" ] || set +f
 	}
 
 	for sch_param; do
 		sch_param_seen=1
 		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
-		[ -n "${sch_set_all_params}" ] || sch_is_included "${sch_param}" "${sch_cur_params}" ||
-			{ sch_fail_msg "Param '${sch_param}' was never registered for job '${sch_job_id}'."; return 1; }
 		eval "${sch_export}${sch_param}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
 	done
 
@@ -282,7 +280,7 @@ sch_start_job() {
 	sch_get_cur_pid sch_job_pid || exit 1
 
 	[ "${SCHED_AUTO_PARAMS}" = 1 ] &&
-		{ job_get_params -export "${sch_job_id}" all || exit 1; }
+		{ job_get_params -export "${sch_job_id}" sch_all || exit 1; }
 
 	"${DO_JOB_CB:?}" "${sch_job_id}" "${@}"
 	exit "${?}"
