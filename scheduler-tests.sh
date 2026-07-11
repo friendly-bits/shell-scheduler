@@ -2525,12 +2525,15 @@ test_41()
 		sched_rv \
 		seen
 
-	local OUT_FILE="/tmp/sched.params.basic.${TEST_NUM}.$$"
+	local \
+		OUT_FILE="/tmp/sched.params.basic.${TEST_NUM}.$$" \
+		job_id=job_41
+
 	rm -f "${OUT_FILE}"
 
-	print_test_header 41 "Single job param delivered as env var" "job41"
+	print_test_header 41 "Single job param delivered as env var" "${job_id}"
 
-	job_set_params job41 "FOO=bar123"
+	job_set_params "${job_id}" "FOO=bar123"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2539,7 +2542,7 @@ test_41()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job41' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -2577,12 +2580,15 @@ test_42()
 		expected \
 		actual
 
-	local OUT_FILE="/tmp/sched.params.multi.${TEST_NUM}.$$"
+	local \
+		OUT_FILE="/tmp/sched.params.multi.${TEST_NUM}.$$" \
+		job_id=job_42
+
 	rm -f "${OUT_FILE}"
 
-	print_test_header 42 "Multiple job params delivered" "job42"
+	print_test_header 42 "Multiple job params delivered" "${job_id}"
 
-	job_set_params job42 "PARAM_A=1" "PARAM_B=two" "PARAM_C=3three3"
+	job_set_params "${job_id}" "PARAM_A=1" "PARAM_B=two" "PARAM_C=3three3"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2591,7 +2597,7 @@ test_42()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job42' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -2640,13 +2646,14 @@ test_43()
 
 	local \
 		OUT_FILE="/tmp/sched.params.unregistered.${TEST_NUM}.$$" \
-		MSG_FILE="/tmp/sched.params.unregistered.msg.${TEST_NUM}.$$"
+		MSG_FILE="/tmp/sched.params.unregistered.msg.${TEST_NUM}.$$" \
+		job_id=job_43
 
 	rm -f "${OUT_FILE}" "${MSG_FILE}"
 
-	print_test_header 43 "job_get_params() rejects an unregistered param and stops at the first failure" "job43"
+	print_test_header 43 "job_get_params() rejects an unregistered param and stops at the first failure" "${job_id}"
 
-	job_set_params job43 "GOOD1=alpha" "GOOD2=beta"
+	job_set_params "${job_id}" "GOOD1=alpha" "GOOD2=beta"
 
 	SCHED_FAIL_MSG_CB=test_43_fail_msg \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2655,7 +2662,7 @@ test_43()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job43' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -2721,18 +2728,19 @@ test_44()
 		msg_cnt
 
 	local MSG_FILE="/tmp/sched.params.validate.${TEST_NUM}.$$"
+	local job_id=job_44
 	rm -f "${MSG_FILE}"
 
 	print_test_header 44 "job_set_params() input validation" "(direct calls, no scheduler run)"
 
 	test_44_check_rejected ""        "FOO=bar"      # empty job ID
 	test_44_check_rejected "bad id"  "FOO=bar"       # job ID with space
-	test_44_check_rejected "job44"   "novalue"       # pair missing '='
-	test_44_check_rejected "job44"   "=novalue"      # empty param name
-	test_44_check_rejected "job44"   "bad param=x"   # param name with space
-	test_44_check_rejected "job44"   "1bad=x"        # param name starting with digit
+	test_44_check_rejected "${job_id}" "novalue"       # pair missing '='
+	test_44_check_rejected "${job_id}" "=novalue"      # empty param name
+	test_44_check_rejected "${job_id}" "bad param=x"   # param name with space
+	test_44_check_rejected "${job_id}" "1bad=x"        # param name starting with digit
 	test_44_check_accepted "1job"    "FOO=x"         # leading-digit JOB ID is fine
-	test_44_check_accepted "job44"   "GOOD=x"        # sanity: valid case still accepted
+	test_44_check_accepted "${job_id}" "GOOD=x"        # sanity: valid case still accepted
 
 	msg_cnt=0
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
@@ -2777,11 +2785,12 @@ test_45()
 
 	local \
 		MSG_FILE="/tmp/sched.params.reserved.msg.${TEST_NUM}.$$" \
-		OUT_FILE="/tmp/sched.params.reserved.out.${TEST_NUM}.$$"
+		OUT_FILE="/tmp/sched.params.reserved.out.${TEST_NUM}.$$" \
+		job_id=job_45
 
 	rm -f "${MSG_FILE}" "${OUT_FILE}"
 
-	print_test_header 45 "Reserved param names rejected at job_set_params() time" "job45"
+	print_test_header 45 "Reserved param names rejected at job_set_params() time" "${job_id}"
 
 	for name in \
 		sch_foo sch_job_id sch_me \
@@ -2792,7 +2801,7 @@ test_45()
 		DO_JOB_CB JOB_DONE_CB IFS
 	do
 		total_cnt=$((total_cnt + 1))
-		SCHED_FAIL_MSG_CB=test_45_fail_msg job_set_params job45 "${name}=x" 2>/dev/null
+		SCHED_FAIL_MSG_CB=test_45_fail_msg job_set_params "${job_id}" "${name}=x" 2>/dev/null
 		rv=$?
 		if [ "${rv}" != 0 ]
 		then
@@ -2803,7 +2812,7 @@ test_45()
 	done
 
 	# One legitimate param too, to confirm the job still runs normally.
-	job_set_params job45 "GOOD=fine"
+	job_set_params "${job_id}" "GOOD=fine"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2812,7 +2821,7 @@ test_45()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job45' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -2836,15 +2845,16 @@ test_45()
 	fi
 }
 
-# Verify params are scoped per job ID: job46a's param must not leak into job46b's environment.
+# Verify params are scoped per job ID: one job's param must not leak into
+# another job's environment.
 test_46()
 {
 	test_46_do_job()
 	{
 		local out
 		case "${1}" in
-			job46a) out="${J1_FILE:?}" ;;
-			job46b) out="${J2_FILE:?}" ;;
+			"${job_id_a}") out="${J1_FILE:?}" ;;
+			"${job_id_b}") out="${J2_FILE:?}" ;;
 			*) return 1 ;;
 		esac
 		job_get_params "${1}" SHARED_NAME
@@ -2865,13 +2875,15 @@ test_46()
 
 	local \
 		J1_FILE="/tmp/sched.params.isolation.j1.${TEST_NUM}.$$" \
-		J2_FILE="/tmp/sched.params.isolation.j2.${TEST_NUM}.$$"
+		J2_FILE="/tmp/sched.params.isolation.j2.${TEST_NUM}.$$" \
+		job_id_a=job_46a \
+		job_id_b=job_46b
 
 	rm -f "${J1_FILE}" "${J2_FILE}"
 
-	print_test_header 46 "Params are scoped per job ID" "job46a job46b"
+	print_test_header 46 "Params are scoped per job ID" "${job_id_a} ${job_id_b}"
 
-	job_set_params job46a "SHARED_NAME=only_job46a"
+	job_set_params "${job_id_a}" "SHARED_NAME=only_${job_id_a}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2880,7 +2892,7 @@ test_46()
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job46a job46b' &
+		schedule_jobs "${job_id_a} ${job_id_b}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -2890,13 +2902,13 @@ test_46()
 	rm -f "${J1_FILE}" "${J2_FILE}"
 
 	if [ "${sched_rv}" = 0 ] &&
-		[ "${seen1}" = "set:only_job46a" ] &&
+		[ "${seen1}" = "set:only_${job_id_a}" ] &&
 		[ "${seen2}" = "unset" ]
 	then
-		printf '%s\n' "Result: ${PASS} (job46a='${seen1}', job46b='${seen2}')"
+		printf '%s\n' "Result: ${PASS} (${job_id_a}='${seen1}', ${job_id_b}='${seen2}')"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, job46a='${seen1}', job46b='${seen2}')"
+		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, ${job_id_a}='${seen1}', ${job_id_b}='${seen2}')"
 		return 1
 	fi
 }
@@ -2918,12 +2930,15 @@ test_47()
 		error_seen \
 		seen
 
-	local OUT_FILE="/tmp/sched.params.dup.${TEST_NUM}.$$"
+	local \
+		OUT_FILE="/tmp/sched.params.dup.${TEST_NUM}.$$" \
+		job_id=job_47
+
 	rm -f "${OUT_FILE}"
 
-	print_test_header 47 "Duplicate param key: last write wins" "job47"
+	print_test_header 47 "Duplicate param key: last write wins" "${job_id}"
 
-	job_set_params job47 "DUPKEY=first" "DUPKEY=second" || error_seen=1
+	job_set_params "${job_id}" "DUPKEY=first" "DUPKEY=second" || error_seen=1
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2932,7 +2947,7 @@ test_47()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job47' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -2967,12 +2982,15 @@ test_48()
 		seen \
 		expected='http://x?a=1&b=2'
 
-	local OUT_FILE="/tmp/sched.params.eqsign.${TEST_NUM}.$$"
+	local \
+		OUT_FILE="/tmp/sched.params.eqsign.${TEST_NUM}.$$" \
+		job_id=job_48
+
 	rm -f "${OUT_FILE}"
 
-	print_test_header 48 "Value containing embedded '=' preserved intact" "job48"
+	print_test_header 48 "Value containing embedded '=' preserved intact" "${job_id}"
 
-	job_set_params job48 "URL=${expected}"
+	job_set_params "${job_id}" "URL=${expected}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2981,7 +2999,7 @@ test_48()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job48' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -3028,14 +3046,15 @@ test_49()
 
 	local \
 		OUT_FILE="/tmp/sched.params.valfidelity.${TEST_NUM}.$$" \
-		INJECT_FILE="/tmp/sched.params.valfidelity.inject.${TEST_NUM}.$$"
+		INJECT_FILE="/tmp/sched.params.valfidelity.inject.${TEST_NUM}.$$" \
+		job_id=job_49
 
 	rm -f "${OUT_FILE}" "${INJECT_FILE}"
 
-	print_test_header 49 "Param value fidelity / no injection via value content" "job49"
+	print_test_header 49 "Param value fidelity / no injection via value content" "${job_id}"
 
 	# shellcheck disable=SC2016
-	job_set_params job49 \
+	job_set_params "${job_id}" \
 		'SPACEY=hello world' \
 		"QUOTY=a'b\"c" \
 		'CMDSUB=$(test_49_touch_inject)' \
@@ -3053,7 +3072,7 @@ test_49()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job49' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -3095,12 +3114,15 @@ test_50()
 		actual \
 		expected
 
-	local OUT_FILE="/tmp/sched.params.withargs.${TEST_NUM}.$$"
+	local \
+		OUT_FILE="/tmp/sched.params.withargs.${TEST_NUM}.$$" \
+		job_id=job_50
+
 	rm -f "${OUT_FILE}"
 
-	print_test_header 50 "Job params coexist with forwarded extra args" "job50"
+	print_test_header 50 "Job params coexist with forwarded extra args" "${job_id}"
 
-	job_set_params job50 "COMBOPARAM=paramval"
+	job_set_params "${job_id}" "COMBOPARAM=paramval"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -3109,12 +3131,12 @@ test_50()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job50' extra1 extra2 &
+		schedule_jobs "${job_id}" extra1 extra2 &
 
 	wait "$!"
 	sched_rv=$?
 
-	expected="$(printf 'PARAM=paramval\nARGS=job50 extra1 extra2')"
+	expected="$(printf 'PARAM=paramval\nARGS=%s extra1 extra2' "${job_id}")"
 	actual="$([ -f "${OUT_FILE}" ] && cat "${OUT_FILE}")"
 	rm -f "${OUT_FILE}"
 
@@ -3146,12 +3168,15 @@ test_51()
 		REALPARAM \
 		IFS="${IFS}"
 
-	local MSG_FILE="/tmp/sched.params.get_validate.${TEST_NUM}.$$"
+	local \
+		MSG_FILE="/tmp/sched.params.get_validate.${TEST_NUM}.$$" \
+		job_id=job_51
+
 	rm -f "${MSG_FILE}"
 
 	print_test_header 51 "job_get_params() rejects reserved/malformed param names" "(direct calls, no scheduler run)"
 
-	job_set_params job51 "REALPARAM=fine"
+	job_set_params "${job_id}" "REALPARAM=fine"
 
 	# "IFS" is deliberately included below: job_get_params() must reject it
 	# before ever reaching its eval-assignment line. local IFS="${IFS}"
@@ -3162,7 +3187,7 @@ test_51()
 	for name in SCH_FOO sch_foo _sch_foo SCHED_MAX_JOBS DO_JOB_CB JOB_DONE_CB IFS 1bad "bad name"
 	do
 		total_cnt=$((total_cnt + 1))
-		SCHED_FAIL_MSG_CB=test_51_fail_msg job_get_params job51 "${name}"
+		SCHED_FAIL_MSG_CB=test_51_fail_msg job_get_params "${job_id}" "${name}"
 		rv=$?
 		if [ "${rv}" != 0 ]
 		then
@@ -3175,7 +3200,7 @@ test_51()
 	# A legitimate, already-registered param must still work afterward.
 	# REALPARAM is declared local above so this direct (non-subshell) call
 	# doesn't leak it into the global scope.
-	job_get_params job51 REALPARAM
+	job_get_params "${job_id}" REALPARAM
 
 	msg_cnt=0
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
@@ -3208,12 +3233,15 @@ test_52()
 		msg_cnt \
 		REALPARAM
 
-	local MSG_FILE="/tmp/sched.params.get_jobid.${TEST_NUM}.$$"
+	local \
+		MSG_FILE="/tmp/sched.params.get_jobid.${TEST_NUM}.$$" \
+		job_id=job_52
+
 	rm -f "${MSG_FILE}"
 
 	print_test_header 52 "job_get_params() rejects a bad/empty job ID" "(direct calls, no scheduler run)"
 
-	job_set_params job52 "REALPARAM=fine"
+	job_set_params "${job_id}" "REALPARAM=fine"
 
 	for jid in "" "bad id"
 	do
@@ -3231,7 +3259,7 @@ test_52()
 	# A legitimate job ID must still work afterward. REALPARAM is declared
 	# local above so this direct (non-subshell) call doesn't leak it into
 	# the global scope.
-	job_get_params job52 REALPARAM
+	job_get_params "${job_id}" REALPARAM
 
 	msg_cnt=0
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
@@ -3263,14 +3291,17 @@ test_53()
 		msg_cnt \
 		msg_ok
 
-	local MSG_FILE="/tmp/sched.params.get_empty.${TEST_NUM}.$$"
+	local \
+		MSG_FILE="/tmp/sched.params.get_empty.${TEST_NUM}.$$" \
+		job_id=job_53
+
 	rm -f "${MSG_FILE}"
 
 	print_test_header 53 "job_get_params() rejects zero requested param names" "(direct call, no scheduler run)"
 
-	job_set_params job53 "REALPARAM=fine"
+	job_set_params "${job_id}" "REALPARAM=fine"
 
-	SCHED_FAIL_MSG_CB=test_53_fail_msg job_get_params job53
+	SCHED_FAIL_MSG_CB=test_53_fail_msg job_get_params "${job_id}"
 	rv=$?
 
 	msg_cnt=0
@@ -3307,12 +3338,15 @@ test_54()
 		msg_cnt \
 		msg_ok
 
-	local MSG_FILE="/tmp/sched.params.set_empty.${TEST_NUM}.$$"
+	local \
+		MSG_FILE="/tmp/sched.params.set_empty.${TEST_NUM}.$$" \
+		job_id=job_54
+
 	rm -f "${MSG_FILE}"
 
 	print_test_header 54 "job_set_params() rejects zero key=value pairs" "(direct call, no scheduler run)"
 
-	SCHED_FAIL_MSG_CB=test_54_fail_msg job_set_params job54
+	SCHED_FAIL_MSG_CB=test_54_fail_msg job_set_params "${job_id}"
 	rv=$?
 
 	msg_cnt=0
@@ -3344,17 +3378,18 @@ test_55()
 		TEST_NUM=55 \
 		first \
 		second \
-		REFETCH
+		REFETCH \
+		job_id=job_55
 
 	print_test_header 55 "job_get_params() reflects updates from a later job_set_params() call" "(direct calls, no scheduler run)"
 
-	job_set_params job55 "REFETCH=one"
-	job_get_params job55 REFETCH
+	job_set_params "${job_id}" "REFETCH=one"
+	job_get_params "${job_id}" REFETCH
 	first="${REFETCH}"
 
-	job_set_params job55 "REFETCH=two"
+	job_set_params "${job_id}" "REFETCH=two"
 	unset REFETCH
-	job_get_params job55 REFETCH
+	job_get_params "${job_id}" REFETCH
 	second="${REFETCH}"
 
 	if [ "${first}" = "one" ] && [ "${second}" = "two" ]
@@ -3387,12 +3422,15 @@ test_56()
 		sched_rv \
 		seen
 
-	local OUT_FILE="/tmp/sched.params.job_done_cb.${TEST_NUM}.$$"
+	local \
+		OUT_FILE="/tmp/sched.params.job_done_cb.${TEST_NUM}.$$" \
+		job_id=job_56
+
 	rm -f "${OUT_FILE}"
 
-	print_test_header 56 "job_get_params() is usable from JOB_DONE_CB" "job56"
+	print_test_header 56 "job_get_params() is usable from JOB_DONE_CB" "${job_id}"
 
-	job_set_params job56 "FROMDONE=seen_in_job_done_cb"
+	job_set_params "${job_id}" "FROMDONE=seen_in_job_done_cb"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -3401,7 +3439,7 @@ test_56()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job56' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -3432,11 +3470,12 @@ test_57()
 		TEST_NUM=57 \
 		sched_rv \
 		seen \
-		FROMSCOPE
+		FROMSCOPE \
+		job_id=job_57
 
-	print_test_header 57 "job_get_params() is usable directly in the caller's own scope" "job57"
+	print_test_header 57 "job_get_params() is usable directly in the caller's own scope" "${job_id}"
 
-	job_set_params job57 "FROMSCOPE=seen_in_caller_scope"
+	job_set_params "${job_id}" "FROMSCOPE=seen_in_caller_scope"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -3445,7 +3484,7 @@ test_57()
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'job57' &
+		schedule_jobs "${job_id}" &
 
 	wait "$!"
 	sched_rv=$?
@@ -3453,7 +3492,7 @@ test_57()
 	# FROMSCOPE is declared local above so this direct (main-process) call
 	# doesn't leak it into the global scope.
 	unset FROMSCOPE
-	job_get_params job57 FROMSCOPE
+	job_get_params "${job_id}" FROMSCOPE
 	seen="${FROMSCOPE-<unset>}"
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "seen_in_caller_scope" ]
