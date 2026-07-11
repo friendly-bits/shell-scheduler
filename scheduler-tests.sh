@@ -17,6 +17,16 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 # Testing infrastructure functions
 #
 
+PASS()
+{
+	printf '%s\n' "Result: ${green}PASS${n_c}${1:+" ("}${1}${1:+")"}"
+}
+
+FAIL()
+{
+	printf '%s\n' "Result: ${red}FAIL${n_c}${1:+" ("}${1}${1:+")"}"
+}
+
 is_uint()
 {
 	local _v
@@ -185,10 +195,10 @@ run_generic_test()
 
 	if [ "${sched_rv}" = "${TEST_EXPECT_RV:?}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected ${TEST_EXPECT_RV})"
+		FAIL "sched_rv=${sched_rv}, expected ${TEST_EXPECT_RV}"
 		return 1
 	fi
 }
@@ -277,10 +287,10 @@ run_parallelism_test()
 		is_uint "${max_active}" &&
 		[ "${max_active}" = "${TEST_EXPECT_MAX_JOBS:?}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (max_parallel=${max_active})"
+		PASS "max_parallel=${max_active}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, max_parallel=${max_active})"
+		FAIL "sched_rv=${sched_rv}, max_parallel=${max_active}"
 		return 1
 	fi
 }
@@ -434,10 +444,10 @@ test_8()
 	if [ "${sched_rv}" = "${TEST_8_DONE_HANDLER_RV}" ] &&
 		[ "${failprop_msg}" = "fail_seen" ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv})"
+		FAIL "sched_rv=${sched_rv}"
 		return 1
 	fi
 }
@@ -495,10 +505,10 @@ test_9()
 			"${jobs}"
 	then
 		rm -f "${DONE_COUNT_FILE}"
-		printf '%s\n' "Result: ${PASS} (done_cnt=${done_cnt})"
+		PASS "done_cnt=${done_cnt}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected_cnt=${expected_cnt}, done_cnt=${done_cnt}, actual_done_jobs=${actual_done_jobs})"
+		FAIL "sched_rv=${sched_rv}, expected_cnt=${expected_cnt}, done_cnt=${done_cnt}, actual_done_jobs=${actual_done_jobs}"
 		return 1
 	fi
 }
@@ -582,11 +592,11 @@ test_10()
 		[ "${finalize_state}" = empty ]
 	then
 		rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
-		printf '%s\n' "Result: ${PASS} (completed=${actual_done_cnt})"
+		PASS "completed=${actual_done_cnt}"
 		return 0
 	else
 		rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, finalize_state=${finalize_state}, expected_cnt=${expected_cnt}, actual_done_cnt=${actual_done_cnt}, actual_done_jobs=${actual_done_jobs})"
+		FAIL "sched_rv=${sched_rv}, finalize_state=${finalize_state}, expected_cnt=${expected_cnt}, actual_done_cnt=${actual_done_cnt}, actual_done_jobs=${actual_done_jobs}"
 		return 1
 	fi
 }
@@ -636,10 +646,10 @@ test_11()
 	if [ "${sched_rv}" = 82 ] &&
 		[ "${timeout_rv}" = 82 ]
 	then
-		printf '%s\n' "Result: ${PASS} (timeout_rv=${timeout_rv})"
+		PASS "timeout_rv=${timeout_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL}"
+		FAIL
 		return 1
 	fi
 }
@@ -713,10 +723,10 @@ test_12()
 		[ "${actual_done_cnt}" = 0 ] &&
 		[ "${finalize_state}" = empty ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, actual_done_cnt=${actual_done_cnt}, finalize=${finalize_state})"
+		FAIL "sched_rv=${sched_rv}, actual_done_cnt=${actual_done_cnt}, finalize=${finalize_state}"
 		return 1
 	fi
 }
@@ -781,10 +791,10 @@ test_13()
 		[ "${callback_rv}" = 83 ] &&
 		[ -n "${pids}" ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, callback_rv=${callback_rv}, pids=${pids})"
+		FAIL "sched_rv=${sched_rv}, callback_rv=${callback_rv}, pids=${pids}"
 		return 1
 	fi
 }
@@ -816,10 +826,10 @@ test_14()
 
 	if [ "${sched_rv}" = 81 ]
 	then
-		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 81)"
+		FAIL "sched_rv=${sched_rv}, expected 81"
 		return 1
 	fi
 }
@@ -887,10 +897,10 @@ test_15()
 		[ "${rv_failure}" = 81 ] &&
 		[ "${recorded_rvs}" = "0 81 " ]
 	then
-		printf '%s\n' "Result: ${PASS} (success_rv=${rv_success}, failure_rv=${rv_failure})"
+		PASS "success_rv=${rv_success}, failure_rv=${rv_failure}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (success_rv=${rv_success}, failure_rv=${rv_failure}, recorded=${recorded_rvs})"
+		FAIL "success_rv=${rv_success}, failure_rv=${rv_failure}, recorded=${recorded_rvs}"
 		return 1
 	fi
 }
@@ -977,10 +987,10 @@ test_16()
 	if [ "${pass_cnt}" = 4 ] &&
 		[ "${msg_cnt}" = 3 ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/4, messages=${msg_cnt})"
+		FAIL "passed=${pass_cnt}/4, messages=${msg_cnt}"
 		return 1
 	fi
 }
@@ -1069,10 +1079,10 @@ test_17()
 	if [ "${pass_cnt}" = "${total_cnt}" ] &&
 		[ "${msg_cnt}" = "${total_cnt}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (passed=${pass_cnt}/${total_cnt})"
+		PASS "passed=${pass_cnt}/${total_cnt}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/${total_cnt}, messages=${msg_cnt})"
+		FAIL "passed=${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
 		return 1
 	fi
 }
@@ -1143,10 +1153,10 @@ EOF
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${actual}" = "${expected}" ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv})"
+		FAIL "sched_rv=${sched_rv}"
 		return 1
 	fi
 }
@@ -1248,10 +1258,10 @@ test_20()
 		is_uint "${max_active}" &&
 		[ "${max_active}" -le 20 ]
 	then
-		printf '%s\n' "Result: ${PASS} (max_parallel=${max_active})"
+		PASS "max_parallel=${max_active}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, max_parallel=${max_active})"
+		FAIL "sched_rv=${sched_rv}, max_parallel=${max_active}"
 		return 1
 	fi
 }
@@ -1320,10 +1330,10 @@ EOF
 		[ "${actual_cnt}" = 6 ] &&
 		[ "${actual}" = "${expected}" ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, count=${actual_cnt}, actual=${actual//$'\n'/; })"
+		FAIL "sched_rv=${sched_rv}, count=${actual_cnt}, actual=${actual//$'\n'/; }"
 		return 1
 	fi
 }
@@ -1361,10 +1371,10 @@ test_22()
 
 	if [ "${sched_rv}" = 1 ]
 	then
-		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv})"
+		FAIL "sched_rv=${sched_rv}"
 		return 1
 	fi
 }
@@ -1413,10 +1423,10 @@ test_23()
 	if [ "${sched_rv}" = 81 ] &&
 		[ "${timeout_rv}" = 81 ]
 	then
-		printf '%s\n' "Result: ${PASS} (timeout_rv=${timeout_rv})"
+		PASS "timeout_rv=${timeout_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL}"
+		FAIL
 		return 1
 	fi
 }
@@ -1465,10 +1475,10 @@ test_24()
 	if [ "${sched_rv}" = 82 ] &&
 		[ "${timeout_rv}" = 82 ]
 	then
-		printf '%s\n' "Result: ${PASS} (timeout_rv=${timeout_rv})"
+		PASS "timeout_rv=${timeout_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL}"
+		FAIL
 		return 1
 	fi
 }
@@ -1498,10 +1508,10 @@ test_25()
 
 	if [ "${sched_rv}" = 82 ]
 	then
-		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 82)"
+		FAIL "sched_rv=${sched_rv}, expected 82"
 		return 1
 	fi
 }
@@ -1566,10 +1576,10 @@ test_28()
 	if [ "${sched_rv}" = 0 ] &&
 		[ ! -e "${sched_fifo}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, fifo_exists=$([ -e "${sched_fifo}" ] && echo yes || echo no))"
+		FAIL "sched_rv=${sched_rv}, fifo_exists=$([ -e "${sched_fifo}" ] && echo yes || echo no)"
 		return 1
 	fi
 }
@@ -1679,10 +1689,10 @@ test_29()
 
 	if [ "${pass_cnt}" = 2 ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/2)"
+		FAIL "passed=${pass_cnt}/2"
 		return 1
 	fi
 }
@@ -1788,12 +1798,12 @@ test_30()
 		[ ! -e "${INJECT_FILE}" ]
 	then
 		rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
-		printf '%s\n' "Result: ${PASS} (jobs=${actual_do_cnt})"
+		PASS "jobs=${actual_do_cnt}"
 		return 0
 	else
 		rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
-		printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-			"Result: ${FAIL} (sched_rv=${sched_rv})" \
+		FAIL "sched_rv=${sched_rv}"
+		printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
 			"expected_do_cnt=${expected_do_cnt}, actual_do_cnt=${actual_do_cnt}" \
 			"expected_done_cnt=${expected_done_cnt}, actual_done_cnt=${actual_done_cnt}" \
 			"inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)" \
@@ -1895,10 +1905,10 @@ test_31()
 	if [ "${pass_cnt}" = "${total_cnt}" ] &&
 		[ "${msg_cnt}" = "${total_cnt}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (passed=${pass_cnt}/${total_cnt})"
+		PASS "passed=${pass_cnt}/${total_cnt}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (passed=${pass_cnt}/${total_cnt}, messages=${msg_cnt})"
+		FAIL "passed=${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
 		return 1
 	fi
 }
@@ -1967,11 +1977,11 @@ test_32()
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${actual}" = "${expected}" ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
+		FAIL "sched_rv=${sched_rv}"
 		printf '%s\n' \
-			"Result: ${FAIL} (sched_rv=${sched_rv})" \
 			"expected:" \
 			"'${expected}'" \
 			"actual:" \
@@ -2090,10 +2100,10 @@ test_33()
 
 	if [ "${all_ok}" = 1 ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL}"
+		FAIL
 		return 1
 	fi
 }
@@ -2139,10 +2149,10 @@ test_34()
 	# Remaining idle timeout is 2s. Expected total ~5s. Adding 1s margin.
 	if [ "${sched_rv}" = 81 ] && [ "${elapsed}" -le 6 ]
 	then
-		printf '%s\n' "Result: ${PASS} (elapsed=${elapsed}s)"
+		PASS "elapsed=${elapsed}s"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, elapsed=${elapsed}s, expected <= 6s)"
+		FAIL "sched_rv=${sched_rv}, elapsed=${elapsed}s, expected <= 6s"
 		return 1
 	fi
 }
@@ -2174,10 +2184,10 @@ test_35()
 
 	if [ "${sched_rv}" = 0 ]
 	then
-		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 0)"
+		FAIL "sched_rv=${sched_rv}, expected 0"
 		return 1
 	fi
 }
@@ -2270,10 +2280,10 @@ test_36()
 
 	if [ "${all_ok}" = 1 ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL}"
+		FAIL
 		return 1
 	fi
 }
@@ -2348,10 +2358,10 @@ test_37()
 
 	if [ "${all_ok}" = 1 ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL}"
+		FAIL
 		return 1
 	fi
 }
@@ -2392,10 +2402,10 @@ test_38()
 		[ "${elapsed}" -ge 1 ] &&
 		[ "${elapsed}" -le 3 ]
 	then
-		printf '%s\n' "Result: ${PASS} (elapsed=${elapsed}s)"
+		PASS "elapsed=${elapsed}s"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, elapsed=${elapsed}s, expected 1<=elapsed<=3 and sched_rv=81)"
+		FAIL "sched_rv=${sched_rv}, elapsed=${elapsed}s, expected 1<=elapsed<=3 and sched_rv=81"
 		return 1
 	fi
 }
@@ -2428,10 +2438,10 @@ test_39()
 
 	if [ "${sched_rv}" = 0 ]
 	then
-		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 0)"
+		FAIL "sched_rv=${sched_rv}, expected 0"
 		return 1
 	fi
 }
@@ -2486,11 +2496,11 @@ test_40()
 	if [ "${sched_rv}" = 82 ] &&
 		[ ! -e "${SECOND_DISPATCHED_FILE}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (sched_rv=${sched_rv})"
+		PASS "sched_rv=${sched_rv}"
 		rm -f "${SECOND_DISPATCHED_FILE}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, expected 82, second_dispatched=$([ -e "${SECOND_DISPATCHED_FILE}" ] && echo yes || echo no))"
+		FAIL "sched_rv=${sched_rv}, expected 82, second_dispatched=$([ -e "${SECOND_DISPATCHED_FILE}" ] && echo yes || echo no)"
 		rm -f "${SECOND_DISPATCHED_FILE}"
 		return 1
 	fi
@@ -2540,10 +2550,10 @@ test_41()
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "bar123" ]
 	then
-		printf '%s\n' "Result: ${PASS} (FOO='${seen}')"
+		PASS "FOO='${seen}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, FOO='${seen}', expected 'bar123')"
+		FAIL "sched_rv=${sched_rv}, FOO='${seen}', expected 'bar123'"
 		return 1
 	fi
 }
@@ -2596,10 +2606,11 @@ test_42()
 
 	if [ "${sched_rv}" = 0 ] && [ "${actual}" = "${expected}" ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n%s\n%s\n' "Result: ${FAIL} (sched_rv=${sched_rv})" "expected: ${expected}" "actual: ${actual}"
+		FAIL "sched_rv=${sched_rv}"
+		printf '%s\n%s\n' "expected: ${expected}" "actual: ${actual}"
 		return 1
 	fi
 }
@@ -2665,10 +2676,11 @@ test_43()
 
 	if [ "${sched_rv}" = 0 ] && [ "${actual}" = "${expected}" ] && [ "${msg_cnt}" = 1 ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n%s\n%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, msg_cnt=${msg_cnt})" "expected: ${expected}" "actual: ${actual}"
+		FAIL "sched_rv=${sched_rv}, msg_cnt=${msg_cnt}"
+		printf '%s\n%s\n' "expected: ${expected}" "actual: ${actual}"
 		return 1
 	fi
 }
@@ -2738,10 +2750,10 @@ test_44()
 	# the 2 accepted cases produce none.
 	if [ "${pass_cnt}" = "${total_cnt}" ] && [ "${msg_cnt}" = 6 ]
 	then
-		printf '%s\n' "Result: ${PASS} (${pass_cnt}/${total_cnt}, messages=${msg_cnt})"
+		PASS "${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (${pass_cnt}/${total_cnt}, messages=${msg_cnt})"
+		FAIL "${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
 		return 1
 	fi
 }
@@ -2825,10 +2837,10 @@ test_45()
 		[ "${sched_rv}" = 0 ] &&
 		[ "${seen}" = "fine" ]
 	then
-		printf '%s\n' "Result: ${PASS} (${pass_cnt}/${total_cnt} rejected, GOOD='${seen}')"
+		PASS "${pass_cnt}/${total_cnt} rejected, GOOD='${seen}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (${pass_cnt}/${total_cnt} rejected, msg_cnt=${msg_cnt}, sched_rv=${sched_rv}, GOOD='${seen}')"
+		FAIL "${pass_cnt}/${total_cnt} rejected, msg_cnt=${msg_cnt}, sched_rv=${sched_rv}, GOOD='${seen}'"
 		return 1
 	fi
 }
@@ -2893,10 +2905,10 @@ test_46()
 		[ "${seen1}" = "set:only_${job_id_a}" ] &&
 		[ "${seen2}" = "unset" ]
 	then
-		printf '%s\n' "Result: ${PASS} (${job_id_a}='${seen1}', ${job_id_b}='${seen2}')"
+		PASS "${job_id_a}='${seen1}', ${job_id_b}='${seen2}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, ${job_id_a}='${seen1}', ${job_id_b}='${seen2}')"
+		FAIL "sched_rv=${sched_rv}, ${job_id_a}='${seen1}', ${job_id_b}='${seen2}'"
 		return 1
 	fi
 }
@@ -2945,10 +2957,10 @@ test_47()
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "second" ] && [ -z "${error_seen}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (DUPKEY='${seen}')"
+		PASS "DUPKEY='${seen}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, DUPKEY='${seen}', expected 'second', error_seen='${error_seen}')"
+		FAIL "sched_rv=${sched_rv}, DUPKEY='${seen}', expected 'second', error_seen='${error_seen}'"
 		return 1
 	fi
 }
@@ -2997,10 +3009,10 @@ test_48()
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "${expected}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (URL='${seen}')"
+		PASS "URL='${seen}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, URL='${seen}', expected '${expected}')"
+		FAIL "sched_rv=${sched_rv}, URL='${seen}', expected '${expected}'"
 		return 1
 	fi
 }
@@ -3072,12 +3084,12 @@ test_49()
 		[ ! -e "${INJECT_FILE}" ]
 	then
 		rm -f "${OUT_FILE}" "${INJECT_FILE}"
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
 		rm -f "${OUT_FILE}" "${INJECT_FILE}"
-		printf '%s\n%s\n%s\n%s\n' \
-			"Result: ${FAIL} (sched_rv=${sched_rv}, inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no))" \
+		FAIL "sched_rv=${sched_rv}, inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)"
+		printf '%s\n%s\n%s\n' \
 			"expected:" "${expected}" "actual: ${actual}"
 		return 1
 	fi
@@ -3130,10 +3142,11 @@ test_50()
 
 	if [ "${sched_rv}" = 0 ] && [ "${actual}" = "${expected}" ]
 	then
-		printf '%s\n' "Result: ${PASS}"
+		PASS
 		return 0
 	else
-		printf '%s\n%s\n%s\n' "Result: ${FAIL} (sched_rv=${sched_rv})" "expected: ${expected}" "actual: ${actual}"
+		FAIL "sched_rv=${sched_rv}"
+		printf '%s\n%s\n' "expected: ${expected}" "actual: ${actual}"
 		return 1
 	fi
 }
@@ -3198,10 +3211,10 @@ test_51()
 		[ "${msg_cnt}" = "${total_cnt}" ] &&
 		[ "${REALPARAM}" = "fine" ]
 	then
-		printf '%s\n' "Result: ${PASS} (${pass_cnt}/${total_cnt} rejected, REALPARAM='${REALPARAM}')"
+		PASS "${pass_cnt}/${total_cnt} rejected, REALPARAM='${REALPARAM}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (${pass_cnt}/${total_cnt} rejected, msg_cnt=${msg_cnt}, REALPARAM='${REALPARAM-<unset>}')"
+		FAIL "${pass_cnt}/${total_cnt} rejected, msg_cnt=${msg_cnt}, REALPARAM='${REALPARAM-<unset>}'"
 		return 1
 	fi
 }
@@ -3257,10 +3270,10 @@ test_52()
 		[ "${msg_cnt}" = "${total_cnt}" ] &&
 		[ "${REALPARAM}" = "fine" ]
 	then
-		printf '%s\n' "Result: ${PASS} (${pass_cnt}/${total_cnt} rejected, REALPARAM='${REALPARAM}')"
+		PASS "${pass_cnt}/${total_cnt} rejected, REALPARAM='${REALPARAM}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (${pass_cnt}/${total_cnt} rejected, msg_cnt=${msg_cnt}, REALPARAM='${REALPARAM-<unset>}')"
+		FAIL "${pass_cnt}/${total_cnt} rejected, msg_cnt=${msg_cnt}, REALPARAM='${REALPARAM-<unset>}'"
 		return 1
 	fi
 }
@@ -3304,10 +3317,10 @@ test_53()
 
 	if [ "${rv}" != 0 ] && [ "${msg_cnt}" = 1 ] && [ -n "${msg_ok}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv}, msg='${msg}')"
+		PASS "rv=${rv}, msg='${msg}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, msg_cnt=${msg_cnt}, msg='${msg}')"
+		FAIL "rv=${rv}, msg_cnt=${msg_cnt}, msg='${msg}'"
 		return 1
 	fi
 }
@@ -3349,10 +3362,10 @@ test_54()
 
 	if [ "${rv}" != 0 ] && [ "${msg_cnt}" = 1 ] && [ -n "${msg_ok}" ]
 	then
-		printf '%s\n' "Result: ${PASS} (rv=${rv}, msg='${msg}')"
+		PASS "rv=${rv}, msg='${msg}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (rv=${rv}, msg_cnt=${msg_cnt}, msg='${msg}')"
+		FAIL "rv=${rv}, msg_cnt=${msg_cnt}, msg='${msg}'"
 		return 1
 	fi
 }
@@ -3382,10 +3395,10 @@ test_55()
 
 	if [ "${first}" = "one" ] && [ "${second}" = "two" ]
 	then
-		printf '%s\n' "Result: ${PASS} (first='${first}', second='${second}')"
+		PASS "first='${first}', second='${second}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (first='${first}', expected 'one', second='${second}', expected 'two')"
+		FAIL "first='${first}', expected 'one', second='${second}', expected 'two'"
 		return 1
 	fi
 }
@@ -3437,10 +3450,10 @@ test_56()
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "seen_in_job_done_cb" ]
 	then
-		printf '%s\n' "Result: ${PASS} (FROMDONE='${seen}')"
+		PASS "FROMDONE='${seen}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, FROMDONE='${seen}', expected 'seen_in_job_done_cb')"
+		FAIL "sched_rv=${sched_rv}, FROMDONE='${seen}', expected 'seen_in_job_done_cb'"
 		return 1
 	fi
 }
@@ -3485,10 +3498,10 @@ test_57()
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "seen_in_caller_scope" ]
 	then
-		printf '%s\n' "Result: ${PASS} (FROMSCOPE='${seen}')"
+		PASS "FROMSCOPE='${seen}'"
 		return 0
 	else
-		printf '%s\n' "Result: ${FAIL} (sched_rv=${sched_rv}, FROMSCOPE='${seen}', expected 'seen_in_caller_scope')"
+		FAIL "sched_rv=${sched_rv}, FROMSCOPE='${seen}', expected 'seen_in_caller_scope'"
 		return 1
 	fi
 }
