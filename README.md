@@ -196,6 +196,11 @@ echo "filename is '${filename}', url is '${url}'"
 
 This works in every callback and in your application script.
 
+If you want to **export** the variables set by `job_set_params` then prepend the `-export` flag to the command:
+```
+job_get_params -export "job1" filename url
+```
+
 If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job, including if the job is implemented as an external command (rather than as a shell function). Note that in that case, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
 
 Example with `SCHED_AUTO_PARAMS=1`:
@@ -246,9 +251,9 @@ For job C, file is ''.
 ```
 
 **Notes**:
-- Params are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
-- Assigning and fetching params is internally implemented via indirection. In order to keep the implementation compatible with Busybox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_params()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
-- Setting job-specific params via `job_set_params` requires corresponding **job ID** to contain only following characters: `a-z`, `A-Z`, `0-9`, `_`. It also requires corresponding **param name** to contain only the same set of characters, and not start with a digit (for compliance with POSIX specification of valid variable names). When either of these requirements is not met, `job_set_params()` will print an error, return code 1, and the parameter will not be set.
+- When `SCHED_AUTO_PARAMS` is set to `1`, parameters are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
+- Assigning and fetching parameters is internally implemented via indirection. In order to keep the implementation compatible with Busybox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_params()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
+- Setting job-specific parameters via `job_set_params` requires corresponding **job ID** to contain only following characters: `a-z`, `A-Z`, `0-9`, `_`. It also requires corresponding **param name** to contain only the same set of characters, and not start with a digit (for compliance with POSIX specification of valid variable names). In addition, parameter names can not start with `SCHED_`, `SCH_`, `sch_`, `_sch_` and can not be the same as callback variables (`DO_JOB_CB`, `JOB_DONE_CB`) and the `IFS` variable. These are all reserved for internal use. When either of these requirements is not met, `job_set_params()` will print an error, return code 1, and the parameter will not be set.
 
 
 ## Environment variables
@@ -336,16 +341,16 @@ As explained in the [Job Parameters](#job-parameters) section above, this exampl
 # Job-specific parameters are assigned in the main script
 job_set_params pro "url=https://..."
 
-# Job execution callback (only param-related details)
+# Job execution callback (showing only param-related details)
 download_list() {
 	local name="${1:?}"
 
     # Note: with SCHED_AUTO_PARAMS=1, the ${url} variable is set by the scheduler before callback invocation,
     #   so this variable *must not be declared local or reset* inside the callback
 
-    # Without SCHED_AUTO_PARAMS=1, declare the variable local and get its value from job_get_param:
+    # Without SCHED_AUTO_PARAMS=1, declare the variable local and get its value from job_get_params:
     # local url
-    # job_get_param "${name}" url || exit 1
+    # job_get_params "${name}" url || exit 1
 
     wget -q -O "${OUT_DIR}/${name}.txt" "${url:?}"
 }
