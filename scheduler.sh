@@ -65,6 +65,69 @@ sch_rm_elem() {
 	export -n "${sre_out_var}=${sre_l}"
 }
 
+sch_is_uint() {
+	local _v
+	for _v; do
+		case "${_v}" in
+			''|*[!0-9]*) return 1
+		esac
+	done
+	:
+}
+
+sch_is_cmd() {
+	command -v "${1}" 1>/dev/null 2>&1
+}
+
+# 1 - var name for centiseconds output
+sch_get_uptime_cs() {
+	local __uptime i_cs cs s
+	export -n "${1}="
+
+	read -r __uptime _ < /proc/uptime &&
+	case "${__uptime}" in
+		''|*.*.*) false ;;
+		*.*) ;;
+		*) false ;;
+	esac &&
+	i_cs="${__uptime##*.}" &&
+	case "${i_cs}" in
+		'') cs=00 ;;
+		?) cs="${i_cs}0" ;;
+		??) cs="${i_cs}" ;;
+		??*) cs="${i_cs%"${i_cs#??}"}"
+	esac &&
+	s="${__uptime%.*}" &&
+	sch_is_uint "${s}" "${cs}" ||
+	{
+		sch_fail_msg "Failed to get uptime from /proc/uptime."
+		export -n "${1}"=0
+		return 1
+	}
+	cs="${s:-0}${cs:-00}"
+	cs="${cs#"${cs%%[!0]*}"}"
+	export -n "${1}=${cs:-0}"
+}
+
+# Get PID of current shell process
+# 1 - var name for output
+sch_get_cur_pid() {
+	local __pid line
+	export -n "${1:?}="
+
+	while IFS= read -r line; do
+		case "${line}" in
+			Pid:*)
+				__pid="${line##*[^0-9]}"
+				break
+			;;
+		esac
+	done < /proc/self/status
+
+	sch_is_uint "${__pid}" || { sch_fail_msg "Failed to get current PID."; return 1; }
+	export -n "${1}=${__pid}"
+}
+
 sch_is_valid_param() {
 	sch_check_var_chars "param" "${1}" "${2}" || return 1
 	case "${1}" in
@@ -94,6 +157,43 @@ sch_check_var_chars() {
 
 	sch_fail_msg "${3}${3:+": "}${1}${1:+ }'${2}' is empty string or contains incompatible characters."
 	return 1
+}
+
+# 1 = var name
+refresh_remain_time()  {
+	get_remain_time "${1}" || sch_finalize "${?}"
+}
+
+# Sets var named $1 to remaining time to ${SCH_PROC_TIMEOUT_S} or to ${SCH_IDLE_TIMEOUT_S}, whichever is lower
+# If timeout is hit, returns code ${SCH_RV_GLOBAL_TIMEOUT} or ${SCH_RV_IDLE_TIMEOUT}
+# 1 - var name to output remaining time
+get_remain_time() {
+	local gt_cur_time_cs gt_total_time_cs gt_remain_time_cs gt_idle_remain_time_cs rv
+	export -n "${1}"=0
+
+	sch_get_uptime_cs gt_cur_time_cs || return 1
+	gt_total_time_cs=$((gt_cur_time_cs - SCH_INIT_UPTIME_CS))
+
+	gt_remain_time_cs=$((SCH_PROC_TIMEOUT_S*100 - gt_total_time_cs))
+	gt_idle_remain_time_cs=$(( SCH_IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-SCH_LAST_PROGRESS_TIME_CS) ))
+
+	if [ ! "${gt_remain_time_cs}" -gt 0 ]
+	then
+		sch_fail_msg "Processing timeout (${SCH_PROC_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
+		rv="${SCH_RV_GLOBAL_TIMEOUT}"
+	elif [ ! "${gt_idle_remain_time_cs}" -gt 0 ]
+	then
+		sch_fail_msg "Idle timeout (${SCH_IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
+		rv="${SCH_RV_IDLE_TIMEOUT}"
+	fi
+
+	if [ "${gt_idle_remain_time_cs}" -lt "${gt_remain_time_cs}" ]; then
+		gt_remain_time_cs="${gt_idle_remain_time_cs}"
+	fi
+
+	export -n "${1}=${gt_remain_time_cs}"
+
+	return "${rv:-0}"
 }
 
 # 1: job ID
@@ -180,69 +280,6 @@ job_get_params() {
 	return 1
 }
 
-sch_is_uint() {
-	local _v
-	for _v; do
-		case "${_v}" in
-			''|*[!0-9]*) return 1
-		esac
-	done
-	:
-}
-
-sch_is_cmd() {
-	command -v "${1}" 1>/dev/null 2>&1
-}
-
-# 1 - var name for centiseconds output
-sch_get_uptime_cs() {
-	local __uptime i_cs cs s
-	export -n "${1}="
-
-	read -r __uptime _ < /proc/uptime &&
-	case "${__uptime}" in
-		''|*.*.*) false ;;
-		*.*) ;;
-		*) false ;;
-	esac &&
-	i_cs="${__uptime##*.}" &&
-	case "${i_cs}" in
-		'') cs=00 ;;
-		?) cs="${i_cs}0" ;;
-		??) cs="${i_cs}" ;;
-		??*) cs="${i_cs%"${i_cs#??}"}"
-	esac &&
-	s="${__uptime%.*}" &&
-	sch_is_uint "${s}" "${cs}" ||
-	{
-		sch_fail_msg "Failed to get uptime from /proc/uptime."
-		export -n "${1}"=0
-		return 1
-	}
-	cs="${s:-0}${cs:-00}"
-	cs="${cs#"${cs%%[!0]*}"}"
-	export -n "${1}=${cs:-0}"
-}
-
-# Get PID of current shell process
-# 1 - var name for output
-sch_get_cur_pid() {
-	local __pid line
-	export -n "${1:?}="
-
-	while IFS= read -r line; do
-		case "${line}" in
-			Pid:*)
-				__pid="${line##*[^0-9]}"
-				break
-			;;
-		esac
-	done < /proc/self/status
-
-	sch_is_uint "${__pid}" || { sch_fail_msg "Failed to get current PID."; return 1; }
-	export -n "${1}=${__pid}"
-}
-
 sch_finalize() {
 	local sch_cb_rv sch_rv="${1}"
 
@@ -284,43 +321,6 @@ sch_start_job() {
 
 	"${DO_JOB_CB:?}" "${sch_job_id}" "${@}"
 	exit "${?}"
-}
-
-# 1 = var name
-refresh_remain_time()  {
-	get_remain_time "${1}" || sch_finalize "${?}"
-}
-
-# Sets var named $1 to remaining time to ${SCH_PROC_TIMEOUT_S} or to ${SCH_IDLE_TIMEOUT_S}, whichever is lower
-# If timeout is hit, returns code ${SCH_RV_GLOBAL_TIMEOUT} or ${SCH_RV_IDLE_TIMEOUT}
-# 1 - var name to output remaining time
-get_remain_time() {
-	local gt_cur_time_cs gt_total_time_cs gt_remain_time_cs gt_idle_remain_time_cs rv
-	export -n "${1}"=0
-
-	sch_get_uptime_cs gt_cur_time_cs || return 1
-	gt_total_time_cs=$((gt_cur_time_cs - SCH_INIT_UPTIME_CS))
-
-	gt_remain_time_cs=$((SCH_PROC_TIMEOUT_S*100 - gt_total_time_cs))
-	gt_idle_remain_time_cs=$(( SCH_IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-SCH_LAST_PROGRESS_TIME_CS) ))
-
-	if [ ! "${gt_remain_time_cs}" -gt 0 ]
-	then
-		sch_fail_msg "Processing timeout (${SCH_PROC_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
-		rv="${SCH_RV_GLOBAL_TIMEOUT}"
-	elif [ ! "${gt_idle_remain_time_cs}" -gt 0 ]
-	then
-		sch_fail_msg "Idle timeout (${SCH_IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
-		rv="${SCH_RV_IDLE_TIMEOUT}"
-	fi
-
-	if [ "${gt_idle_remain_time_cs}" -lt "${gt_remain_time_cs}" ]; then
-		gt_remain_time_cs="${gt_idle_remain_time_cs}"
-	fi
-
-	export -n "${1}=${gt_remain_time_cs}"
-
-	return "${rv:-0}"
 }
 
 process_done_record() {
