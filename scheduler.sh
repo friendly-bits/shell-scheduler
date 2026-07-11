@@ -49,7 +49,7 @@ sch_is_included() {
 sch_append()
 {
 	sch_check_var_chars "var" "${1}" || return 1
-	eval "${1}=\"\${${1}}\${${1}:+\"\${3:-" "}\"}${2}\""
+	eval "${1}=\"\${${1}}\${${1}:+\"\${3:-" "}\"}\${2}\""
 }
 
 # 1: out var
@@ -248,6 +248,7 @@ job_get_params() {
 
 	local sch_me=job_get_params \
 		sch_param \
+		sch_had_f \
 		sch_job_params \
 		sch_param_seen \
 		sch_job_id="${1}"
@@ -256,12 +257,15 @@ job_get_params() {
 	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	[ "${*}" = sch_all ] && {
+		case "${-}" in
+			*f*) sch_had_f=1 ;;
+		esac
 		eval "sch_job_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 		[ -n "${sch_job_params}" ] || return 0
 
 		set -f
 		set -- ${sch_job_params}
-		[ -n "${SCH_HAD_F}" ] || set +f
+		[ -n "${sch_had_f}" ] || set +f
 	}
 
 	for sch_param; do
