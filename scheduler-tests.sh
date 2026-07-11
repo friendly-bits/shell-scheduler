@@ -301,9 +301,7 @@ run_parallelism_test()
 #
 
 
-# Verify that the scheduler completes normally when one job returns a non-zero
-# status. The scheduler itself should still succeed and invoke the completion
-# callback for each job.
+# Verify the scheduler succeeds and calls JOB_DONE_CB for every job, even when one fails.
 test_1()
 {
 	TEST_NUM=1 \
@@ -316,8 +314,7 @@ test_1()
 		run_generic_test
 }
 
-# Verify that the scheduler detects lack of progress and terminates when the
-# idle timeout expires while a job is still running.
+# Verify the scheduler terminates on idle timeout while a job is still running.
 test_2()
 {
 	TEST_NUM=2 \
@@ -331,7 +328,7 @@ test_2()
 		run_generic_test
 }
 
-# Verify that the scheduler eventually times out when a worker exits without sending a completion record.
+# Verify the scheduler times out when a worker exits without sending a completion record.
 test_3()
 {
 	TEST_NUM=3 \
@@ -345,7 +342,7 @@ test_3()
 		run_generic_test
 }
 
-# Verify that the scheduler treats malformed completion records as an error.
+# Verify the scheduler treats malformed completion records as an error.
 test_4()
 {
 	TEST_NUM=4 \
@@ -358,7 +355,7 @@ test_4()
 		run_generic_test
 }
 
-# Verify that the scheduler never runs more than SCHED_MAX_JOBS workers at the same time.
+# Verify the scheduler never runs more than SCHED_MAX_JOBS workers at once.
 test_5()
 {
 	TEST_NUM=5 \
@@ -371,7 +368,7 @@ test_5()
 		run_parallelism_test
 }
 
-# Verify that SCHED_MAX_JOBS=1 causes jobs to execute strictly sequentially.
+# Verify SCHED_MAX_JOBS=1 causes jobs to execute strictly sequentially.
 test_6()
 {
 	TEST_NUM=6 \
@@ -385,8 +382,7 @@ test_6()
 		run_parallelism_test
 }
 
-# Verify that the scheduler succeeds when all jobs complete successfully and
-# all completion callbacks are executed.
+# Verify the scheduler succeeds and all JOB_DONE_CB callbacks run when every job succeeds.
 test_7()
 {
 	TEST_NUM=7 \
@@ -399,8 +395,7 @@ test_7()
 		run_generic_test
 }
 
-# Verify that a failure returned by done_handler() causes the scheduler to
-# terminate with an error.
+# Verify a failing JOB_DONE_CB causes the scheduler to terminate with an error.
 test_8()
 {
 	test_8_done_handler()
@@ -452,8 +447,7 @@ test_8()
 	fi
 }
 
-# Verify that completion of a running job causes the scheduler to launch the
-# next queued job until all queued jobs have been processed.
+# Verify job completion triggers dispatch of the next queued job until all jobs run.
 test_9()
 {
 	test_9_do_job()
@@ -513,8 +507,7 @@ test_9()
 	fi
 }
 
-# Verify scheduler behavior with a larger number of jobs and ensure that
-# finalize callback receives an empty running PID list on success.
+# Verify 100 jobs complete and SCHED_FINALIZE_CB receives an empty running-PID list.
 test_10()
 {
 	test_10_do_job()
@@ -601,9 +594,7 @@ test_10()
 	fi
 }
 
-# Verify that the scheduler terminates when the overall processing timeout
-# expires, even though workers are still active and the idle timeout has not
-# been reached.
+# Verify the global timeout fires while workers are active and idle timeout hasn't elapsed.
 test_11()
 {
 	test_11_finalize_handler()
@@ -654,8 +645,7 @@ test_11()
 	fi
 }
 
-# Verify that an empty job list exits successfully, invokes no done_handler()
-# callbacks and finalizes with an empty PID list.
+# Verify an empty job list succeeds, calls no JOB_DONE_CB, and finalizes with empty PIDs.
 test_12()
 {
 	test_12_done_handler()
@@ -731,8 +721,8 @@ test_12()
 	fi
 }
 
-# Verify that SIGUSR1 causes scheduler termination with SCHED_RV_SIGNAL,
-# that finalize callback receives non-empty running PID list and that the callback terminates the workers.
+# Verify SIGUSR1 terminates the scheduler, SCHED_FINALIZE_CB gets a non-empty PID list,
+#   and kills the workers.
 test_13()
 {
 	test_13_finalize_handler()
@@ -799,8 +789,7 @@ test_13()
 	fi
 }
 
-# Verify that loss of a completion record while another worker still holds the FIFO open
-# eventually causes an idle timeout instead of being mistaken for normal completion due to EOF.
+# Verify a lost completion record with another worker still active causes an idle timeout.
 test_14()
 {
 	local \
@@ -834,8 +823,7 @@ test_14()
 	fi
 }
 
-# Verify that a failing SCHED_FINALIZE_CB overrides rv=0 but does not
-# overwrite an existing scheduler error.
+# Verify a failing SCHED_FINALIZE_CB overrides rv=0 but not an existing scheduler error.
 test_15()
 {
 	test_15_finalize_handler()
@@ -905,8 +893,7 @@ test_15()
 	fi
 }
 
-# Verify that invalid callback configuration is rejected before any jobs are
-# started.
+# Verify invalid callback configuration is rejected before any jobs start.
 test_16()
 {
 	test_16_fail_msg_handler()
@@ -995,8 +982,7 @@ test_16()
 	fi
 }
 
-# Verify that invalid values of SCHED_MAX_JOBS are rejected before any jobs
-# are started.
+# Verify invalid scheduler numeric env vars are rejected before any jobs start.
 test_17()
 {
 	test_17_fail_msg_handler()
@@ -1088,8 +1074,7 @@ test_17()
 }
 
 
-# Verify that JOB_DONE_CB may be empty and that successful execution still
-# completes normally.
+# Verify JOB_DONE_CB may be empty and the scheduler still completes normally.
 test_18()
 {
 	JOB_DONE_CB='' \
@@ -1102,8 +1087,7 @@ test_18()
 		run_generic_test
 }
 
-# Test 19
-# Verify that additional arguments passed to schedule_jobs() are forwarded unchanged to DO_JOB_CB after the job ID.
+# Verify extra args to schedule_jobs() are forwarded unchanged to DO_JOB_CB after the job ID.
 test_19()
 {
 	test_19_do_job()
@@ -1161,9 +1145,7 @@ EOF
 	fi
 }
 
-# Large parallelism stress test
-# Verify that scheduler enforces SCHED_MAX_JOBS under heavy concurrency
-# and that maximum observed parallelism never exceeds the configured limit.
+# Verify SCHED_MAX_JOBS caps concurrency under heavy load (300 jobs).
 test_20()
 {
 	test_20_do_job()
@@ -1266,8 +1248,7 @@ test_20()
 	fi
 }
 
-# Verify that arbitrary DO_JOB_CB return codes are propagated unchanged to
-# JOB_DONE_CB and that non-zero job failures do not cause scheduler failure.
+# Verify arbitrary DO_JOB_CB return codes reach JOB_DONE_CB unchanged without failing the scheduler.
 test_21()
 {
 	test_21_do_job()
@@ -1338,7 +1319,7 @@ EOF
 	fi
 }
 
-# Verify that removal of the scheduler FIFO during execution is detected and causes scheduler failure.
+# Verify removing the scheduler FIFO during execution causes scheduler failure.
 test_22()
 {
 	local \
@@ -1379,9 +1360,7 @@ test_22()
 	fi
 }
 
-# Verify that the scheduler terminates when the idle timeout
-# expires, even though workers are still active and the processing timeout has not
-# been reached.
+# Verify idle timeout fires while workers are active and processing timeout hasn't elapsed.
 test_23()
 {
 	test_23_finalize_handler()
@@ -1431,9 +1410,7 @@ test_23()
 	fi
 }
 
-# Verify that the global processing timeout fires based on elapsed time since
-# scheduler start, not since the last job completion — i.e. continuous
-# progress must not indefinitely postpone it.
+# Verify the global timeout fires from scheduler start time, not from the last job completion.
 test_24()
 {
 	test_24_finalize_handler()
@@ -1483,8 +1460,7 @@ test_24()
 	fi
 }
 
-# Verify that when the global processing timeout and the idle timeout are due
-# at the same instant, the global timeout takes priority (if/elif ordering).
+# Verify the global timeout takes priority when it and the idle timeout are due simultaneously.
 test_25()
 {
 	local \
@@ -1516,8 +1492,7 @@ test_25()
 	fi
 }
 
-# Verify that SCHED_MAX_JOBS greater than the job count never enters the
-# concurrency-limiting wait loop, and all jobs still complete normally.
+# Verify SCHED_MAX_JOBS greater than the job count still completes all jobs normally.
 test_26()
 {
 	TEST_NUM=26 \
@@ -1530,8 +1505,8 @@ test_26()
 		run_generic_test
 }
 
-# Verify that SCHED_FINALIZE_CB may be empty and that successful execution
-# still completes normally (symmetric to test_18's empty JOB_DONE_CB).
+# Verify SCHED_FINALIZE_CB may be empty and the scheduler still completes normally
+#   (test_18).
 test_27()
 {
 	SCHED_FINALIZE_CB='' \
@@ -1544,8 +1519,7 @@ test_27()
 		run_generic_test
 }
 
-# Verify that finalize() removes the scheduler's FIFO after a normal
-# (non-error) run, leaving no leaked file behind.
+# Verify finalize() removes the scheduler's FIFO after a normal run, no leaked file.
 test_28()
 {
 	local \
@@ -1584,9 +1558,7 @@ test_28()
 	fi
 }
 
-# Verify that the caller's original noglob state (glob-enabled or
-# glob-disabled) is what DO_JOB_CB, JOB_DONE_CB, and SCHED_FINALIZE_CB
-# observe, regardless of schedule_jobs()'s internal set -f handling.
+# Verify DO_JOB_CB, JOB_DONE_CB, and SCHED_FINALIZE_CB observe the caller's noglob state.
 test_29()
 {
 	test_29_do_job()
@@ -1697,8 +1669,7 @@ test_29()
 	fi
 }
 
-# Verify job IDs can contain arbitrary non-whitespace characters and are
-# passed to DO_JOB_CB/JOB_DONE_CB unchanged.
+# Verify job IDs with arbitrary non-whitespace chars reach DO_JOB_CB/JOB_DONE_CB unchanged.
 test_30()
 {
 	test_30_do_job()
@@ -1738,9 +1709,8 @@ test_30()
 
 	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 
-	# Glob/quote/injection-shaped characters. Multi-line literal (not a
-	# bash array); whitespace from continuation/indentation is stripped
-	# below.
+	# Glob/quote/injection-shaped chars. Multi-line literal, not a bash array; whitespace
+	#   from continuation/indentation is stripped below.
 
 	jobs="
 		plain1 \
@@ -1820,8 +1790,7 @@ test_30()
 	fi
 }
 
-# Verify forged completion records (glob "*", or shell-injection-shaped
-# IDs) are rejected as unknown/malformed, never accepted or executed.
+# Verify forged completion records (glob/injection-shaped IDs) are rejected, never executed.
 test_31()
 {
 	test_31_touch_inject()
@@ -1913,10 +1882,8 @@ test_31()
 	fi
 }
 
-# Verify that additional arguments passed to schedule_jobs() preserve exact
-# argument boundaries and content when forwarded to DO_JOB_CB - an
-# empty-string arg, an arg with embedded whitespace, a glob-metacharacter
-# arg, and a leading-dash arg - regardless of caller noglob state.
+# Verify extra args to schedule_jobs() reach DO_JOB_CB with exact boundaries/content intact:
+#   empty string, embedded whitespace, glob metacharacters, leading dash.
 test_32()
 {
 	test_32_do_job()
@@ -2000,8 +1967,7 @@ test_32()
 	fi
 }
 
-# Verify that SIGINT and SIGTERM both terminate the scheduler with SCHED_RV_INT_TERM,
-# and that the finalize callback receives that rv plus a non-empty running-PID list.
+# Verify SIGINT/SIGTERM terminate the scheduler with SCHED_RV_INT_TERM and a non-empty PID list.
 test_33()
 {
 	test_33_finalize_handler()
@@ -2108,13 +2074,12 @@ test_33()
 	fi
 }
 
-# Verify that the idle timeout correctly accounts for time elapsed during job completion callbacks,
-# rather than resetting to the full IDLE_TIMEOUT_S.
+# Verify idle timeout accounts for time spent in JOB_DONE_CB, not reset to the full value.
 test_34()
 {
 	test_34_done_handler()
 	{
-		# Artificially delay the callback to consume a portion of the idle timeout before the next read -t call.
+		# Delay JOB_DONE_CB to consume part of the idle timeout before the next read -t.
 		sleep 3
 		return 0
 	}
@@ -2145,8 +2110,7 @@ test_34()
 	end_time=$(date +%s)
 	elapsed=$((end_time - start_time))
 
-	# instant takes 0s, callback takes 3s (total 3s elapsed since start).
-	# Remaining idle timeout is 2s. Expected total ~5s. Adding 1s margin.
+	# instant=0s, callback=3s: 3s elapsed, 2s idle timeout remaining, ~5s total (+1s margin).
 	if [ "${sched_rv}" = 81 ] && [ "${elapsed}" -le 6 ]
 	then
 		PASS "elapsed=${elapsed}s"
@@ -2157,12 +2121,8 @@ test_34()
 	fi
 }
 
-# Verify that SCHED_TIMEOUT_S and SCHED_IDLE_TIMEOUT_S may be left entirely
-# unset (as opposed to explicitly empty, covered separately by test_39) and
-# that sch_check_uint's "not set and not required" branch accepts this,
-# falling back to schedule_jobs()'s built-in PROC_TIMEOUT_S=900/IDLE_TIMEOUT_S=300
-# defaults rather than being rejected. Uses a fast job so the test does not
-# have to wait out either default to prove this.
+# Verify SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S may be left unset, falling back to defaults
+#   (test_39).
 test_35()
 {
 	local \
@@ -2192,11 +2152,7 @@ test_35()
 	fi
 }
 
-# Verify that SIGUSR1/SIGINT/SIGTERM interrupt the scheduler promptly rather
-# than merely being noticed the next time an unrelated timeout would have
-# fired anyway. SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S are set generously high
-# so a pass can only be explained by the signal handler itself firing, not by
-# either timeout coincidentally expiring around the same time.
+# Verify SIGUSR1/SIGINT/SIGTERM interrupt the scheduler promptly, not via an unrelated timeout.
 test_36()
 {
 	local \
@@ -2288,10 +2244,7 @@ test_36()
 	fi
 }
 
-# Verify that the idle and global timeouts fire within their configured
-# window - not just that the eventual return code is correct (already
-# covered elsewhere), but that they fire neither implausibly early nor late
-# enough to suggest the wrong timer value is being used.
+# Verify idle and global timeouts fire within their configured time window, not just eventually.
 test_37()
 {
 	local \
@@ -2366,10 +2319,8 @@ test_37()
 	fi
 }
 
-# Verify that process_done_record()'s rounding of remaining time up to the
-# next whole second (for its `read -t` call) does not compound into a large
-# overshoot, even at the minimum legal SCHED_IDLE_TIMEOUT_S=1: elapsed time
-# must still be close to 1s, not several seconds.
+# Verify read -t rounding doesn't overshoot at the minimum SCHED_IDLE_TIMEOUT_S=1
+#   (~1s, not more).
 test_38()
 {
 	local \
@@ -2410,11 +2361,8 @@ test_38()
 	fi
 }
 
-# Verify that explicitly empty SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S (as
-# opposed to entirely unset, covered by test_35) are accepted and fall back
-# to the built-in defaults. Complements test_17, which only exercises the
-# rejection path for these vars and deliberately skips '' since it is
-# documented as a valid value.
+# Verify that explicitly empty-value SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S
+#   are accepted and fall back to defaults.
 test_39()
 {
 	local \
@@ -2446,17 +2394,8 @@ test_39()
 	fi
 }
 
-# scheduler.sh's SCHED_DISPATCH_TICK_CB is a testing-only hook with no role in normal operation.
-# It's called with <job_id> right after each job is dispatched in the initial scheduling loop.
-# test_40 uses it to stall dispatch deterministically.
-# That avoids racing host fork speed against a timeout, which isn't portable across environments.
-
-# Verify the global timeout can fire inside the initial dispatch loop itself,
-#   not only via process_done_record()'s checks.
-# SCHED_MAX_JOBS equals the job count, so the capacity-wait loop is skipped entirely.
-# SCHED_DISPATCH_TICK_CB stalls past SCHED_TIMEOUT_S right after the first job dispatches.
-# Only the dispatch loop's own refresh_remaining_time() call can catch it then.
-# A marker file confirms the second job was never dispatched.
+# Verify the global timeout can fire inside schedule_jobs()'s initial dispatch loop.
+# SCHED_DISPATCH_TICK_CB stalls past SCHED_TIMEOUT_S so the second job is never dispatched.
 test_40()
 {
 	test_40_do_job()
@@ -2507,8 +2446,8 @@ test_40()
 }
 
 
-# Verify that a single param registered via job_set_params() is delivered to
-# DO_JOB_CB as a real environment variable with the exact value.
+# Verify that a single param registered via job_set_params()
+#   is delivered to DO_JOB_CB with the exact value.
 test_41()
 {
 	test_41_do_job()
@@ -2558,7 +2497,7 @@ test_41()
 	fi
 }
 
-# Verify that multiple params registered for the same job are all delivered.
+# Verify multiple params registered for the same job are all delivered.
 test_42()
 {
 	test_42_do_job()
@@ -2615,10 +2554,10 @@ test_42()
 	fi
 }
 
-# Verify job_get_params() rejects a param that was never registered for the
-# job, and that a multi-name request stops at the first unregistered name:
-# a name requested before the bad one is already assigned, a name requested
-# after it is never attempted.
+# Verify job_get_params() rejects param not registered for the job,
+#  and that a multi-name request stops at the first unregistered name:
+#  name requested before if is already assigned,
+#  name requested after it is never attempted.
 test_43()
 {
 	test_43_do_job()
@@ -2685,11 +2624,9 @@ test_43()
 	fi
 }
 
-# Verify job_set_params() rejects invalid input at assignment time: bad job
-# ID, pair missing '=', and bad/empty/leading-digit param names - while
-# still accepting a leading-digit job ID (job IDs need not be valid shell
-# identifiers, unlike param names, which are used directly as export
-# targets). No scheduler run is needed for this test.
+# Verify job_set_params() rejects invalid input at assignment time:
+#   bad job ID, pair missing '=', bad/empty/leading-digit param names,
+#   and accepts a leading-digit job ID (job IDs need not be valid shell identifiers).
 test_44()
 {
 	test_44_check_rejected()
@@ -2759,9 +2696,9 @@ test_44()
 }
 
 # Verify job_set_params() rejects every reserved param name immediately
-# (sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS): rv=1,
-# one specific message emitted per case, and nothing is stored -
-# a later job run never sees the param.
+#   (sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS): rv=1,
+#   one specific message emitted per case, and nothing is stored -
+#   a later job run never sees the param.
 test_45()
 {
 	test_45_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
@@ -2845,8 +2782,7 @@ test_45()
 	fi
 }
 
-# Verify params are scoped per job ID: one job's param must not leak into
-# another job's environment.
+# Verify a job's params don't leak into another job's environment.
 test_46()
 {
 	test_46_do_job()
@@ -2965,8 +2901,8 @@ test_47()
 	fi
 }
 
-# Verify pair parsing splits only on the first '=': the value may contain
-# further '=' characters unmodified.
+# Verify pair parsing splits only on the first '=':
+#   the value may contain further '=' characters unmodified.
 test_48()
 {
 	test_48_do_job()
@@ -3017,9 +2953,9 @@ test_48()
 	fi
 }
 
-# Verify param values are stored/delivered as opaque data: quotes, $(),
-# backticks, globs, spaces, and an empty value are preserved exactly and
-# never executed or glob-expanded.
+# Verify param values are stored/delivered as opaque data:
+#   quotes, $(), backticks, globs, spaces, empty value
+#   are preserved and never executed or glob-expanded.
 test_49()
 {
 	test_49_touch_inject() { touch "${INJECT_FILE:?}"; }
@@ -3152,9 +3088,8 @@ test_50()
 }
 
 
-# Verify job_get_params() runs its own reserved/malformed-name validation on
-# the requested param name, independent of job_set_params()'s validation at
-# registration time (defense in depth on the read side).
+# Verify job_get_params() runs its own reserved/malformed-name validation on the requested
+#   param name, independent of job_set_params()'s validation at registration time.
 test_51()
 {
 	test_51_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
@@ -3180,20 +3115,10 @@ test_51()
 	job_set_params "${job_id}" "REALPARAM=fine" "AAA=1" "BBB=2"
 
 	# "IFS" is deliberately included below: job_get_params() must reject it
-	# before ever reaching its eval-assignment line. local IFS="${IFS}"
-	# above is a safety net in case that check ever regresses - without it,
-	# a regression here would clobber the shell's field separator globally
-	# and silently break every test that runs after this one, rather than
-	# just failing this test's own assertion.
+	#   before reaching its eval-assignment line.
+	# local IFS="${IFS}" guards from IFS corruption leak
 	#
-	# "AAA BBB" is deliberately built from two names that are ALREADY
-	# registered: this is what actually exercises the word-splitting
-	# regression. "bad name" alone doesn't - its split halves ("bad",
-	# "name") are rejected anyway for being unregistered, so it passes
-	# this loop whether or not job_get_params() incorrectly word-splits a
-	# single malformed argument. Registered halves are required to prove
-	# the argument is rejected as one malformed token rather than silently
-	# split into two valid ones.
+	# "AAA BBB" is deliberately built from two registered names
 	for name in SCH_FOO sch_foo _sch_foo SCHED_MAX_JOBS DO_JOB_CB JOB_DONE_CB IFS 1bad "bad name" "AAA BBB"
 	do
 		total_cnt=$((total_cnt + 1))
@@ -3207,9 +3132,7 @@ test_51()
 		fi
 	done
 
-	# A legitimate, already-registered param must still work afterward.
-	# REALPARAM is declared local above so this direct (non-subshell) call
-	# doesn't leak it into the global scope.
+	# Legitimate, already-registered param must still work afterward.
 	job_get_params "${job_id}" REALPARAM
 
 	msg_cnt=0
@@ -3228,8 +3151,8 @@ test_51()
 	fi
 }
 
-# Verify job_get_params() runs its own job-ID validation, independent of
-# job_set_params()'s job-ID validation at registration time.
+# Verify job_get_params() runs its own job-ID validation,
+#   independent of job_set_params()'s job-ID validation at registration time.
 test_52()
 {
 	test_52_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
@@ -3266,9 +3189,7 @@ test_52()
 		fi
 	done
 
-	# A legitimate job ID must still work afterward. REALPARAM is declared
-	# local above so this direct (non-subshell) call doesn't leak it into
-	# the global scope.
+	# Legitimate job ID must still work afterward
 	job_get_params "${job_id}" REALPARAM
 
 	msg_cnt=0
@@ -3287,9 +3208,9 @@ test_52()
 	fi
 }
 
-# Verify job_get_params() rejects a call with a valid job ID but zero
-# requested param names, and that this failure is reported with its own
-# distinct message (not conflated with the bad-job-ID message).
+# Verify job_get_params() rejects a call with a valid job ID but zero requested param names,
+#   and that this failure is reported with its own distinct message
+#   (not conflated with the bad-job-ID message)
 test_53()
 {
 	test_53_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
@@ -3334,9 +3255,8 @@ test_53()
 	fi
 }
 
-# Verify job_set_params() rejects a call with a valid job ID but zero
-# key=value pairs - symmetric with job_get_params()'s equivalent guard
-# above (test_53).
+# Verify job_set_params() rejects a call with a valid job ID but zero key=value pairs -
+#   symmetric with equivalent guard above (test_53).
 test_54()
 {
 	test_54_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
@@ -3379,9 +3299,9 @@ test_54()
 	fi
 }
 
-# Verify job_get_params() always reflects the current registered value, not
-# something cached at an earlier point - re-fetching after a later
-# job_set_params() update picks up the new value.
+# Verify job_get_params() always reflects the current registered value,
+#   not something cached at an earlier point -
+#   re-fetching after a later job_set_params() update picks up the new value.
 test_55()
 {
 	local \
@@ -3412,10 +3332,9 @@ test_55()
 	fi
 }
 
-# Verify job_get_params() works when called from JOB_DONE_CB, which runs in
-# the main scheduler process (not the forked per-job subshell that runs
-# DO_JOB_CB) - confirming params are available in every callback, not just
-# DO_JOB_CB.
+# Verify job_get_params() works when called from JOB_DONE_CB,
+#   which runs in the main scheduler process (not the forked per-job subshell that runs
+#   DO_JOB_CB) - confirming params are available in every callback, not just DO_JOB_CB.
 test_56()
 {
 	test_56_do_job() { return 0; }
@@ -3467,11 +3386,9 @@ test_56()
 	fi
 }
 
-# Verify job_get_params() is usable directly in the caller's own top-level
-# scope (after schedule_jobs() returns), not only from within a scheduler
-# callback - confirming params are available in the user's application
-# scope as intended, rounding out coverage alongside DO_JOB_CB (tests 41
-# etc.) and JOB_DONE_CB (test_56).
+# Verify job_get_params() is usable directly in the caller's own top-level scope,
+#   not only from within a scheduler callback -
+#   confirming params are available in the user's application scope
 test_57()
 {
 	test_57_do_job() { return 0; }
@@ -3516,10 +3433,8 @@ test_57()
 }
 
 
-# Verify that job_get_params() "all" mode is a no-op success (rv=0, no
-# params assigned) when the job has never had any params registered -
-# regression test for a bug where "all" on an empty set incorrectly fell
-# through to job_get_params()'s "no params specified" failure path.
+# Verify that job_get_params() "all" mode is a no-op success (rv=0, no params assigned)
+#   when the job has never had any params registered
 test_58()
 {
 	local \
@@ -3544,10 +3459,10 @@ test_58()
 	fi
 }
 
-# Verify that job_get_params() "all" mode returns the complete, correct set
-# of registered params, matching an explicit multi-param fetch of the same
-# job. Also verifies "all" mode's internal word-splitting of the
-# registered-params list does not leak or lose the caller's noglob state.
+# Verify job_get_params() "all" mode returns the complete, correct set of registered params,
+#   matching an explicit multi-param fetch of the same job.
+# Also verifies "all" mode's internal word-splitting of the registered-params list
+#   does not leak or lose the caller's noglob state.
 test_59()
 {
 	local \
@@ -3593,13 +3508,8 @@ test_59()
 	fi
 }
 
-# Verify that job_get_params() with the "-export" flag genuinely exports
-# into the process environment (visible to a real child process), while
-# the default (no "-export") mode only assigns in the caller's own shell
-# scope. Checked via a separately exec'd child (sh -c ...): a plain
-# subshell would not distinguish this, since a subshell forks and so
-# shares the full (exported and non-exported) variable table with its
-# parent - only a genuine exec only ever inherits vars actually exported.
+# Verify that job_get_params() with the "-export" flag exports into the process environment,
+#   while the default (no "-export") mode only assigns in the caller's own shell scope.
 test_60()
 {
 	local \
@@ -3633,12 +3543,10 @@ test_60()
 	fi
 }
 
-# Verify SCHED_AUTO_PARAMS=1's core promise end-to-end: DO_JOB_CB sees its
-# own job's registered params as already-exported env vars without calling
-# job_get_params() itself, jobs with different params stay isolated from
-# each other, and - regression test for a bug where job_get_params() "all"
-# on an empty set made sch_start_job() exit 1 before DO_JOB_CB ever ran -
-# a job with zero registered params still runs normally.
+# Verify with SCHED_AUTO_PARAMS=1:
+# - DO_JOB_CB sees its own job's registered params without job_get_params() call
+# - jobs with different params stay isolated from each other
+# - job_get_params() "all" doesn't 'exit 1' on empty params set
 test_61()
 {
 	test_61_do_job()
@@ -3674,9 +3582,9 @@ test_61()
 
 	print_test_header 61 "SCHED_AUTO_PARAMS=1: auto-export, per-job isolation, and jobs with no params" "${jobs}"
 
+	# "noparam" deliberately has no job_set_params() call at all.
 	job_set_params withparam1 "MYPARAM=aaa"
 	job_set_params withparam2 "MYPARAM=bbb"
-	# "noparam" deliberately has no job_set_params() call at all.
 
 	SCHED_AUTO_PARAMS=1 \
 	SCHED_FAIL_MSG_CB=echo \
