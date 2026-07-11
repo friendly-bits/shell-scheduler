@@ -2554,10 +2554,9 @@ test_42()
 	fi
 }
 
-# Verify job_get_params() rejects param not registered for the job,
-#  and that a multi-name request stops at the first unregistered name:
-#  name requested before if is already assigned,
-#  name requested after it is never attempted.
+# Verify job_get_params() returns an empty value (rv=0, no error) for a param never
+#   registered for the job, and a multi-name request still fetches every requested name,
+#   including ones after the unregistered one.
 test_43()
 {
 	test_43_do_job()
@@ -2568,32 +2567,29 @@ test_43()
 		{
 			printf 'rv=%s\n' "${rv}"
 			printf 'GOOD1=%s\n' "${GOOD1-<unset>}"
+			printf 'MISSING=%s\n' "${MISSING-<unset>}"
 			printf 'GOOD2=%s\n' "${GOOD2-<unset>}"
 		} > "${OUT_FILE:?}"
 		return 0
 	}
 
-	test_43_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
-
 	local \
 		TEST_NUM=43 \
 		sched_rv \
 		actual \
-		expected \
-		msg_cnt
+		expected
 
 	local \
 		OUT_FILE="/tmp/sched.params.unregistered.${TEST_NUM}.$$" \
-		MSG_FILE="/tmp/sched.params.unregistered.msg.${TEST_NUM}.$$" \
 		job_id=job_43
 
-	rm -f "${OUT_FILE}" "${MSG_FILE}"
+	rm -f "${OUT_FILE}"
 
-	print_test_header 43 "job_get_params() rejects an unregistered param and stops at the first failure" "${job_id}"
+	print_test_header 43 "job_get_params() returns empty for an unregistered param, no error" "${job_id}"
 
 	job_set_params "${job_id}" "GOOD1=alpha" "GOOD2=beta"
 
-	SCHED_FAIL_MSG_CB=test_43_fail_msg \
+	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=test_43_do_job \
@@ -2606,19 +2602,16 @@ test_43()
 	sched_rv=$?
 
 	actual="$([ -f "${OUT_FILE}" ] && cat "${OUT_FILE}")"
-	expected="$(printf 'rv=1\nGOOD1=alpha\nGOOD2=<unset>')"
+	expected="$(printf 'rv=0\nGOOD1=alpha\nMISSING=\nGOOD2=beta')"
 
-	msg_cnt=0
-	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
+	rm -f "${OUT_FILE}"
 
-	rm -f "${OUT_FILE}" "${MSG_FILE}"
-
-	if [ "${sched_rv}" = 0 ] && [ "${actual}" = "${expected}" ] && [ "${msg_cnt}" = 1 ]
+	if [ "${sched_rv}" = 0 ] && [ "${actual}" = "${expected}" ]
 	then
 		PASS
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}, msg_cnt=${msg_cnt}"
+		FAIL "sched_rv=${sched_rv}"
 		printf '%s\n%s\n' "expected: ${expected}" "actual: ${actual}"
 		return 1
 	fi
@@ -2782,7 +2775,8 @@ test_45()
 	fi
 }
 
-# Verify a job's params don't leak into another job's environment.
+# Verify a job's params don't leak into another job's environment: two jobs registering
+#   the same param name with different values must each see only their own value.
 test_46()
 {
 	test_46_do_job()
@@ -2794,12 +2788,7 @@ test_46()
 			*) return 1 ;;
 		esac
 		job_get_params "${1}" SHARED_NAME
-		if [ -z "${SHARED_NAME+x}" ]
-		then
-			printf 'unset\n' > "${out}"
-		else
-			printf 'set:%s\n' "${SHARED_NAME}" > "${out}"
-		fi
+		printf '%s\n' "${SHARED_NAME}" > "${out}"
 		return 0
 	}
 
@@ -2820,6 +2809,7 @@ test_46()
 	print_test_header 46 "Params are scoped per job ID" "${job_id_a} ${job_id_b}"
 
 	job_set_params "${job_id_a}" "SHARED_NAME=only_${job_id_a}"
+	job_set_params "${job_id_b}" "SHARED_NAME=only_${job_id_b}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -2838,8 +2828,8 @@ test_46()
 	rm -f "${J1_FILE}" "${J2_FILE}"
 
 	if [ "${sched_rv}" = 0 ] &&
-		[ "${seen1}" = "set:only_${job_id_a}" ] &&
-		[ "${seen2}" = "unset" ]
+		[ "${seen1}" = "only_${job_id_a}" ] &&
+		[ "${seen2}" = "only_${job_id_b}" ]
 	then
 		PASS "${job_id_a}='${seen1}', ${job_id_b}='${seen2}'"
 		return 0
@@ -3433,7 +3423,7 @@ test_57()
 }
 
 
-# Verify that job_get_params() "all" mode is a no-op success (rv=0, no params assigned)
+# Verify that job_get_params() "sch_all" mode is a no-op success (rv=0, no params assigned)
 #   when the job has never had any params registered
 test_58()
 {
@@ -3443,10 +3433,10 @@ test_58()
 		job_id=job_58_noparams
 
 	print_test_header 58 \
-		"job_get_params() 'all' on a job with zero registered params is a no-op success" \
+		"job_get_params() 'sch_all' on a job with zero registered params is a no-op success" \
 		"(direct call, no scheduler run)"
 
-	job_get_params "${job_id}" all
+	job_get_params "${job_id}" sch_all
 	rv=$?
 
 	if [ "${rv}" = 0 ]
@@ -3459,9 +3449,9 @@ test_58()
 	fi
 }
 
-# Verify job_get_params() "all" mode returns the complete, correct set of registered params,
+# Verify job_get_params() "sch_all" mode returns the complete, correct set of registered params,
 #   matching an explicit multi-param fetch of the same job.
-# Also verifies "all" mode's internal word-splitting of the registered-params list
+# Also verifies "sch_all" mode's internal word-splitting of the registered-params list
 #   does not leak or lose the caller's noglob state.
 test_59()
 {
@@ -3483,18 +3473,18 @@ test_59()
 		explicit_ok=1
 
 	unset P1 P2 P3
-	job_get_params "${job_id}" all
+	job_get_params "${job_id}" sch_all
 	[ "${P1}" = one ] && [ "${P2}" = two ] && [ "${P3}" = three ] &&
 		all_ok=1
 
-	# Noglob preservation around "all" mode's internal set -f handling:
+	# Noglob preservation around "sch_all" mode's internal set -f handling:
 	# caller's set -f/+f state must survive the call unchanged either way.
 	set +f
-	job_get_params "${job_id}" all >/dev/null
+	job_get_params "${job_id}" sch_all >/dev/null
 	case "${-}" in *f*) noglob_ok=0 ;; esac
 
 	set -f
-	job_get_params "${job_id}" all >/dev/null
+	job_get_params "${job_id}" sch_all >/dev/null
 	case "${-}" in *f*) ;; *) noglob_ok=0 ;; esac
 	set +f
 
