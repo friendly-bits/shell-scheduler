@@ -95,7 +95,7 @@ done_handler()
 
 finalize_handler_default()
 {
-	local rv="${1}" pids="${2}" pid_cnt=0
+	local finalize_rv="${1}" pids="${2}" pid_cnt=0
 
 	if [ -n "${pids}" ]
 	then
@@ -105,9 +105,9 @@ finalize_handler_default()
 
 	if [ "${pid_cnt}" -le 20 ]
 	then
-		echo "finalize rv='${rv}' pids='${pids}'"
+		echo "finalize_rv='${finalize_rv}' pids='${pids}'"
 	else
-		echo "finalize rv='${rv}' running_pid_count=${pid_cnt} (list suppressed)"
+		echo "finalize_rv='${finalize_rv}' running_pid_count=${pid_cnt} (list suppressed)"
 	fi
 
 	for pid in ${pids}
