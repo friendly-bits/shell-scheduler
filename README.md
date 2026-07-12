@@ -1,6 +1,8 @@
 ## shell-scheduler
 The goal of this project is to implement a reliable, reusable, flexible and reasonably comprehensive library for parallelization in shell scripts, which would allow to keep application code separate from scheduler infrastructure - and keep it small, lightweight and self-contained.
 
+This is a niche project which will probably be very useful but to a very few people. This makes it inherently difficult to make it visible. If you are one of the few who finds it useful, please take a second to give it a star on Github. This helps other people to find it.
+
 ## Contents
 
 - [Main Features](#main-features)
