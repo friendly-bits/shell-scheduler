@@ -3,8 +3,10 @@
 # shellcheck source=/dev/null
 
 # Supported script arguments:
-# To run all tests: 'run'
-# To run select tests: <space_separated_list_of_numbers>
+# [no arguments] - do nothing (for sourcing the script)
+# 'run' - run all tests
+# 'run <space_separated_list_of_numbers>' - e.g. 'run 1 3 55'
+# 'run <test_num_start>-<test_num_end>' - run tests in a range, e.g. 'run 33-44'
 
 # scheduler-tests.sh
 
@@ -3802,13 +3804,9 @@ test_66() {
 test_67() {
 	test_67_do_job() {
 		case "${1}" in
-			trigger) return 0 ;;
+			hang2) do_job_default hang ;;
 			*) do_job_default "${@}" ;;
 		esac
-	}
-
-	test_67_dispatch_tick() {
-		[ "${1}" = trigger ] && sleep 4
 	}
 
 	test_67_finalize_handler() {
@@ -3823,7 +3821,7 @@ test_67() {
 		exp_ok act_ok exp_fail act_fail exp_unfinished act_unfinished \
 		exp_undispatched act_undispatched \
 		member_cnt \
-		jobs='ok1 fail trigger hang1'
+		jobs='ok1 fail hang2 hang1'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
@@ -3831,13 +3829,13 @@ test_67() {
 	print_test_header 67 "ok/fail/unfinished/undispatched partition the full job set" "${jobs}"
 
 	# SCHED_MAX_JOBS=1 forces strictly sequential dispatch: ok1 and fail are
-	# each fully drained/classified before the next job starts, so only
-	# "trigger" (mid-dispatch when the timeout hits) lands in unfinished.
+	# each fully drained/classified before hang2 starts. hang2 is still
+	# sleeping (no completion record ever read) when SCHED_TIMEOUT_S hits, so
+	# it lands in unfinished; hang1 never gets dispatched.
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=test_67_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=test_67_do_job \
-	SCHED_DISPATCH_TICK_CB=test_67_dispatch_tick \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=30 \
@@ -3859,7 +3857,7 @@ test_67() {
 	if [ "${sched_rv}" = 82 ] &&
 		verify_id_set exp_ok act_ok "ok1" "${ok_raw}" &&
 		verify_id_set exp_fail act_fail "fail" "${fail_raw}" &&
-		verify_id_set exp_unfinished act_unfinished "trigger" "${unfinished_raw}" &&
+		verify_id_set exp_unfinished act_unfinished "hang2" "${unfinished_raw}" &&
 		verify_id_set exp_undispatched act_undispatched "hang1" "${undispatched_raw}" &&
 		[ "${member_cnt}" = 4 ]
 	then
@@ -4011,17 +4009,28 @@ set_ansi
 PASS="${green}PASS${n_c}"
 FAIL="${red}FAIL${n_c}"
 
+case "${1}" in
+	run)
+		shift
+		RUN_TESTS="${*:-"$(seq 1 69)"}"
+		;;
+	'')
+		;;
+	*)
+		printf '%s\n' "Unexpected argument '${1}'." >&2; exit 1
+esac
 
-RUN_TESTS="${*}"
 
 if [ -n "${RUN_TESTS}" ]; then
+	case "${RUN_TESTS}" in
+		*-*-*) printf '%s\n' "Unexpected string '${RUN_TESTS}'."; exit 1 ;;
+		*-*) RUN_TESTS=$(seq "${RUN_TESTS%%-*}" "${RUN_TESTS#*-}") || exit 1 ;;
+	esac
+
 	printf 'Scheduler tests\n'
 
 	TESTS_RUN=0
 	TESTS_PASSED=0
-
-	[ "${RUN_TESTS}" = "run" ] &&
-		RUN_TESTS="$(seq 1 69)"
 
 	for RUN_TEST in ${RUN_TESTS}; do
 		TESTS_RUN=$((TESTS_RUN + 1))
