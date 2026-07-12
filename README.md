@@ -416,10 +416,10 @@ job_set_params pro "url=https://..."
 download_list() {
 	local name="${1:?}"
 
-    # Note: with SCHED_AUTO_PARAMS=1, the ${url} variable is set by the scheduler before callback invocation,
-    #   so this variable *must not be declared local or reset* inside the callback
+    # *With* SCHED_AUTO_PARAMS=1, the ${url} variable is set by the scheduler before callback invocation,
+    #   so ${url} *must not be declared local or reset* inside the callback
 
-    # Without SCHED_AUTO_PARAMS=1, declare the variable local and get its value from job_get_params:
+    # *Without* SCHED_AUTO_PARAMS=1, declare the variable local and get its value from job_get_params:
     # local url
     # job_get_params "${name}" url || exit 1
 
@@ -430,7 +430,6 @@ download_list() {
 # <...>
 SCHED_AUTO_PARAMS=1 \  
     schedule_jobs "${IDS}" &
-
 ```
 
 ### 2. Signal Forwarding
@@ -464,4 +463,6 @@ kill -TERM ${child_pids} ${running_pids} 2>/dev/null
 ```
 
 ### 4. Tracking State Across Callbacks
-Because, from the application point of view, `schedule_jobs` runs in a background child process, any callbacks invoked by the scheduler are isolated from the application process. Hence variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks will not be visible in the scope of the application script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. The in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`) while final processing of the collected information is in the **scheduler termination callback** (`SCHED_FINALIZE_CB`) - both of these callbacks execute synchronously within the scheduler's process context and share visibility of the callback-updated variables.
+This example implements a rudimentary application-specific bookkeeping (incrementing `SUCCESS_CNT` for each successful job) and combines that with scheduler-backed bookkeeping (fetching and reporting the list of jobs by status, i.e. `ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`).
+
+Because, from the application point of view, `schedule_jobs` runs in a background child process, any callbacks invoked by the scheduler are isolated from the application process. Hence variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks will not be visible in the scope of the application script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. Rudimentary in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`) while final processing of the collected information is in the **scheduler termination callback** (`SCHED_FINALIZE_CB`) and utilizes both information collected by the application (`SUCCESS_CNT`) and information collected by the scheduler (`ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`).
