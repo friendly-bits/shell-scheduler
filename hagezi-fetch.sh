@@ -9,14 +9,13 @@
 SCHEDULER_LIB="${SCHEDULER_LIB:-./scheduler.sh}"
 . "${SCHEDULER_LIB}"
 
-# --- Job list: one numeric ID per list, per-job data via JOB_*_<id> ---
+# Params assignment
 job_set_params pro      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt"
 job_set_params proplus  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus.txt"
 job_set_params multi    "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi.txt"
 job_set_params tif      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.txt"
 job_set_params invalid  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/invalid.txt"
 job_set_params gambling "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling.txt"
-
 
 JOBS_CNT=6
 SUCCESS_CNT=0
@@ -34,7 +33,7 @@ download_list()
 {
 	local name="${1:?}" rv
 
-	printf 'Downloading: '%s' from %s\n' "${name}" "${url:?}"
+	printf 'Downloading: '%s' (%s)\n' "${name}" "${url:?}"
 
 	# shellcheck disable=SC2154
 	wget -q -O "${OUT_DIR}/${name}.txt" "${url}"
@@ -75,12 +74,17 @@ sched_error()
 #   would only orphane the wget process rather than killing it.
 #
 # NOTE: The scheduler (including this callback) runs in a background child process.
-#   Updates to SUCCESS_CNT made in job_done() are visible here but not in the scope of the main process.
+#   Collected statuses are visible here but not in the scope of the main process.
 finalize_dl()
 {
+	local running_pid child_pids
 	local \
-		rv="${1}" running_pids="${2}" \
-		running_pid child_pids
+		rv="${1}" \
+		running_pids="${2}" \
+		ok_ids="${3}" \
+		fail_ids="${4}" \
+		unfinished_ids="${5}" \
+		undispatched_ids="${6}"
 
 	if [ -n "${running_pids}" ]
 	then
@@ -95,8 +99,17 @@ finalize_dl()
 		kill -TERM ${child_pids} ${running_pids} 2>/dev/null
 	fi
 
-	printf 'Downloaded: %s\n' "${SUCCESS_CNT}"
-	printf 'Failed: %s\n' "$((JOBS_CNT - SUCCESS_CNT))"
+	printf '\n'
+	printf '%s\n' "OK count: ${SUCCESS_CNT}"
+	printf '%s\n' "Failed count (including unfinished and undispatched): $((JOBS_CNT - SUCCESS_CNT))"
+
+	printf '\n'
+	printf '%s\n' "Successful jobs:  ${ok_ids:-<none>}"
+	printf '\n'
+	printf '%s\n' "Failed jobs by completion status:"
+	printf '%s\n' "Returned non-zero code:  ${fail_ids:-<none>}"
+	printf '%s\n' "Unfinished jobs:         ${unfinished_ids:-<none>}"
+	printf '%s\n' "Undispatched jobs:       ${undispatched_ids:-<none>}"
 
 	return 0
 }
