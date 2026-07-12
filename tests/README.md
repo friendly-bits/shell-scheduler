@@ -1,15 +1,24 @@
 ## Test suite
 
-Consists of tests.sh and (currently) 7 category-specific test files. tests.sh is the entry point, the other files are like categorized libraries of tests.
+Consists of tests.sh and (currently) 7 category-specific test files. tests.sh is the launcher/entry point, the other files are categorized libraries of tests.
 
-Categories: dispatch, core, termination, config, params, misc, outcome
+Categories: `dispatch`, `core`, `termination`, `config`, `params`, `misc`, `outcome`
 
 ### Testing suite command line options
 
 Usage:
-- `sh ./tests.sh [options]` (on Busybox ash)
-- `bash ./tests.sh [options]` (on Bash)
 
+On Busybox ash:
+```sh
+sh ./tests.sh [options]
+```
+
+On Bash:
+```bash
+bash ./tests.sh [options]
+```
+
+Options:
 - `[no arguments]` - do nothing (for sourcing the script)
 - `run` - run all tests, across all categories
 - `run <category>` - run all tests in the given category
