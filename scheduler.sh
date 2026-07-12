@@ -166,12 +166,17 @@ refresh_remain_time()  {
 
 # Sets var named $1 to remaining time to ${SCH_PROC_TIMEOUT_S} or to ${SCH_IDLE_TIMEOUT_S}, whichever is lower
 # If timeout is hit, returns code ${SCH_RV_GLOBAL_TIMEOUT} or ${SCH_RV_IDLE_TIMEOUT}
-# 1 - var name to output remaining time
+# 1: var name to output remaining time
+# 2 (optional): freshly retrieved uptime_cs
 get_remain_time() {
 	local gt_cur_time_cs gt_total_time_cs gt_remain_time_cs gt_idle_remain_time_cs rv
 	export -n "${1}"=0
 
-	sch_get_uptime_cs gt_cur_time_cs || return 1
+	if [ -n "${2}" ]; then
+		gt_cur_time_cs="${2}"
+	else
+		sch_get_uptime_cs gt_cur_time_cs || return 1
+	fi
 	gt_total_time_cs=$((gt_cur_time_cs - SCH_INIT_UPTIME_CS))
 
 	gt_remain_time_cs=$((SCH_PROC_TIMEOUT_S*100 - gt_total_time_cs))
@@ -362,11 +367,12 @@ process_done_record() {
 	[ "${sch_read_t_s}" -gt 0 ] &&
 	read -t "${sch_read_t_s}" -r sch_done_pid sch_done_rv sch_done_id < "${sch_ipc_fifo}"
 
-	refresh_remain_time "${sch_rem_time_var}"
-
-	# Empty completion record: read -t timed out with nothing to report
-	# Next call to process_done_record() will trigger timeout
-	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] || return 0
+	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] || {
+		refresh_remain_time "${sch_rem_time_var}"
+		# Empty completion record: read -t timed out with nothing to report
+		# Next call to process_done_record() will trigger timeout
+		return 0
+	}
 
 	sch_is_uint "${sch_done_pid}" &&
 	sch_is_uint "${sch_done_rv}" &&
@@ -397,6 +403,8 @@ process_done_record() {
 	[ -z "${sch_job_done_cb}" ] ||
 	"${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
 		sch_finalize ${?}
+
+	get_remain_time "${sch_rem_time_var}" "${_sch_cur_time_cs}" || sch_finalize "${?}"
 
 	return 0
 }
