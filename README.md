@@ -318,7 +318,7 @@ If the idle timeout is reached, the scheduler reports an error, invokes the **sc
 
 The scheduler installs handlers for signals: `USR1`, `INT`, `TERM`. When any of these signals is received, the scheduler stops processing, performs its internal cleanup, invokes the **scheduler termination callback** (if defined), and exits with return code `83` (for `USR1`) or `84` (for `INT` or `TERM`).
 
-## Running Jobs Termination
+## Termination of Running Jobs
 
 The scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received. If your application needs to stop unfinished jobs, implement this in the **scheduler termination callback** using the list of unfinished job PIDs passed to it.
 
