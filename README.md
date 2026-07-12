@@ -1,6 +1,21 @@
 ## shell-scheduler
 The goal of this project is to implement a reliable, reusable, flexible and reasonably comprehensive library for parallelization in shell scripts, which would allow to keep application code separate from scheduler infrastructure - and keep it small, lightweight and self-contained.
 
+## Contents
+
+- [Main Features](#main-features)
+- [Dependencies](#dependencies)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Scheduler API](#scheduler-api)
+- [Callbacks](#callbacks)
+- [Job Parameters](#job-parameters)
+- [Environment variables](#environment-variables)
+- [Return Codes](#return-codes)
+- [Timeouts](#timeouts)
+- [Signal Handling](#signal-handling)
+- [Termination of Running Jobs](#termination-of-running-jobs)
+- [Real-World Example](#real-world-example)
 
 ## Main Features
 
@@ -145,19 +160,73 @@ It can be used to e.g. collect job results or handle failures.
 
 ### Scheduler termination callback (optional)
 
+This callback may be used for user-defined cleanup, e.g. terminating unfinished jobs, or to implement a processing completion handler.
+
+Under normal operation, all jobs have already finished when this callback is invoked. If you want to kill any unfinished jobs, this callback is where you should implement that.
+
 Defined by the value of **`${SCHED_FINALIZE_CB}`**. Invoked this way immediately before the scheduler exits:
 
 ```sh
-${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids>
+${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <unfinished_job_ids> <undispatched_job_ids>
 ```
 
-where `<running_pids>` is a space-separated list of PIDs corresponding to jobs that the scheduler started but did not receive completion records for. Under normal operation this is an empty string.
+- `<running_pids>`: PIDs corresponding to jobs that the scheduler started but did not receive completion records for. Under normal operation this is an empty string.
+- `<ok_job_ids>`: job IDs whose **job execution callback** (`DO_JOB_CB`) returned code `0`.
+- `<fail_job_ids>`: job IDs whose **job execution callback** returned a non-zero code.
+- `<unfinished_job_ids>`: job IDs that were dispatched (i.e. a process was started for them) but for which no completion record was received before the scheduler exited. Under normal operation this is an empty string; it becomes non-empty when the scheduler exits before all dispatched jobs report back, e.g. due to a timeout, a signal, a fatal error, or a non-zero return code from `JOB_DONE_CB`.
+- `<undispatched_job_ids>`: job IDs that were never started at all. Under normal operation this is an empty string; it becomes non-empty when the scheduler exits before it has dispatched every job ID from the original list.
+
+(all above lists are space-separated)
+
+**Note**: every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of `<ok_job_ids>`, `<fail_job_ids>`, `<unfinished_job_ids>`, `<undispatched_job_ids>`. This makes them a convenient basis for final bookkeeping, logging, or cleanup in the **scheduler termination callback**, without having to separately track job status yourself.
 
 If this callback returns a non-zero code while `<scheduler_return_code>` is `0`, the scheduler exits with the callback's return code instead. Otherwise, the scheduler's return code is unchanged.
 
-This may be used for user-defined cleanup, e.g. terminating unfinished jobs, or to implement a processing completion handler.
+#### Example: inspecting final job status
 
-This callback is invoked synchronously. Under normal operation, all jobs have already finished when this callback is invoked. If you want to kill any unfinished jobs, this callback is where you should implement that.
+The example below defines a **scheduler termination callback** that unconditionally reports on every outcome category, regardless of whether a given category ended up empty. It does not manufacture any failure or timeout scenario; job `3` simply returns a non-zero code on its own, like any job might in practice.
+
+```sh
+#!/bin/sh
+
+. ./scheduler.sh
+
+do_job() {
+	local job_id="${1}"
+	# Simulates job C failure
+	[ "${job_id}" = C ] && return 1
+	return 0
+}
+
+finalize_report() {
+	local rv="${1}" running_pids="${2}" ok_ids="${3}" fail_ids="${4}" \
+		unfinished_ids="${5}" undispatched_ids="${6}"
+
+	echo "Scheduler exited with code ${rv}"
+	echo "Succeeded:    ${ok_ids:-<none>}"
+	echo "Failed:       ${fail_ids:-<none>}"
+	echo "Unfinished:   ${unfinished_ids:-<none>}"
+	echo "Undispatched: ${undispatched_ids:-<none>}"
+}
+
+DO_JOB_CB=do_job
+SCHED_FINALIZE_CB=finalize_report
+SCHED_MAX_JOBS=3
+
+schedule_jobs "A B C D E" &
+wait ${!}
+```
+
+Output:
+```text
+Scheduler exited with code 0
+Succeeded:    A B D E
+Failed:       C
+Unfinished:   <none>
+Undispatched: <none>
+```
+
+Since all five jobs run to completion in this example, `<unfinished_job_ids>` and `<undispatched_job_ids>` are both empty - see the [Timeouts](#timeouts) and [Signal Handling](#signal-handling) sections below for cases where they are populated.
 
 ### Scheduler error reporting callback (optional)
 Defined by the value of **`${SCHED_FAIL_MSG_CB}`**. Invoked whenever the scheduler needs to report an error.
@@ -167,6 +236,8 @@ ${SCHED_FAIL_MSG_CB} <message>
 ```
 
 If this callback is not defined, error messages are written to standard error.
+
+**Note**: All callbacks, except the **job execution callback**, are invoked synchronously (in the foreground, from the scheduler's perspective). Synchronous callbacks block scheduler execution, bookkeeping and time-keeping. Previously started jobs do continue to run but the scheduler will not launch new jobs or register job completions until the callback returns control to the scheduler. For this reason, avoid including commands which may stall for prolonged time in such callbacks.
 
 
 ## Job Parameters
@@ -294,7 +365,7 @@ Notes:
 
 If the job completion callback (`JOB_DONE_CB`) returns a non-zero code, the scheduler terminates immediately and returns the same code (after invoking the scheduler termination callback, if defined).
 
-The **scheduler termination callback** (`SCHED_FINALIZE_CB`) is always invoked before the scheduler exits. It receives the scheduler's return code as its first argument. Normally the scheduler exits with that same return code. The only exception is when the scheduler itself would otherwise return `0` but the **scheduler termination callback** returns a non-zero code. In that case, the scheduler exits with the callback's return code instead.
+The **scheduler termination callback** (`SCHED_FINALIZE_CB`) is always invoked before the scheduler exits. It receives the scheduler's return code as its first argument, along with the running PIDs and job ID breakdown described in the [Scheduler termination callback](#scheduler-termination-callback-optional) section above. Normally the scheduler exits with that same return code. The only exception is when the scheduler itself would otherwise return `0` but the **scheduler termination callback** returns a non-zero code. In that case, the scheduler exits with the callback's return code instead.
 
 ## Timeouts
 
@@ -320,7 +391,7 @@ The scheduler installs handlers for signals: `USR1`, `INT`, `TERM`. When any of 
 
 ## Termination of Running Jobs
 
-The scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received. If your application needs to stop unfinished jobs, implement this in the **scheduler termination callback** using the list of unfinished job PIDs passed to it.
+The scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received. If your application needs to stop unfinished jobs, implement this in the **scheduler termination callback** using the list of unfinished job PIDs (`<running_pids>`) passed to it. The corresponding job IDs are also available, as `<unfinished_job_ids>`, if your cleanup or logging is keyed by job ID rather than by PID.
 
 
 
@@ -384,6 +455,8 @@ The scheduler tracks the PIDs of the jobs (i.e. instances of the shell function 
 
 ```sh
 # Inside SCHED_FINALIZE_CB
+# (only the running_pids argument is used here; the job-ID arguments described
+#  in the Scheduler termination callback section are ignored by this snippet)
 for running_pid in ${running_pids}; do
     child_pids="${child_pids}${child_pids:+ }$(pgrep -P "${running_pid}" 2>/dev/null)"
 done

@@ -6,6 +6,10 @@ Categories: dispatch, core, termination, config, params, misc, outcome
 
 ### Testing suite command line options
 
+Usage:
+- `sh ./tests.sh [options]` (on Busybox ash)
+- `bash ./tests.sh [options]` (on Bash)
+
 - `[no arguments]` - do nothing (for sourcing the script)
 - `run` - run all tests, across all categories
 - `run <category>` - run all tests in the given category
