@@ -26,6 +26,7 @@ This is a niche project which will probably be very useful but to a very few peo
 - Validates configuration, callback definitions, job completion records and internal scheduler state, terminating with an error if inconsistency is detected.
 - Supports Bash and BusyBox ash. Simpler shells (like dash) are not supported.
 - Configurable global and idle timeouts: automatically terminate the scheduler and call termination callback when total allowed runtime is exceeded or no job completions have been observed for N seconds.
+- Negligible performance overhead for almost any feasible use case (almost no invocations of binaries, very few filesystem operations, minimum subshells created).
 
 
 ## Dependencies
