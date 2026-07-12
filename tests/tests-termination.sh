@@ -11,7 +11,7 @@
 
 # Verify the scheduler terminates on idle timeout while a job is still running.
 test_termination_01() {
-	TEST_NUM=1 \
+	TEST_ID=termination_01 \
 	TEST_NAME='Idle timeout' \
 	TEST_JOBS='ok ok hang' \
 	TEST_EXPECT_RV=81 \
@@ -24,7 +24,7 @@ test_termination_01() {
 
 # Verify the global timeout fires while workers are active and idle timeout hasn't elapsed.
 test_termination_02() {
-	test_termination_02_finalize_handler() {
+	termination_02_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -35,18 +35,18 @@ test_termination_02() {
 	}
 
 	local \
-		TEST_NUM=2 \
+		TEST_ID=termination_02 \
 		sched_rv \
 		timeout_rv \
 		jobs="ok hang"
 
-	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
+	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_ID:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
-	print_test_header 2 "Processing timeout" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Processing timeout" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_termination_02_finalize_handler \
+	SCHED_FINALIZE_CB=termination_02_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
@@ -74,7 +74,7 @@ test_termination_02() {
 # Verify SIGUSR1 terminates the scheduler, SCHED_FINALIZE_CB gets a non-empty PID list,
 #   and kills the workers.
 test_termination_03() {
-	test_termination_03_finalize_handler() {
+	termination_03_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		printf '%s\n' "${rv}" > "${SIGUSR1_RV_FILE:?}"
@@ -88,22 +88,22 @@ test_termination_03() {
 	}
 
 	local \
-		TEST_NUM=3 \
+		TEST_ID=termination_03 \
 		sched_rv \
 		callback_rv \
 		pids='' \
 		schedule_pid
 
 	local \
-		SIGUSR1_RV_FILE="/tmp/sched.sigusr1.rv.${TEST_NUM:?}.$$" \
-		SIGUSR1_PIDS_FILE="/tmp/sched.sigusr1.pids.${TEST_NUM:?}.$$"
+		SIGUSR1_RV_FILE="/tmp/sched.sigusr1.rv.${TEST_ID:?}.$$" \
+		SIGUSR1_PIDS_FILE="/tmp/sched.sigusr1.pids.${TEST_ID:?}.$$"
 
 	rm -f "${SIGUSR1_RV_FILE}" "${SIGUSR1_PIDS_FILE}"
 
-	print_test_header 3 "SIGUSR1 termination" "1 2"
+	print_test_header "${TEST_ID:?}" "SIGUSR1 termination" "1 2"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_termination_03_finalize_handler \
+	SCHED_FINALIZE_CB=termination_03_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
@@ -139,7 +139,7 @@ test_termination_03() {
 
 # Verify idle timeout fires while workers are active and processing timeout hasn't elapsed.
 test_termination_04() {
-	test_termination_04_finalize_handler() {
+	termination_04_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -150,17 +150,17 @@ test_termination_04() {
 	}
 
 	local \
-		TEST_NUM=4 \
+		TEST_ID=termination_04 \
 		timeout_rv \
 		jobs="ok ok ok hang ok"
 
-	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
+	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_ID:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
-	print_test_header 4 "Idle timeout" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Idle timeout" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_termination_04_finalize_handler \
+	SCHED_FINALIZE_CB=termination_04_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
@@ -187,7 +187,7 @@ test_termination_04() {
 
 # Verify the global timeout fires from scheduler start time, not from the last job completion.
 test_termination_05() {
-	test_termination_05_finalize_handler() {
+	termination_05_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
@@ -198,17 +198,17 @@ test_termination_05() {
 	}
 
 	local \
-		TEST_NUM=5 \
+		TEST_ID=termination_05 \
 		timeout_rv \
 		jobs="ok ok ok ok ok ok"
 
-	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_NUM:?}.$$"
+	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_ID:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
 
-	print_test_header 5 "Global timeout despite continuous progress" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Global timeout despite continuous progress" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_termination_05_finalize_handler \
+	SCHED_FINALIZE_CB=termination_05_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \
@@ -236,11 +236,11 @@ test_termination_05() {
 # Verify the global timeout takes priority when it and the idle timeout are due simultaneously.
 test_termination_06() {
 	local \
-		TEST_NUM=6 \
+		TEST_ID=termination_06 \
 		sched_rv \
 		jobs='hang'
 
-	print_test_header 6 "Simultaneous global/idle timeout - global wins" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Simultaneous global/idle timeout - global wins" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -266,7 +266,7 @@ test_termination_06() {
 
 # Verify SIGINT/SIGTERM terminate the scheduler with SCHED_RV_INT_TERM and a non-empty PID list.
 test_termination_07() {
-	test_termination_07_finalize_handler() {
+	termination_07_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		printf '%s\n' "${rv}" > "${SIG_RV_FILE:?}"
@@ -280,7 +280,7 @@ test_termination_07() {
 	}
 
 	local \
-		TEST_NUM=7 \
+		TEST_ID=termination_07 \
 		sig \
 		sched_rv \
 		expect_rv=84 \
@@ -290,19 +290,19 @@ test_termination_07() {
 		all_ok=1
 
 	local \
-		SIG_RV_FILE="/tmp/sched.sigintterm.rv.${TEST_NUM:?}.$$" \
-		SIG_PIDS_FILE="/tmp/sched.sigintterm.pids.${TEST_NUM:?}.$$"
+		SIG_RV_FILE="/tmp/sched.sigintterm.rv.${TEST_ID:?}.$$" \
+		SIG_PIDS_FILE="/tmp/sched.sigintterm.pids.${TEST_ID:?}.$$"
 
 	local \
 		SCHED_FAIL_MSG_CB=echo \
-		SCHED_FINALIZE_CB=test_termination_07_finalize_handler \
+		SCHED_FINALIZE_CB=termination_07_finalize_handler \
 		JOB_DONE_CB=done_handler \
 		DO_JOB_CB=do_job_default \
 		SCHED_MAX_JOBS=2 \
 		SCHED_TIMEOUT_S=10 \
 		SCHED_IDLE_TIMEOUT_S=5
 
-	print_test_header 7 "SIGINT/SIGTERM termination" "1 2"
+	print_test_header "${TEST_ID:?}" "SIGINT/SIGTERM termination" "1 2"
 
 	for sig in INT TERM; do
 		rm -f "${SIG_RV_FILE}" "${SIG_PIDS_FILE}"
@@ -370,27 +370,27 @@ test_termination_07() {
 
 # Verify idle timeout accounts for time spent in JOB_DONE_CB, not reset to the full value.
 test_termination_08() {
-	test_termination_08_done_handler() {
+	termination_08_done_handler() {
 		# Delay JOB_DONE_CB to consume part of the idle timeout before the next read -t.
 		sleep 3
 		return 0
 	}
 
 	local \
-		TEST_NUM=8 \
+		TEST_ID=termination_08 \
 		sched_rv \
 		start_time \
 		end_time \
 		elapsed \
 		jobs="instant hang"
 
-	print_test_header 8 "Idle timeout accounts for elapsed callback time" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Idle timeout accounts for elapsed callback time" "${jobs}"
 
 	start_time=$(date +%s)
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=test_termination_08_done_handler \
+	JOB_DONE_CB=termination_08_done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=20 \
@@ -416,7 +416,7 @@ test_termination_08() {
 # Verify SIGUSR1/SIGINT/SIGTERM interrupt the scheduler promptly, not via an unrelated timeout.
 test_termination_09() {
 	local \
-		TEST_NUM=9 \
+		TEST_ID=termination_09 \
 		sig \
 		expect_rv \
 		sched_rv \
@@ -426,6 +426,7 @@ test_termination_09() {
 		schedule_pid \
 		all_ok=1
 
+	# shellcheck disable=SC2034
 	local \
 		SCHED_FAIL_MSG_CB=echo \
 		SCHED_FINALIZE_CB=finalize_handler \
@@ -435,7 +436,7 @@ test_termination_09() {
 		SCHED_TIMEOUT_S=12 \
 		SCHED_IDLE_TIMEOUT_S=10
 
-	print_test_header 9 "Prompt termination on SIGUSR1/SIGINT/SIGTERM" "hang"
+	print_test_header "${TEST_ID:?}" "Prompt termination on SIGUSR1/SIGINT/SIGTERM" "hang"
 
 	for sig in USR1 INT TERM; do
 		case "${sig}" in
@@ -506,14 +507,14 @@ test_termination_09() {
 # Verify idle and global timeouts fire within their configured time window, not just eventually.
 test_termination_10() {
 	local \
-		TEST_NUM=10 \
+		TEST_ID=termination_10 \
 		sched_rv \
 		start_s \
 		end_s \
 		elapsed \
 		all_ok=1
 
-	print_test_header 10 "Timeouts fire within their configured window" "hang"
+	print_test_header "${TEST_ID:?}" "Timeouts fire within their configured window" "hang"
 
 	start_s=$(date +%s)
 
@@ -581,14 +582,14 @@ test_termination_10() {
 #   (~1s, not more).
 test_termination_11() {
 	local \
-		TEST_NUM=11 \
+		TEST_ID=termination_11 \
 		sched_rv \
 		start_s \
 		end_s \
 		elapsed \
 		jobs='hang'
 
-	print_test_header 11 "Read-timeout rounding does not compound at SCHED_IDLE_TIMEOUT_S=1" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Read-timeout rounding does not compound at SCHED_IDLE_TIMEOUT_S=1" "${jobs}"
 
 	start_s=$(date +%s)
 
@@ -621,30 +622,30 @@ test_termination_11() {
 # Verify the global timeout can fire inside schedule_jobs()'s initial dispatch loop.
 # SCHED_DISPATCH_TICK_CB stalls past SCHED_TIMEOUT_S so the second job is never dispatched.
 test_termination_12() {
-	test_termination_12_do_job() {
+	termination_12_do_job() {
 		[ "${1}" = second ] && printf 'dispatched\n' > "${SECOND_DISPATCHED_FILE}"
 		return 0
 	}
 
-	test_termination_12_dispatch_tick() {
+	termination_12_dispatch_tick() {
 		[ "${1}" = first ] && sleep 2
 	}
 
 	local \
-		TEST_NUM=12 \
+		TEST_ID=termination_12 \
 		sched_rv \
 		jobs='first second'
 
-	local SECOND_DISPATCHED_FILE="/tmp/sched.dispatch_timeout.${TEST_NUM:?}.$$"
+	local SECOND_DISPATCHED_FILE="/tmp/sched.dispatch_timeout.${TEST_ID:?}.$$"
 	rm -f "${SECOND_DISPATCHED_FILE}"
 
-	print_test_header 12 "Global timeout can fire during initial dispatch" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Global timeout can fire during initial dispatch" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=test_termination_12_do_job \
-	SCHED_DISPATCH_TICK_CB=test_termination_12_dispatch_tick \
+	DO_JOB_CB=termination_12_do_job \
+	SCHED_DISPATCH_TICK_CB=termination_12_dispatch_tick \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=1 \
 	SCHED_IDLE_TIMEOUT_S=30 \
@@ -668,7 +669,7 @@ test_termination_12() {
 
 # Verify the scheduler times out when a worker exits without sending a completion record.
 test_termination_13() {
-	TEST_NUM=13 \
+	TEST_ID=termination_13 \
 	TEST_NAME='Child crash before completion record' \
 	TEST_JOBS='ok crash' \
 	TEST_EXPECT_RV=81 \
@@ -680,7 +681,7 @@ test_termination_13() {
 }
 # Verify the scheduler treats malformed completion records as an error.
 test_termination_14() {
-	TEST_NUM=14 \
+	TEST_ID=termination_14 \
 	TEST_NAME='Malformed completion record' \
 	TEST_JOBS='malformed' \
 	TEST_EXPECT_RV=1 \
@@ -692,11 +693,11 @@ test_termination_14() {
 # Verify a lost completion record with another worker still active causes an idle timeout.
 test_termination_15() {
 	local \
-		TEST_NUM=15 \
+		TEST_ID=termination_15 \
 		sched_rv \
 		jobs='crash hang'
 
-	print_test_header 15 \
+	print_test_header "${TEST_ID:?}" \
 		"Missing completion record with active writer" \
 		"${jobs}"
 
@@ -724,13 +725,13 @@ test_termination_15() {
 # Verify removing the scheduler FIFO during execution causes scheduler failure.
 test_termination_16() {
 	local \
-		TEST_NUM=16 \
+		TEST_ID=termination_16 \
 		sched_rv \
 		scheduler_pid \
 		sched_fifo \
 		jobs="ok5 ok5"
 
-	print_test_header 16 "FIFO disappearance during execution" "${jobs}"
+	print_test_header "${TEST_ID:?}" "FIFO disappearance during execution" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \

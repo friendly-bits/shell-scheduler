@@ -13,33 +13,34 @@
 
 # Verify a failing SCHED_FINALIZE_CB overrides rv=0 but not an existing scheduler error.
 test_config_01() {
-	test_config_01_finalize_handler() {
+	config_01_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
 		finalize_handler "${rv}" "${pids}" || return $?
 
 		printf '%s\n' "${rv}" >> "${FINALIZE_RV_FILE}"
 
-		return "${TEST_15_FINALIZE_RV:?}"
+		return "${CONFIG_01_FINALIZE_RV:?}"
 	}
 
 	local \
-		TEST_NUM=1 \
+		TEST_ID=config_01 \
 		rv_success \
 		rv_failure \
 		recorded_rvs \
-		TEST_15_FINALIZE_RV=97
+		CONFIG_01_FINALIZE_RV=97
 
-	print_test_header 1 "Failure of SCHED_FINALIZE_CB" \
+	print_test_header "${TEST_ID:?}" "Failure of SCHED_FINALIZE_CB" \
 		"success path and error path"
 
-	FINALIZE_RV_FILE="/tmp/sched.finalize.fail.${TEST_NUM:?}.$$"
+	FINALIZE_RV_FILE="/tmp/sched.finalize.fail.${TEST_ID:?}.$$"
 
 	rm -f "${FINALIZE_RV_FILE}"
 
+	# shellcheck disable=SC2034
 	local \
 		SCHED_FAIL_MSG_CB=echo \
-		SCHED_FINALIZE_CB=test_config_01_finalize_handler \
+		SCHED_FINALIZE_CB=config_01_finalize_handler \
 		JOB_DONE_CB=done_handler \
 		DO_JOB_CB=do_job_default
 
@@ -67,7 +68,7 @@ test_config_01() {
 
 	rm -f "${FINALIZE_RV_FILE}"
 
-	if [ "${rv_success}" = "${TEST_15_FINALIZE_RV}" ] &&
+	if [ "${rv_success}" = "${CONFIG_01_FINALIZE_RV}" ] &&
 		[ "${rv_failure}" = 81 ] &&
 		[ "${recorded_rvs}" = "0 81 " ]
 	then
@@ -81,31 +82,31 @@ test_config_01() {
 
 # Verify invalid callback configuration is rejected before any jobs start.
 test_config_02() {
-	test_config_02_fail_msg_handler() {
+	config_02_fail_msg_handler() {
 		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
-	test_config_02_do_job() {
+	config_02_do_job() {
 		printf 'started\n' > "${JOB_STARTED_FILE:?}"
 		return 0
 	}
 
 	# shellcheck disable=SC2034
 	local \
-		TEST_NUM=2 \
+		TEST_ID=config_02 \
 		sched_rv \
 		pass_cnt=0 \
 		msg_cnt=0 \
 		cb bad_cb \
 		\
 		SCHED_FINALIZE_CB_def=finalize_handler \
-		DO_JOB_CB_def=test_config_02_do_job \
+		DO_JOB_CB_def=config_02_do_job \
 		JOB_DONE_CB_def=done_handler \
-		SCHED_FAIL_MSG_CB_def=test_config_02_fail_msg_handler
+		SCHED_FAIL_MSG_CB_def=config_02_fail_msg_handler
 
 	local \
-		FAIL_MSG_FILE="/tmp/sched.badcb.msg.${TEST_NUM:?}.$$" \
-		JOB_STARTED_FILE="/tmp/sched.badcb.job.${TEST_NUM:?}.$$"
+		FAIL_MSG_FILE="/tmp/sched.badcb.msg.${TEST_ID:?}.$$" \
+		JOB_STARTED_FILE="/tmp/sched.badcb.job.${TEST_ID:?}.$$"
 
 	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
 
@@ -122,7 +123,7 @@ test_config_02() {
 	IFS=${DEFAULT_IFS}
 
 
-	print_test_header 2 "Invalid callback configuration" "${cb_list}"
+	print_test_header "${TEST_ID:?}" "Invalid callback configuration" "${cb_list}"
 
 	for bad_cb in ${cb_list}; do
 		for cb in ${cb_list}; do
@@ -165,11 +166,11 @@ test_config_02() {
 
 # Verify invalid scheduler numeric env vars are rejected before any jobs start.
 test_config_03() {
-	test_config_03_fail_msg_handler() {
+	config_03_fail_msg_handler() {
 		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
-	test_config_03_do_job() {
+	config_03_do_job() {
 		printf 'started\n' > "${JOB_STARTED_FILE:?}"
 		return 0
 	}
@@ -177,7 +178,8 @@ test_config_03() {
 	# SCHED_MAX_JOBS is required (sch_check_uint's 3rd arg); SCHED_TIMEOUT_S
 	# and SCHED_IDLE_TIMEOUT_S are optional, so '' is a *valid* value for
 	# them (means "use default") and must not be included as a bad value.
-	test_config_03_check_bad_value() {
+	config_03_check_bad_value() {
+		# shellcheck disable=SC2034
 		local var="${1}" bad_val="${2}" sched_rv \
 			SCHED_MAX_JOBS=1 \
 			SCHED_TIMEOUT_S=3 \
@@ -185,10 +187,10 @@ test_config_03() {
 
 		local "${var}=${bad_val}"
 
-		SCHED_FAIL_MSG_CB=test_config_03_fail_msg_handler \
+		SCHED_FAIL_MSG_CB=config_03_fail_msg_handler \
 		SCHED_FINALIZE_CB=finalize_handler \
 		JOB_DONE_CB=done_handler \
-		DO_JOB_CB=test_config_03_do_job \
+		DO_JOB_CB=config_03_do_job \
 			schedule_jobs '1' &
 
 		wait "$!"
@@ -204,28 +206,28 @@ test_config_03() {
 	}
 
 	local \
-		TEST_NUM=3 \
+		TEST_ID=config_03 \
 		pass_cnt=0 \
 		total_cnt=0 \
 		msg_cnt=0 \
 		var bad_val
 
 	local \
-		FAIL_MSG_FILE="/tmp/sched.maxjobs.msg.${TEST_NUM:?}.$$" \
-		JOB_STARTED_FILE="/tmp/sched.maxjobs.job.${TEST_NUM:?}.$$"
+		FAIL_MSG_FILE="/tmp/sched.maxjobs.msg.${TEST_ID:?}.$$" \
+		JOB_STARTED_FILE="/tmp/sched.maxjobs.job.${TEST_ID:?}.$$"
 
 	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
 
-	print_test_header 3 "Invalid scheduler numeric env var values" \
+	print_test_header "${TEST_ID:?}" "Invalid scheduler numeric env var values" \
 		"SCHED_MAX_JOBS('' abc 0 -1), SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S(abc 0 -1)"
 
 	for bad_val in '' abc 0 -1; do
-		test_config_03_check_bad_value SCHED_MAX_JOBS "${bad_val}"
+		config_03_check_bad_value SCHED_MAX_JOBS "${bad_val}"
 	done
 
 	for var in SCHED_TIMEOUT_S SCHED_IDLE_TIMEOUT_S; do
 		for bad_val in abc 0 -1; do
-			test_config_03_check_bad_value "${var}" "${bad_val}"
+			config_03_check_bad_value "${var}" "${bad_val}"
 		done
 	done
 
@@ -251,7 +253,7 @@ test_config_03() {
 test_config_04() {
 	JOB_DONE_CB='' \
 	SCHED_FINALIZE_CB=finalize_handler \
-	TEST_NUM=4 \
+	TEST_ID=config_04 \
 	TEST_NAME='Empty JOB_DONE_CB' \
 	TEST_JOBS='ok ok ok' \
 	TEST_EXPECT_RV=0 \
@@ -264,7 +266,7 @@ test_config_04() {
 test_config_05() {
 	SCHED_FINALIZE_CB='' \
 	JOB_DONE_CB=done_handler \
-	TEST_NUM=5 \
+	TEST_ID=config_05 \
 	TEST_NAME='Empty SCHED_FINALIZE_CB' \
 	TEST_JOBS='ok ok ok ok ok' \
 	TEST_EXPECT_RV=0 \
@@ -276,11 +278,11 @@ test_config_05() {
 #   (test_config_07).
 test_config_06() {
 	local \
-		TEST_NUM=6 \
+		TEST_ID=config_06 \
 		sched_rv \
 		jobs='ok'
 
-	print_test_header 6 "Unset SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S fall back to built-in defaults" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Unset SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S fall back to built-in defaults" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -306,11 +308,11 @@ test_config_06() {
 #   are accepted and fall back to defaults.
 test_config_07() {
 	local \
-		TEST_NUM=7 \
+		TEST_ID=config_07 \
 		sched_rv \
 		jobs='ok'
 
-	print_test_header 7 "Explicitly empty SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S accepted" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Explicitly empty SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S accepted" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \

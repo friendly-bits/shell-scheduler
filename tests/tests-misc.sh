@@ -13,27 +13,27 @@
 
 # Verify extra args to schedule_jobs() are forwarded unchanged to DO_JOB_CB after the job ID.
 test_misc_01() {
-	test_misc_01_do_job() {
+	misc_01_do_job() {
 		printf '%s\n' "$*" >> "${ARGS_FILE:?}"
 		return 0
 	}
 
 	local \
-		TEST_NUM=1 \
+		TEST_ID=misc_01 \
 		sched_rv \
 		expected \
 		actual \
 		jobs='1 2 3'
 
-	local ARGS_FILE="/tmp/sched.args.${TEST_NUM:?}.$$"
+	local ARGS_FILE="/tmp/sched.args.${TEST_ID:?}.$$"
 	rm -f "${ARGS_FILE}"
 
-	print_test_header 1 "Job callback receives scheduler arguments" \
+	print_test_header "${TEST_ID:?}" "Job callback receives scheduler arguments" \
 		"${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
-	DO_JOB_CB=test_misc_01_do_job \
+	DO_JOB_CB=misc_01_do_job \
 	JOB_DONE_CB='' \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=3 \
@@ -69,23 +69,23 @@ EOF
 
 # Verify job IDs with arbitrary non-whitespace chars reach DO_JOB_CB/JOB_DONE_CB unchanged.
 test_misc_02() {
-	test_misc_02_do_job() {
+	misc_02_do_job() {
 		printf '%s\n' "$1" >> "${ARGS_FILE:?}"
 		sleep 1
 		return 0
 	}
 
-	test_misc_02_done_handler() {
+	misc_02_done_handler() {
 		printf '%s\n' "$1" >> "${DONE_FILE:?}"
 		return 0
 	}
 
-	test_misc_02_touch_inject() {
+	misc_02_touch_inject() {
 		touch "${INJECT_FILE:?}"
 	}
 
 	local \
-		TEST_NUM=2 \
+		TEST_ID=misc_02 \
 		sched_rv \
 		expected_do_jobs \
 		expected_do_cnt \
@@ -97,9 +97,9 @@ test_misc_02() {
 		jobs=''
 
 	local \
-		INJECT_FILE="/tmp/sched.idchars.inject.${TEST_NUM}.$$" \
-		ARGS_FILE="/tmp/sched.idchars.args.${TEST_NUM}.$$" \
-		DONE_FILE="/tmp/sched.idchars.done.${TEST_NUM}.$$"
+		INJECT_FILE="/tmp/sched.idchars.inject.${TEST_ID}.$$" \
+		ARGS_FILE="/tmp/sched.idchars.args.${TEST_ID}.$$" \
+		DONE_FILE="/tmp/sched.idchars.done.${TEST_ID}.$$"
 
 	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${INJECT_FILE}"
 
@@ -132,22 +132,22 @@ test_misc_02() {
 		apos'trophe \
 		dquo\"te \
 		bslash\\x \
-		cmdsub\$(test_misc_02_touch_inject) \
-		subshelltick\`test_misc_02_touch_inject\` \
-		semiexec;test_misc_02_touch_inject \
-		andexec&&test_misc_02_touch_inject \
-		pipeexec|test_misc_02_touch_inject \
+		cmdsub\$(misc_02_touch_inject) \
+		subshelltick\`misc_02_touch_inject\` \
+		semiexec;misc_02_touch_inject \
+		andexec&&misc_02_touch_inject \
+		pipeexec|misc_02_touch_inject \
 	"
 
 	jobs="${jobs//[$'\n'$'\t']/}"
 
-	print_test_header 2 "Arbitrary characters in job IDs" \
+	print_test_header "${TEST_ID:?}" "Arbitrary characters in job IDs" \
 		"30 IDs covering glob/quote/injection-shaped characters"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
-	DO_JOB_CB=test_misc_02_do_job \
-	JOB_DONE_CB=test_misc_02_done_handler \
+	DO_JOB_CB=misc_02_do_job \
+	JOB_DONE_CB=misc_02_done_handler \
 	SCHED_MAX_JOBS=5 \
 	SCHED_TIMEOUT_S=15 \
 	SCHED_IDLE_TIMEOUT_S=10 \
@@ -186,11 +186,11 @@ test_misc_02() {
 
 # Verify forged completion records (glob/injection-shaped IDs) are rejected, never executed.
 test_misc_03() {
-	test_misc_03_touch_inject() {
+	misc_03_touch_inject() {
 		touch "${INJECT_FILE:?}"
 	}
 
-	test_misc_03_do_job() {
+	misc_03_do_job() {
 		local self_pid
 
 		get_test_pid self_pid || return 1
@@ -200,19 +200,19 @@ test_misc_03() {
 		return 0
 	}
 
-	test_misc_03_fail_msg_handler() {
+	misc_03_fail_msg_handler() {
 		printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"
 	}
 
-	test_misc_03_check_forgery() {
+	misc_03_check_forgery() {
 		local job_id="${1:?}" spoof_id="${2:?}" sched_rv
 
 		rm -f "${INJECT_FILE:?}"
 
 		SCHED_FINALIZE_CB=finalize_handler \
 		JOB_DONE_CB=done_handler \
-		DO_JOB_CB=test_misc_03_do_job \
-		SCHED_FAIL_MSG_CB=test_misc_03_fail_msg_handler \
+		DO_JOB_CB=misc_03_do_job \
+		SCHED_FAIL_MSG_CB=misc_03_fail_msg_handler \
 		SPOOF_DONE_ID="${spoof_id}" \
 		SCHED_MAX_JOBS=1 \
 		SCHED_TIMEOUT_S=5 \
@@ -236,24 +236,24 @@ test_misc_03() {
 	}
 
 	local \
-		TEST_NUM=3 \
+		TEST_ID=misc_03 \
 		pass_cnt=0 \
 		total_cnt=0 \
 		msg_cnt=0
 
 	local \
-		INJECT_FILE="/tmp/sched.forge.inject.${TEST_NUM}.$$" \
-		FAIL_MSG_FILE="/tmp/sched.forge.msg.${TEST_NUM}.$$"
+		INJECT_FILE="/tmp/sched.forge.inject.${TEST_ID}.$$" \
+		FAIL_MSG_FILE="/tmp/sched.forge.msg.${TEST_ID}.$$"
 
 	rm -f "${INJECT_FILE}" "${FAIL_MSG_FILE}"
 
-	print_test_header 3 "Job-ID forgery / injection resistance" \
+	print_test_header "${TEST_ID:?}" "Job-ID forgery / injection resistance" \
 		"spoofed completion records with glob and shell-metacharacter IDs"
 
-	test_misc_03_check_forgery "realjob" "*"
-	test_misc_03_check_forgery "realjob" "\$(test_misc_03_touch_inject)"
-	test_misc_03_check_forgery "realjob" "\`test_misc_03_touch_inject\`"
-	test_misc_03_check_forgery "realjob" ";test_misc_03_touch_inject"
+	misc_03_check_forgery "realjob" "*"
+	misc_03_check_forgery "realjob" "\$(misc_03_touch_inject)"
+	misc_03_check_forgery "realjob" "\`misc_03_touch_inject\`"
+	misc_03_check_forgery "realjob" ";misc_03_touch_inject"
 
 	[ -f "${FAIL_MSG_FILE}" ] &&
 		msg_cnt=$(wc -l < "${FAIL_MSG_FILE}")
@@ -274,7 +274,7 @@ test_misc_03() {
 # Verify extra args to schedule_jobs() reach DO_JOB_CB with exact boundaries/content intact:
 #   empty string, embedded whitespace, glob metacharacters, leading dash.
 test_misc_04() {
-	test_misc_04_do_job() {
+	misc_04_do_job() {
 		local id="${1}" rec
 
 		shift
@@ -290,21 +290,21 @@ test_misc_04() {
 	}
 
 	local \
-		TEST_NUM=4 \
+		TEST_ID=misc_04 \
 		sched_rv \
 		expected \
 		actual \
 		jobs='1 2 3'
 
-	local ARGS_FILE="/tmp/sched.args4.${TEST_NUM:?}.$$"
+	local ARGS_FILE="/tmp/sched.args4.${TEST_ID:?}.$$"
 	rm -f "${ARGS_FILE}"
 
-	print_test_header 4 "Extra-argument boundary/content integrity" \
+	print_test_header "${TEST_ID:?}" "Extra-argument boundary/content integrity" \
 		"${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
-	DO_JOB_CB=test_misc_04_do_job \
+	DO_JOB_CB=misc_04_do_job \
 	JOB_DONE_CB='' \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=3 \
@@ -356,13 +356,13 @@ test_misc_04() {
 # Verify finalize() removes the scheduler's FIFO after a normal run, no leaked file.
 test_misc_05() {
 	local \
-		TEST_NUM=5 \
+		TEST_ID=misc_05 \
 		sched_rv \
 		scheduler_pid \
 		sched_fifo \
 		jobs='ok ok ok'
 
-	print_test_header 5 "FIFO cleanup after successful completion" "${jobs}"
+	print_test_header "${TEST_ID:?}" "FIFO cleanup after successful completion" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \

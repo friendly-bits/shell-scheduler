@@ -50,8 +50,8 @@ run_parallelism_test() {
 
 	local \
 		sched_rv \
-		fifo="/tmp/sched.parallel.${TEST_NUM:?}.$$" \
-		result_file="/tmp/sched.parallel.res.${TEST_NUM:?}.$$" \
+		fifo="/tmp/sched.parallel.${TEST_ID:?}.$$" \
+		result_file="/tmp/sched.parallel.res.${TEST_ID:?}.$$" \
 		max_active=0 \
 		scheduler_pid \
 		monitor_pid
@@ -59,7 +59,7 @@ run_parallelism_test() {
 	rm -f "${fifo}" "${result_file}" &&
 	mkfifo "${fifo}" || return 1
 
-	print_test_header "${TEST_NUM:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
+	print_test_header "${TEST_ID:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
 
 	monitor_parallel_fifo "${result_file}" < "${fifo}" &
 	monitor_pid=$!
@@ -103,7 +103,7 @@ run_parallelism_test() {
 
 # Verify the scheduler never runs more than SCHED_MAX_JOBS workers at once.
 test_dispatch_01() {
-	TEST_NUM=1 \
+	TEST_ID=dispatch_01 \
 	TEST_NAME='Parallelism limit' \
 	TEST_JOBS='1 2 3 4 5' \
 	TEST_SCHED_MAX_JOBS=3 \
@@ -115,7 +115,7 @@ test_dispatch_01() {
 
 # Verify SCHED_MAX_JOBS=1 causes jobs to execute strictly sequentially.
 test_dispatch_02() {
-	TEST_NUM=2 \
+	TEST_ID=dispatch_02 \
 	TEST_NAME='Single worker mode' \
 	TEST_JOBS='1 2 3 4' \
 	TEST_SCHED_MAX_JOBS=1 \
@@ -141,17 +141,17 @@ test_dispatch_03() {
 	}
 
 	local \
-		TEST_NUM=3 \
+		TEST_ID=dispatch_03 \
 		sched_rv \
 		expected_cnt \
 		actual_done_jobs \
 		done_cnt=0 \
 		jobs="1 2 3 4 5"
 
-	local DONE_COUNT_FILE="/tmp/sched.queue.${TEST_NUM:?}.$$"
+	local DONE_COUNT_FILE="/tmp/sched.queue.${TEST_ID:?}.$$"
 	rm -f "${DONE_COUNT_FILE}"
 
-	print_test_header 3 "Queue refill" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Queue refill" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -213,7 +213,7 @@ test_dispatch_04() {
 	}
 
 	local \
-		TEST_NUM=4 \
+		TEST_ID=dispatch_04 \
 		sched_rv \
 		expected_cnt \
 		actual_done_jobs \
@@ -222,12 +222,12 @@ test_dispatch_04() {
 		jobs=''
 
 	local \
-		DONE_COUNT_FILE="/tmp/sched.large.${TEST_NUM:?}.$$" \
-		LARGE_FINALIZE_FILE="/tmp/sched.large.finalize.${TEST_NUM:?}.$$"
+		DONE_COUNT_FILE="/tmp/sched.large.${TEST_ID:?}.$$" \
+		LARGE_FINALIZE_FILE="/tmp/sched.large.finalize.${TEST_ID:?}.$$"
 
 	rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
 
-	print_test_header 4 "Large job count" "100 jobs"
+	print_test_header "${TEST_ID:?}" "Large job count" "100 jobs"
 
 	jobs=$(seq 1 100)
 
@@ -292,19 +292,19 @@ test_dispatch_05() {
 	}
 
 	local \
-		TEST_NUM=5 \
+		TEST_ID=dispatch_05 \
 		sched_rv \
 		actual_done_cnt=0 \
 		finalize_state='' \
 		jobs="<none>"
 
 	local \
-		EMPTY_DONE_FILE="/tmp/sched.empty.done.${TEST_NUM:?}.$$" \
-		EMPTY_FINALIZE_FILE="/tmp/sched.empty.finalize.${TEST_NUM:?}.$$"
+		EMPTY_DONE_FILE="/tmp/sched.empty.done.${TEST_ID:?}.$$" \
+		EMPTY_FINALIZE_FILE="/tmp/sched.empty.finalize.${TEST_ID:?}.$$"
 
 	rm -f "${EMPTY_DONE_FILE}" "${EMPTY_FINALIZE_FILE}"
 
-	print_test_header 5 "Empty job list" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Empty job list" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=test_dispatch_05_finalize_handler \
@@ -374,11 +374,11 @@ test_dispatch_06() {
 		printf '%s\n' "${max_active}" > "${result_file}"
 	}
 
-	local TEST_NUM=6
+	local TEST_ID=dispatch_06
 	local \
 		sched_rv \
-		fifo="/tmp/sched.stress.${TEST_NUM:?}.$$" \
-		result_file="/tmp/sched.stress.res.${TEST_NUM:?}.$$" \
+		fifo="/tmp/sched.stress.${TEST_ID:?}.$$" \
+		result_file="/tmp/sched.stress.res.${TEST_ID:?}.$$" \
 		scheduler_pid \
 		monitor_pid \
 		max_active=0 \
@@ -386,7 +386,7 @@ test_dispatch_06() {
 		i=0 \
 		N=300
 
-	print_test_header 6 "Parallelism stress test" "300 jobs"
+	print_test_header "${TEST_ID:?}" "Parallelism stress test" "300 jobs"
 
 	rm -f "${fifo}" "${result_file}" &&
 	mkfifo "${fifo}" || return 1
@@ -439,7 +439,7 @@ test_dispatch_06() {
 
 # Verify SCHED_MAX_JOBS greater than the job count still completes all jobs normally.
 test_dispatch_07() {
-	TEST_NUM=7 \
+	TEST_ID=dispatch_07 \
 	TEST_NAME='SCHED_MAX_JOBS exceeds job count' \
 	TEST_JOBS='ok ok ok' \
 	TEST_EXPECT_RV=0 \

@@ -53,7 +53,7 @@ set_ansi() {
 }
 
 print_test_header() {
-	printf '\n%s\n' "== ${purple}${TEST_CAT:?}: Test ${1}: ${2}${n_c} =="
+	printf '\n%s\n' "== ${purple}${1//_/":"}: ${2}${n_c} =="
 	printf 'Running jobs: %s\n' "${blue}${3}${n_c}"
 }
 
@@ -182,8 +182,8 @@ get_test_pid() {
 
 run_generic_test() {
 	local sched_rv
-	
-	print_test_header "${TEST_NUM:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
+
+	print_test_header "${TEST_ID:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	DO_JOB_CB=do_job_default \

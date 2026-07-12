@@ -45,25 +45,25 @@ write_id_sets() {
 # Verify SCHED_FINALIZE_CB's ok/fail sets are correct on a normal completion
 #   with no timeout/undispatched/unfinished jobs involved.
 test_outcome_01() {
-	test_outcome_01_finalize_handler() {
+	outcome_01_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
 	}
 
 	local \
-		TEST_NUM=1 \
+		TEST_ID=outcome_01 \
 		sched_rv \
 		ok_raw fail_raw unfinished_raw undispatched_raw \
 		exp_ok act_ok exp_fail act_fail \
 		jobs='ok1 ok2 fail'
 
-	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$"
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header 1 "SCHED_FINALIZE_CB ok/fail sets on normal completion" "${jobs}"
+	print_test_header "${TEST_ID:?}" "SCHED_FINALIZE_CB ok/fail sets on normal completion" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_outcome_01_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_01_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=3 \
@@ -102,25 +102,25 @@ test_outcome_01() {
 # Verify a job recorded as failed before an idle-timeout abort stays in the fail
 #   set, while a still-running job at abort time lands in unfinished, not fail.
 test_outcome_02() {
-	test_outcome_02_finalize_handler() {
+	outcome_02_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
 	}
 
 	local \
-		TEST_NUM=2 \
+		TEST_ID=outcome_02 \
 		sched_rv \
 		ok_raw fail_raw unfinished_raw undispatched_raw \
 		exp_ok act_ok exp_fail act_fail exp_unfinished act_unfinished \
 		jobs='ok fail hang'
 
-	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$"
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header 2 "Fail set survives idle-timeout abort; running job is unfinished, not failed" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Fail set survives idle-timeout abort; running job is unfinished, not failed" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_outcome_02_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_02_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=3 \
@@ -160,40 +160,40 @@ test_outcome_02() {
 #   lands in undispatched, while the job dispatched just before the abort
 #   (whose completion was never read) lands in unfinished.
 test_outcome_03() {
-	test_outcome_03_do_job() {
+	outcome_03_do_job() {
 		[ "${1}" = second ] && printf 'dispatched\n' > "${SECOND_DISPATCHED_FILE:?}"
 		return 0
 	}
 
-	test_outcome_03_dispatch_tick() {
+	outcome_03_dispatch_tick() {
 		[ "${1}" = first ] && sleep 2
 	}
 
-	test_outcome_03_finalize_handler() {
+	outcome_03_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
 	}
 
 	local \
-		TEST_NUM=3 \
+		TEST_ID=outcome_03 \
 		sched_rv \
 		unfinished_raw undispatched_raw \
 		exp_unfinished act_unfinished exp_undispatched act_undispatched \
 		jobs='first second'
 
 	local \
-		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$" \
-		SECOND_DISPATCHED_FILE="/tmp/sched.dispatch3.${TEST_NUM:?}.$$"
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		SECOND_DISPATCHED_FILE="/tmp/sched.dispatch3.${TEST_ID:?}.$$"
 
 	rm -f "${FINALIZE_SETS_PREFIX}".* "${SECOND_DISPATCHED_FILE}"
 
-	print_test_header 3 "Global timeout during initial dispatch: undispatched vs. unfinished" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Global timeout during initial dispatch: undispatched vs. unfinished" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_outcome_03_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_03_finalize_handler \
 	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=test_outcome_03_do_job \
-	SCHED_DISPATCH_TICK_CB=test_outcome_03_dispatch_tick \
+	DO_JOB_CB=outcome_03_do_job \
+	SCHED_DISPATCH_TICK_CB=outcome_03_dispatch_tick \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=1 \
 	SCHED_IDLE_TIMEOUT_S=30 \
@@ -227,26 +227,26 @@ test_outcome_03() {
 # Verify SIGUSR1 abort: a job already completed before the signal stays ok,
 #   the still-running job lands in unfinished.
 test_outcome_04() {
-	test_outcome_04_finalize_handler() {
+	outcome_04_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
 	}
 
 	local \
-		TEST_NUM=4 \
+		TEST_ID=outcome_04 \
 		sched_rv \
 		schedule_pid \
 		ok_raw unfinished_raw \
 		exp_ok act_ok exp_unfinished act_unfinished \
 		jobs='ok hang'
 
-	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$"
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header 4 "SIGUSR1 abort: completed job stays ok, running job is unfinished" "${jobs}"
+	print_test_header "${TEST_ID:?}" "SIGUSR1 abort: completed job stays ok, running job is unfinished" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_outcome_04_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_04_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
@@ -286,27 +286,27 @@ test_outcome_04() {
 #   inside process_done_record, not from the normal loop exits) still preserves
 #   an already-completed job's ok status; the malformed job itself is unfinished.
 test_outcome_05() {
-	test_outcome_05_finalize_handler() {
+	outcome_05_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
 	}
 
 	local \
-		TEST_NUM=5 \
+		TEST_ID=outcome_05 \
 		sched_rv \
 		ok_raw fail_raw unfinished_raw undispatched_raw \
 		exp_ok act_ok exp_unfinished act_unfinished \
 		jobs='ok malformed'
 
-	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$"
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header 5 "Malformed-record abort preserves prior ok status" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Malformed-record abort preserves prior ok status" "${jobs}"
 
 	# SCHED_MAX_JOBS=1 forces sequential execution: "ok" must fully complete
 	# and be recorded before "malformed" is even dispatched.
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_outcome_05_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_05_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \
@@ -344,20 +344,20 @@ test_outcome_05() {
 # Verify ok/fail/unfinished/undispatched are pairwise disjoint and jointly
 #   exhaustive over the full job set, in one run where all four are populated.
 test_outcome_06() {
-	test_outcome_06_do_job() {
+	outcome_06_do_job() {
 		case "${1}" in
 			hang2) do_job_default hang ;;
 			*) do_job_default "${@}" ;;
 		esac
 	}
 
-	test_outcome_06_finalize_handler() {
+	outcome_06_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
 	}
 
 	local \
-		TEST_NUM=6 \
+		TEST_ID=outcome_06 \
 		sched_rv \
 		ok_raw fail_raw unfinished_raw undispatched_raw \
 		exp_ok act_ok exp_fail act_fail exp_unfinished act_unfinished \
@@ -365,19 +365,19 @@ test_outcome_06() {
 		member_cnt \
 		jobs='ok1 fail hang2 hang1'
 
-	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$"
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header 6 "ok/fail/unfinished/undispatched partition the full job set" "${jobs}"
+	print_test_header "${TEST_ID:?}" "ok/fail/unfinished/undispatched partition the full job set" "${jobs}"
 
 	# SCHED_MAX_JOBS=1 forces strictly sequential dispatch: ok1 and fail are
 	# each fully drained/classified before hang2 starts. hang2 is still
 	# sleeping (no completion record ever read) when SCHED_TIMEOUT_S hits, so
 	# it lands in unfinished; hang1 never gets dispatched.
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_outcome_06_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_06_finalize_handler \
 	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=test_outcome_06_do_job \
+	DO_JOB_CB=outcome_06_do_job \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=30 \
@@ -418,24 +418,24 @@ test_outcome_06() {
 
 # Verify an empty job list yields all four sets empty.
 test_outcome_07() {
-	test_outcome_07_finalize_handler() {
+	outcome_07_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
 	}
 
 	local \
-		TEST_NUM=7 \
+		TEST_ID=outcome_07 \
 		sched_rv \
 		ok_raw fail_raw unfinished_raw undispatched_raw \
 		jobs='<none>'
 
-	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$"
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header 7 "Empty job list yields all-empty ok/fail/unfinished/undispatched sets" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Empty job list yields all-empty ok/fail/unfinished/undispatched sets" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_outcome_07_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_07_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=3 \
@@ -469,44 +469,44 @@ test_outcome_07() {
 # Verify job IDs containing glob/injection-shaped characters still land in the
 #   correct ok/fail set (not just "no crash" - test_misc_02/test_misc_03 already cover that).
 test_outcome_08() {
-	test_outcome_08_touch_inject() { touch "${INJECT_FILE:?}"; }
+	outcome_08_touch_inject() { touch "${INJECT_FILE:?}"; }
 
-	test_outcome_08_do_job() {
+	outcome_08_do_job() {
 		case "${1}" in
 			*ok_marker*) return 0 ;;
 			*) return 1 ;;
 		esac
 	}
 
-	test_outcome_08_finalize_handler() {
+	outcome_08_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
 	}
 
 	local \
-		TEST_NUM=8 \
+		TEST_ID=outcome_08 \
 		sched_rv \
 		ok_raw fail_raw \
 		exp_ok act_ok exp_fail act_fail \
 		ok_id fail_id \
 		jobs
 
-	ok_id='ok_marker_$(test_outcome_08_touch_inject)'
-	fail_id='fail_marker_`test_outcome_08_touch_inject`'
+	ok_id='ok_marker_$(outcome_08_touch_inject)'
+	fail_id='fail_marker_`outcome_08_touch_inject`'
 	jobs="${ok_id} ${fail_id}"
 
 	local \
-		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_NUM:?}.$$" \
-		INJECT_FILE="/tmp/sched.inject8.${TEST_NUM:?}.$$"
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		INJECT_FILE="/tmp/sched.inject8.${TEST_ID:?}.$$"
 
 	rm -f "${FINALIZE_SETS_PREFIX}".* "${INJECT_FILE}"
 
-	print_test_header 8 "Awkward job-ID characters land in the correct ok/fail set" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Awkward job-ID characters land in the correct ok/fail set" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=test_outcome_08_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_08_finalize_handler \
 	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=test_outcome_08_do_job \
+	DO_JOB_CB=outcome_08_do_job \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \
