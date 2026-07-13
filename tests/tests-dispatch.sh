@@ -507,9 +507,8 @@ test_dispatch_08() {
 	fi
 }
 
-# Verify the job list is normalized across a mix of spaces, tabs and newlines used as
-#   separators - including leading, trailing and repeated interior whitespace - so every
-#   intended ID is dispatched exactly once and empty tokens produce no jobs.
+# Verify job list normalization across a mix of spaces, tabs and newlines used as separators -
+#   so every intended ID is dispatched exactly once and empty tokens produce no jobs.
 test_dispatch_09() {
 	dispatch_09_do_job() {
 		printf '%s\n' "${1}" >> "${IDS_FILE:?}"
