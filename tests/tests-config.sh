@@ -336,3 +336,70 @@ test_config_07() {
 	fi
 }
 
+# Verify SCHED_DIR: a custom directory (with a trailing slash) is used for the FIFO
+#   and cleaned up afterward, and a directory that normalizes to empty is rejected
+#   before any job starts.
+test_config_08() {
+	local \
+		TEST_ID=config_08 \
+		sched_rv \
+		bad_rv \
+		scheduler_pid \
+		sched_fifo \
+		fifo_in_dir=no \
+		custom_dir \
+		jobs='ok2'
+
+	custom_dir="/tmp/sched.customdir.${TEST_ID}.$$"
+	rm -rf "${custom_dir}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_DIR: custom dir used and cleaned up; empty-normalized dir rejected" "${jobs}"
+
+	# Sub-check 1: custom SCHED_DIR with a trailing slash.
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+	SCHED_DIR="${custom_dir}/" \
+		schedule_jobs "${jobs}" &
+
+	scheduler_pid=$!
+	sched_fifo="${custom_dir}/sched_ipc_${scheduler_pid}"
+
+	# Observe the FIFO exists in the custom dir while the job runs.
+	sleep 1
+	[ -p "${sched_fifo}" ] && fifo_in_dir=yes
+
+	wait "${scheduler_pid}"
+	sched_rv=$?
+
+	# Sub-check 2: SCHED_DIR='///' -> empty after trailing-slash strip -> rejected.
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=3 \
+	SCHED_DIR='///' \
+		schedule_jobs 'ok_1' &
+	wait "$!"
+	bad_rv=$?
+
+	if [ "${sched_rv}" = 0 ] &&
+		[ "${fifo_in_dir}" = yes ] &&
+		[ ! -e "${sched_fifo}" ] &&
+		[ "${bad_rv}" = 1 ]
+	then
+		rm -rf "${custom_dir}"
+		PASS "fifo_in_dir=${fifo_in_dir}, sched_rv=${sched_rv}, bad_rv=${bad_rv}"
+		return 0
+	else
+		rm -rf "${custom_dir}"
+		FAIL "sched_rv=${sched_rv}, fifo_in_dir=${fifo_in_dir}, fifo_left=$([ -e "${sched_fifo}" ] && echo yes || echo no), bad_rv=${bad_rv}"
+		return 1
+	fi
+}
