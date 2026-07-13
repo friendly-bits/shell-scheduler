@@ -580,7 +580,7 @@ schedule_jobs() {
 		sch_start_job "${sch_id}" "${@}" &
 		sch_pid="${!}"
 
-		sch_append SCH_RUNNING_PIDS "${sch_pid}" || return 1
+		sch_append SCH_RUNNING_PIDS "${sch_pid}" || sch_finalize 1
 		sch_rm_elem SCH_UNDISPATCHED_IDS "${sch_id}" "${SCH_UNDISPATCHED_IDS}"
 
 		[ -z "${SCHED_DISPATCH_TICK_CB}" ] ||
