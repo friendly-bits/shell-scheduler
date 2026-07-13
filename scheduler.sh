@@ -52,16 +52,18 @@ sch_append()
 	eval "${1}=\"\${${1}}\${${1}:+\"\${3:-" "}\"}\${2}\""
 }
 
+# Remove 1 element
 # 1: out var
 # 2: element
 # 3: cur list
 # 4 (optional): delim
 sch_rm_elem() {
 	local sre_out_var="${1}" sre_e="${2}" sre_d="${4:- }"
-	local sre_l="${sre_d}${3}${sre_d}"
-	sre_l="${sre_l%%"${sre_d}${sre_e}${sre_d}"*}${sre_d}${sre_l##*"${sre_d}${sre_e}${sre_d}"}"
+	local sre_l="${sre_d}${3}${sre_d}" sre_s="${sre_d}${sre_e}${sre_d}"
+	sre_l="${sre_l%%"${sre_s}"*}${sre_d}${sre_l#*"${sre_s}"}"
 	sre_l="${sre_l%"${sre_l##*[!"${sre_d}"]}"}"
 	sre_l="${sre_l#"${sre_l%%[!"${sre_d}"]*}"}"
+
 	export -n "${sre_out_var}=${sre_l}"
 }
 
@@ -128,7 +130,7 @@ sch_get_cur_pid() {
 	export -n "${1}=${__pid}"
 }
 
-sch_is_valid_param() {
+sch_is_valid_param_var() {
 	sch_check_var_chars "param" "${1}" "${2}" || return 1
 	case "${1}" in
 		sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS)
@@ -202,7 +204,7 @@ get_remain_time() {
 }
 
 # 1: job ID
-# 2: any number of <param=value> pairs
+# Extra args: any number of <param=value> pairs
 job_set_params() {
 	local sch_me=job_set_params \
 		sch_param \
@@ -227,7 +229,7 @@ job_set_params() {
 
 		sch_param="${sch_pair%%=*}"
 		sch_val="${sch_pair#"${sch_param}="}"
-		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
+		sch_is_valid_param_var "${sch_param}" "${sch_me}" || return 1
 
 		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 		sch_is_included "${sch_param}" "${sch_cur_params}" ||
@@ -244,15 +246,17 @@ job_set_params() {
 }
 
 # For each param <P> assigns corresponding param value to variable named <P>
+# For each pair <var>=<P> assigns param value to variable <var>
 # 0 (optional): '-export'
 # 1: job ID
-# Any extra args: "sch_all" or a list of params, one per argument
+# Extra args: "sch_all" or <list of params, one per argument>, or <list of var=param>
 job_get_params() {
 	local sch_export
 	[ "${1}" = '-export' ] && { sch_export="export "; shift; }
 
 	local sch_me=job_get_params \
 		sch_param \
+		sch_var \
 		sch_had_f \
 		sch_job_params \
 		sch_param_seen \
@@ -275,8 +279,14 @@ job_get_params() {
 
 	for sch_param; do
 		sch_param_seen=1
-		sch_is_valid_param "${sch_param}" "${sch_me}" || return 1
-		eval "${sch_export}${sch_param}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
+		sch_var="${sch_param}"
+		case "${sch_param}" in
+			*=*)
+				sch_var="${sch_param%%=*}"
+				sch_param="${sch_param#*=}"
+		esac
+		sch_is_valid_param_var "${sch_var}" "${sch_me}" || return 1
+		eval "${sch_export}${sch_var}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
 	done
 
 	[ -n "${sch_param_seen}" ] &&
