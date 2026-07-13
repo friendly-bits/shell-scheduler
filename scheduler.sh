@@ -48,7 +48,7 @@ sch_is_included() {
 
 sch_append()
 {
-	sch_check_var_chars "var" "${1}" || return 1
+	sch_check_name "var" "${1}" || return 1
 	eval "${1}=\"\${${1}}\${${1}:+\"\${3:-" "}\"}\${2}\""
 }
 
@@ -130,26 +130,13 @@ sch_get_cur_pid() {
 	export -n "${1}=${__pid}"
 }
 
-sch_is_valid_param_var() {
-	sch_check_var_chars "param" "${1}" "${2}" || return 1
-	case "${1}" in
-		sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS)
-			sch_fail_msg "${2}${2:+": "}param '${1}' is reserved for internal use."
-			return 1
-	esac
-	:
-}
-
-sch_check_var_chars() {
+sch_check_name() {
 	case "${2}" in
 		''|*[!a-zA-Z0-9_]*) false ;;
 		*) : ;;
 	esac &&
 	{
-		case "${1}" in
-			param|var) false ;;
-			*) : ;;
-		esac ||
+		[ "${1}" != var ] ||
 		case "${2}" in
 			[a-zA-Z_]*) : ;;
 			*) false
@@ -216,7 +203,7 @@ job_set_params() {
 
 	[ -n "${1+x}" ] && shift
 
-	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
+	sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	for sch_pair; do
 		sch_pair_seen=1
@@ -229,7 +216,7 @@ job_set_params() {
 
 		sch_param="${sch_pair%%=*}"
 		sch_val="${sch_pair#"${sch_param}="}"
-		sch_is_valid_param_var "${sch_param}" "${sch_me}" || return 1
+		sch_check_name "param" "${sch_param}" "${sch_me}" || return 1
 
 		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 		sch_is_included "${sch_param}" "${sch_cur_params}" ||
@@ -263,7 +250,7 @@ job_get_params() {
 		sch_job_id="${1}"
 
 	[ -n "${1+x}" ] && shift
-	sch_check_var_chars "job ID" "${sch_job_id}" "${sch_me}" || return 1
+	sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	[ "${*}" = sch_all ] && {
 		case "${-}" in
@@ -285,7 +272,15 @@ job_get_params() {
 				sch_var="${sch_param%%=*}"
 				sch_param="${sch_param#*=}"
 		esac
-		sch_is_valid_param_var "${sch_var}" "${sch_me}" || return 1
+
+		sch_check_name "param" "${sch_param}" "${sch_me}" &&
+		sch_check_name "var" "${sch_var}" "${sch_me}" || return 1
+		case "${sch_var}" in
+			sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS)
+				sch_fail_msg "${sch_me}: var name '${sch_var}' is reserved for internal use."
+				return 1
+		esac
+
 		eval "${sch_export}${sch_var}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
 	done
 
