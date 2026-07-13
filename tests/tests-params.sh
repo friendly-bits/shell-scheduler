@@ -243,10 +243,10 @@ test_params_04() {
 	fi
 }
 
-# Verify job_set_params() accepts reserved-looking param names: they are data keys,
-#   stored namespaced (SCH_JOB_PARAM_<id>_<name>), so registration succeeds with no
-#   error and real internal state (IFS, SCHED_* env) is untouched. Each value is
-#   retrievable via a safe alias, while a direct fetch into the reserved name is rejected.
+# Verify job_set_params() accepts reserved-looking param names:
+#   they are namespaced (SCH_JOB_PARAM_<id>_<name>) data keys which may or may not become var names
+# Verify real internal state (IFS, SCHED_* env) is untouched.
+# Verify each value is retrievable via a safe alias, while a direct fetch into the reserved name is rejected.
 test_params_05() {
 	params_05_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
@@ -611,12 +611,8 @@ test_params_10() {
 	fi
 }
 
-# Verify job_get_params() validates the destination variable name: in the plain
-#   (non-aliased) form the requested name is both source param and target variable, so
-#   reserved names (sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS), leading-digit
-#   and otherwise malformed names are rejected before the eval-assignment. Such names are
-#   valid as source params via aliasing (var=param) (test_params_24).
-#   Independent of job_set_params()'s registration-time validation.
+# Verify job_get_params() validates the destination variable name.
+# Independent of job_set_params()'s registration-time validation.
 test_params_11() {
 	params_11_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
@@ -641,11 +637,8 @@ test_params_11() {
 
 	job_set_params "${job_id}" "REALPARAM=fine" "AAA=1" "BBB=2"
 
-	# "IFS" is deliberately included below: job_get_params() must reject it
-	#   before reaching its eval-assignment line.
-	# local IFS="${IFS}" guards from IFS corruption leak
-	#
-	# "AAA BBB" is deliberately built from two registered names
+	# "IFS" is deliberately included.
+	# "AAA BBB" is deliberately built from two registered names.
 	for name in SCH_FOO sch_foo _sch_foo SCHED_MAX_JOBS DO_JOB_CB JOB_DONE_CB IFS 1bad "bad name" "AAA BBB"
 	do
 		total_cnt=$((total_cnt + 1))
@@ -1061,7 +1054,7 @@ test_params_20() {
 # Verify with SCHED_AUTO_PARAMS=1:
 # - DO_JOB_CB sees its own job's registered params without job_get_params() call
 # - jobs with different params stay isolated from each other
-# - job_get_params() "all" doesn't 'exit 1' on empty params set
+# - job_get_params() "sch_all" doesn't 'exit 1' on empty params set
 test_params_21() {
 	params_21_do_job() {
 		case "${1}" in
@@ -1319,9 +1312,9 @@ test_params_25() {
 }
 
 # Verify job_get_params() 'sch_all' fails when a job has a param whose name is not a
-#   valid shell variable (e.g. leading digit): it cannot be auto-delivered (the mechanism
-#   behind SCHED_AUTO_PARAMS), while a valid-name job's 'sch_all' succeeds and the
-#   offending param stays reachable via an explicit alias.
+#   valid shell variable (e.g. leading digit):
+#   it cannot be auto-delivered (the mechanism behind SCHED_AUTO_PARAMS),
+#   while a valid-name job's 'sch_all' succeeds and the offending param stays reachable via an explicit alias.
 test_params_26() {
 	params_26_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
@@ -1449,6 +1442,56 @@ test_params_28() {
 		return 0
 	else
 		FAIL "PLAINA='${PLAINA-<unset>}', ALIASB='${ALIASB-<unset>}', PLAINC='${PLAINC-<unset>}', SRCB='${SRCB-<unset>}'"
+		return 1
+	fi
+}
+
+# Verify SCHED_AUTO_PARAMS=1 truly *exports* each param, so an external (execve'd)
+#   command started by DO_JOB_CB sees it in its environment - not merely a same-shell
+#   assignment (test_params_21 can't distinguish the two; test_params_20 covers only
+#   the direct job_get_params -export path).
+test_params_29() {
+	params_29_do_job() {
+		# A child process must inherit the param through the environment.
+		sh -c 'printf "%s\n" "${EXTPARAM-<unset>}"' > "${OUT_FILE:?}"
+		return 0
+	}
+
+	local \
+		TEST_ID=params_29 \
+		sched_rv \
+		seen \
+		job_id=params_29_job
+
+	local OUT_FILE="/tmp/sched.autoexport.${TEST_ID}.$$"
+	rm -f "${OUT_FILE}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_AUTO_PARAMS exports params into an external command's environment" "${job_id}"
+
+	job_set_params "${job_id}" "EXTPARAM=from_env"
+
+	SCHED_AUTO_PARAMS=1 \
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=params_29_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_first_line seen "${OUT_FILE}"
+	rm -f "${OUT_FILE}"
+
+	if [ "${sched_rv}" = 0 ] && [ "${seen}" = from_env ]
+	then
+		PASS "EXTPARAM='${seen}'"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, EXTPARAM='${seen}', expected 'from_env'"
 		return 1
 	fi
 }
