@@ -336,9 +336,8 @@ test_config_07() {
 	fi
 }
 
-# Verify SCHED_DIR: a custom directory (with a trailing slash) is used for the FIFO
-#   and cleaned up afterward, and a directory that normalizes to empty is rejected
-#   before any job starts.
+# Verify SCHED_DIR: a custom directory (with a trailing slash) is used for the FIFO and cleaned up afterward,
+#   and a directory that normalizes to empty is rejected before any job starts.
 test_config_08() {
 	local \
 		TEST_ID=config_08 \
