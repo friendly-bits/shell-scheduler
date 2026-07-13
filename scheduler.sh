@@ -58,11 +58,15 @@ sch_append()
 # 3: cur list
 # 4 (optional): delim
 sch_rm_elem() {
-	local sre_out_var="${1}" sre_e="${2}" sre_d="${4:- }"
-	local sre_l="${sre_d}${3}${sre_d}" sre_s="${sre_d}${sre_e}${sre_d}"
-	sre_l="${sre_l%%"${sre_s}"*}${sre_d}${sre_l#*"${sre_s}"}"
-	sre_l="${sre_l%"${sre_l##*[!"${sre_d}"]}"}"
-	sre_l="${sre_l#"${sre_l%%[!"${sre_d}"]*}"}"
+	local sre_out_var="${1}" sre_e="${2}" sre_l="${3}" sre_d="${4:- }"
+
+	sch_is_included "${sre_e}" "${sre_l}" "${sre_d}" && {
+		sre_l="${sre_d}${sre_l}${sre_d}"
+		local sre_s="${sre_d}${sre_e}${sre_d}"
+		sre_l="${sre_l%%"${sre_s}"*}${sre_d}${sre_l#*"${sre_s}"}"
+		sre_l="${sre_l%"${sre_l##*[!"${sre_d}"]}"}"
+		sre_l="${sre_l#"${sre_l%%[!"${sre_d}"]*}"}"
+	}
 
 	export -n "${sre_out_var}=${sre_l}"
 }
