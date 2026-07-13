@@ -1446,10 +1446,7 @@ test_params_28() {
 	fi
 }
 
-# Verify SCHED_AUTO_PARAMS=1 truly *exports* each param, so an external (execve'd)
-#   command started by DO_JOB_CB sees it in its environment - not merely a same-shell
-#   assignment (test_params_21 can't distinguish the two; test_params_20 covers only
-#   the direct job_get_params -export path).
+# Verify SCHED_AUTO_PARAMS=1 truly *exports* each param, with a scheduler run
 test_params_29() {
 	params_29_do_job() {
 		# A child process must inherit the param through the environment.
