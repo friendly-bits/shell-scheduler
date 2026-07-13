@@ -360,7 +360,7 @@ test_misc_05() {
 		sched_rv \
 		scheduler_pid \
 		sched_fifo \
-		jobs='ok ok ok'
+		jobs='ok_1 ok_2 ok_3'
 
 	print_test_header "${TEST_ID:?}" "FIFO cleanup after successful completion" "${jobs}"
 

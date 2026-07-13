@@ -441,10 +441,68 @@ test_dispatch_06() {
 test_dispatch_07() {
 	TEST_ID=dispatch_07 \
 	TEST_NAME='SCHED_MAX_JOBS exceeds job count' \
-	TEST_JOBS='ok ok ok' \
+	TEST_JOBS='ok_1 ok_2 ok_3' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=10 \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
 		run_generic_test
+}
+
+# Verify schedule_jobs() rejects a job list with duplicate IDs before starting any job.
+test_dispatch_08() {
+	dispatch_08_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+
+	dispatch_08_do_job() {
+		printf 'started\n' > "${JOB_STARTED_FILE:?}"
+		return 0
+	}
+
+	local \
+		TEST_ID=dispatch_08 \
+		sched_rv \
+		msg \
+		msg_ok \
+		jobs='a b a'
+
+	local \
+		MSG_FILE="/tmp/sched.dup.msg.${TEST_ID:?}.$$" \
+		JOB_STARTED_FILE="/tmp/sched.dup.job.${TEST_ID:?}.$$"
+
+	rm -f "${MSG_FILE}" "${JOB_STARTED_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Duplicate job IDs rejected before dispatch" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=dispatch_08_fail_msg \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=dispatch_08_do_job \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=2 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	msg="$([ -f "${MSG_FILE}" ] && cat "${MSG_FILE}")"
+	rm -f "${MSG_FILE}"
+
+	case "${msg}" in
+		*"Duplicate Job ID"*) msg_ok=1 ;;
+		*) msg_ok= ;;
+	esac
+
+	if [ "${sched_rv}" = 1 ] &&
+		[ -n "${msg_ok}" ] &&
+		[ ! -f "${JOB_STARTED_FILE}" ]
+	then
+		rm -f "${JOB_STARTED_FILE}"
+		PASS "sched_rv=${sched_rv}, msg='${msg}'"
+		return 0
+	else
+		rm -f "${JOB_STARTED_FILE}"
+		FAIL "sched_rv=${sched_rv}, msg='${msg}', started=$([ -f "${JOB_STARTED_FILE}" ] && echo yes || echo no)"
+		return 1
+	fi
 }

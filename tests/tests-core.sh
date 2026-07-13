@@ -27,7 +27,7 @@ test_core_01() {
 test_core_02() {
 	TEST_ID=core_02 \
 	TEST_NAME='All jobs succeed' \
-	TEST_JOBS='ok ok ok ok ok' \
+	TEST_JOBS='ok_1 ok_2 ok_3 ok_4 ok_5' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -217,7 +217,7 @@ test_core_05() {
 		SCHED_MAX_JOBS=2 \
 		SCHED_TIMEOUT_S=3 \
 		SCHED_IDLE_TIMEOUT_S=2 \
-			schedule_jobs 'ok ok ok' &
+			schedule_jobs 'ok_1 ok_2 ok_3' &
 
 		wait "$!"
 		sched_rv=$?

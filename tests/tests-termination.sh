@@ -13,7 +13,7 @@
 test_termination_01() {
 	TEST_ID=termination_01 \
 	TEST_NAME='Idle timeout' \
-	TEST_JOBS='ok ok hang' \
+	TEST_JOBS='ok_1 ok_2 hang_1' \
 	TEST_EXPECT_RV=81 \
 	TEST_SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
@@ -109,7 +109,7 @@ test_termination_03() {
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=10 \
 	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs 'hang hang' &
+		schedule_jobs 'hang_1 hang_2' &
 
 	schedule_pid=$!
 
@@ -152,7 +152,7 @@ test_termination_04() {
 	local \
 		TEST_ID=termination_04 \
 		timeout_rv \
-		jobs="ok ok ok hang ok"
+		jobs="ok_1 ok_2 ok_3 hang_1 ok_4"
 
 	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_ID:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
@@ -200,7 +200,7 @@ test_termination_05() {
 	local \
 		TEST_ID=termination_05 \
 		timeout_rv \
-		jobs="ok ok ok ok ok ok"
+		jobs="ok_1 ok_2 ok_3 ok_4 ok_5 ok_6"
 
 	local TIMEOUT_FILE="/tmp/sched.timeout.${TEST_ID:?}.$$"
 	rm -f "${TIMEOUT_FILE}"
@@ -311,7 +311,7 @@ test_termination_07() {
 			TERM)
 				# Send TERM signal to background scheduler process
 				(
-					schedule_jobs 'hang hang' &
+					schedule_jobs 'hang_1 hang_2' &
 					schedule_pid=$!
 
 					sleep 1
@@ -335,7 +335,7 @@ test_termination_07() {
 
 					trap 'kill "${killer_pid}" 2>/dev/null' EXIT
 
-					schedule_jobs 'hang hang'
+					schedule_jobs 'hang_1 hang_2'
 				)
 		esac
 
@@ -729,7 +729,7 @@ test_termination_16() {
 		sched_rv \
 		scheduler_pid \
 		sched_fifo \
-		jobs="ok5 ok5"
+		jobs="ok5_1 ok5_2"
 
 	print_test_header "${TEST_ID:?}" "FIFO disappearance during execution" "${jobs}"
 

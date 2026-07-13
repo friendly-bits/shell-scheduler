@@ -130,7 +130,7 @@ finalize_handler() {
 }
 
 do_job_default() {
-	local self_pid job_name="${1}"
+	local self_pid job_name="${1%%_*}"
 
 	case "${job_name}" in
 		instant) sleep 0 ;;

@@ -255,7 +255,7 @@ test_config_04() {
 	SCHED_FINALIZE_CB=finalize_handler \
 	TEST_ID=config_04 \
 	TEST_NAME='Empty JOB_DONE_CB' \
-	TEST_JOBS='ok ok ok' \
+	TEST_JOBS='ok_1 ok_2 ok_3' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=2 \
 		run_generic_test
@@ -268,7 +268,7 @@ test_config_05() {
 	JOB_DONE_CB=done_handler \
 	TEST_ID=config_05 \
 	TEST_NAME='Empty SCHED_FINALIZE_CB' \
-	TEST_JOBS='ok ok ok ok ok' \
+	TEST_JOBS='ok_1 ok_2 ok_3 ok_4 ok_5' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
 		run_generic_test
