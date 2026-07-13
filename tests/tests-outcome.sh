@@ -303,8 +303,8 @@ test_outcome_05() {
 
 	print_test_header "${TEST_ID:?}" "Malformed-record abort preserves prior ok status" "${jobs}"
 
-	# SCHED_MAX_JOBS=1 forces sequential execution: "ok" must fully complete
-	# and be recorded before "malformed" is even dispatched.
+	# SCHED_MAX_JOBS=1 forces sequential execution:
+	#   "ok" must fully complete and be recorded before "malformed" is even dispatched.
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=outcome_05_finalize_handler \
 	JOB_DONE_CB=done_handler \
@@ -370,10 +370,10 @@ test_outcome_06() {
 
 	print_test_header "${TEST_ID:?}" "ok/fail/unfinished/undispatched partition the full job set" "${jobs}"
 
-	# SCHED_MAX_JOBS=1 forces strictly sequential dispatch: ok1 and fail are
-	# each fully drained/classified before hang2 starts. hang2 is still
-	# sleeping (no completion record ever read) when SCHED_TIMEOUT_S hits, so
-	# it lands in unfinished; hang1 never gets dispatched.
+	# SCHED_MAX_JOBS=1 forces strictly sequential dispatch:
+	#   ok1 and fail are each fully drained/classified before hang2 starts.
+	#   hang2 is still sleeping when SCHED_TIMEOUT_S hits, so it lands in unfinished;
+	#   hang1 never gets dispatched.
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=outcome_06_finalize_handler \
 	JOB_DONE_CB=done_handler \
@@ -537,12 +537,11 @@ test_outcome_08() {
 	fi
 }
 
-# Verify the full job-ID list passed to schedule_jobs() is delivered to
-#   SCHED_FINALIZE_CB partitioned across the four outcome buckets: the union of
-#   ok/fail/unfinished/undispatched equals the input set and every ID appears in
-#   exactly one bucket (no drop, overlap, extra, or duplicate). Bucket-agnostic:
-#   asserts the partition invariant, not which bucket each ID lands in
-#   (test_outcome_06 checks specific membership); here undispatched holds two IDs.
+# Verify the union of ok/fail/unfinished/undispatched delivered to SCHED_FINALIZE_CB
+#   equals the full job-ID list passed to schedule_jobs(),
+#   and every job ID appears in exactly one bucket.
+#   Bucket-agnostic: asserts the partition invariant, not which bucket each ID lands in
+#   (test_outcome_06 checks specific membership).
 test_outcome_09() {
 	outcome_09_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
@@ -596,7 +595,7 @@ test_outcome_09() {
 		verify_id_set exp_union act_union "${jobs}" "${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw}" &&
 		[ "${member_cnt}" = "${jobs_cnt}" ]
 	then
-		PASS "union='${act_union}', member_cnt=${member_cnt}/${jobs_cnt}"
+		PASS "union='${act_union//$'\n'/ }', member_cnt=${member_cnt}/${jobs_cnt}"
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv} (expected 82), member_cnt=${member_cnt}, jobs_cnt=${jobs_cnt}"
