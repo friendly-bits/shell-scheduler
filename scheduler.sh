@@ -475,6 +475,7 @@ schedule_jobs() {
 		sch_remain_time_cs \
 		SCH_INIT_UPTIME_CS \
 		sch_id \
+		sch_seen_ids \
 		sch_pid \
 		sch_running_jobs_cnt=0 \
 		sch_ipc_fifo \
@@ -522,6 +523,12 @@ schedule_jobs() {
 
 	# Convert ${SCH_JOB_IDS} to space-separated list
 	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || return 1
+
+	for sch_id in ${SCH_JOB_IDS}; do
+		sch_is_included "${sch_id}" "${sch_seen_ids}" &&
+			{ sch_fail_msg "Duplicate Job ID '${sch_id}'."; return 1; }
+		sch_append sch_seen_ids "${sch_id}"
+	done
 
 	SCH_UNDISPATCHED_IDS="${SCH_JOB_IDS}"
 
