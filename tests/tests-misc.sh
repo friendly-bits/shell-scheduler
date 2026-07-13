@@ -390,3 +390,58 @@ test_misc_05() {
 		return 1
 	fi
 }
+
+# Verify a well-formed completion record (uint PID, uint RV, registered job ID) whose
+#   PID is not a running worker is rejected as an internal-consistency error, distinct
+#   from the malformed-record path (test_termination_14 / test_misc_03).
+test_misc_06() {
+	misc_06_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+
+	misc_06_do_job() {
+		# Forge a well-formed record with a PID that is not the running worker.
+		printf '%s %s %s\n' 999999999 0 "${1}" >&3
+		sleep 1
+		return 0
+	}
+
+	local \
+		TEST_ID=misc_06 \
+		sched_rv \
+		msg \
+		msg_ok \
+		jobs='realjob'
+
+	local MSG_FILE="/tmp/sched.unknownpid.msg.${TEST_ID}.$$"
+	rm -f "${MSG_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Completion record with an unknown PID is rejected" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=misc_06_fail_msg \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=misc_06_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	msg="$([ -f "${MSG_FILE}" ] && cat "${MSG_FILE}")"
+	rm -f "${MSG_FILE}"
+
+	case "${msg}" in
+		*"Unknown PID"*) msg_ok=1 ;;
+		*) msg_ok= ;;
+	esac
+
+	if [ "${sched_rv}" = 1 ] && [ -n "${msg_ok}" ]
+	then
+		PASS "sched_rv=${sched_rv}, msg='${msg}'"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, msg='${msg}', expected rv=1 and an 'Unknown PID' error"
+		return 1
+	fi
+}
