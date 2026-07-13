@@ -218,13 +218,13 @@ test_params_04() {
 
 	print_test_header "${TEST_ID:?}" "job_set_params() input validation" "(direct calls, no scheduler run)"
 
-	params_04_check_rejected ""        "FOO=bar"      # empty job ID
-	params_04_check_rejected "bad id"  "FOO=bar"       # job ID with space
+	params_04_check_rejected ""          "FOO=bar"       # empty job ID
+	params_04_check_rejected "bad id"    "FOO=bar"       # job ID with space
 	params_04_check_rejected "${job_id}" "novalue"       # pair missing '='
 	params_04_check_rejected "${job_id}" "=novalue"      # empty param name
 	params_04_check_rejected "${job_id}" "bad param=x"   # param name with space
 	params_04_check_accepted "${job_id}" "1bad=x"        # leading-digit param name is fine
-	params_04_check_accepted "1job"    "FOO=x"         # leading-digit JOB ID is fine
+	params_04_check_accepted "1job"      "FOO=x"         # leading-digit JOB ID is fine
 	params_04_check_accepted "${job_id}" "GOOD=x"        # sanity: valid case still accepted
 
 	msg_cnt=0
@@ -628,6 +628,7 @@ test_params_11() {
 		rv \
 		msg_cnt \
 		REALPARAM \
+		SCH_FOO sch_foo _sch_foo SCHED_MAX_JOBS DO_JOB_CB JOB_DONE_CB \
 		IFS="${IFS}"
 
 	local \
@@ -1135,6 +1136,7 @@ test_params_22() {
 
 	local \
 		TEST_ID=params_22 \
+		dest \
 		spec \
 		rv \
 		pass_cnt=0 \
@@ -1272,6 +1274,7 @@ test_params_25() {
 		total_cnt=0 \
 		msg_cnt \
 		saved_ifs \
+		SCH_x sch_x SCHED_x DO_JOB_CB JOB_DONE_CB \
 		IFS="${IFS}"
 
 	local \
