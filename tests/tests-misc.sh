@@ -391,9 +391,7 @@ test_misc_05() {
 	fi
 }
 
-# Verify a well-formed completion record (uint PID, uint RV, registered job ID) whose
-#   PID is not a running worker is rejected as an internal-consistency error, distinct
-#   from the malformed-record path (test_termination_14 / test_misc_03).
+# Verify unexpected PID is rejected as an internal-consistency error
 test_misc_06() {
 	misc_06_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
