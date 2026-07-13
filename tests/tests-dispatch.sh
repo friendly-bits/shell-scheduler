@@ -506,3 +506,53 @@ test_dispatch_08() {
 		return 1
 	fi
 }
+
+# Verify the job list is normalized across a mix of spaces, tabs and newlines used as
+#   separators - including leading, trailing and repeated interior whitespace - so every
+#   intended ID is dispatched exactly once and empty tokens produce no jobs.
+test_dispatch_09() {
+	dispatch_09_do_job() {
+		printf '%s\n' "${1}" >> "${IDS_FILE:?}"
+		return 0
+	}
+
+	local \
+		TEST_ID=dispatch_09 \
+		sched_rv \
+		exp act exp_cnt act_cnt \
+		jobs
+
+	local IDS_FILE="/tmp/sched.wsids.${TEST_ID}.$$"
+	rm -f "${IDS_FILE}"
+
+	# Leading newline/space/tab, interior single/repeated space/tab/newline runs,
+	# and trailing spaces.
+	jobs=$(printf '\n  \talpha\tbeta \t\t gamma\n\n\ndelta   epsilon   ')
+
+	print_test_header "${TEST_ID:?}" "Job list normalized across mixed space/tab/newline separators" \
+		"alpha beta gamma delta epsilon"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=dispatch_09_do_job \
+	SCHED_MAX_JOBS=3 \
+	SCHED_TIMEOUT_S=10 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	if [ "${sched_rv}" = 0 ] &&
+		verify_recorded_set exp act exp_cnt act_cnt "${IDS_FILE}" "alpha beta gamma delta epsilon"
+	then
+		rm -f "${IDS_FILE}"
+		PASS "count=${act_cnt}"
+		return 0
+	else
+		rm -f "${IDS_FILE}"
+		FAIL "sched_rv=${sched_rv}, exp_cnt=${exp_cnt}, act_cnt=${act_cnt}, exp='${exp}', act='${act//$'\n'/ }'"
+		return 1
+	fi
+}
