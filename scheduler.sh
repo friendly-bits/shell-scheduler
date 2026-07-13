@@ -524,11 +524,17 @@ schedule_jobs() {
 	# Convert ${SCH_JOB_IDS} to space-separated list
 	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || return 1
 
+	set -f
 	for sch_id in ${SCH_JOB_IDS}; do
 		sch_is_included "${sch_id}" "${sch_seen_ids}" &&
-			{ sch_fail_msg "Duplicate Job ID '${sch_id}'."; return 1; }
+			{
+				[ -n "${SCH_HAD_F}" ] || set +f
+				sch_fail_msg "Duplicate Job ID '${sch_id}'."
+				return 1
+			}
 		sch_append sch_seen_ids "${sch_id}"
 	done
+	[ -n "${SCH_HAD_F}" ] || set +f
 
 	SCH_UNDISPATCHED_IDS="${SCH_JOB_IDS}"
 
