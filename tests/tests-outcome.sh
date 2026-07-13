@@ -536,3 +536,74 @@ test_outcome_08() {
 		return 1
 	fi
 }
+
+# Verify the full job-ID list passed to schedule_jobs() is delivered to
+#   SCHED_FINALIZE_CB partitioned across the four outcome buckets: the union of
+#   ok/fail/unfinished/undispatched equals the input set and every ID appears in
+#   exactly one bucket (no drop, overlap, extra, or duplicate). Bucket-agnostic:
+#   asserts the partition invariant, not which bucket each ID lands in
+#   (test_outcome_06 checks specific membership); here undispatched holds two IDs.
+test_outcome_09() {
+	outcome_09_finalize_handler() {
+		finalize_handler "${1}" "${2}" || return $?
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+	}
+
+	local \
+		TEST_ID=outcome_09 \
+		sched_rv \
+		ok_raw fail_raw unfinished_raw undispatched_raw \
+		exp_union act_union \
+		jobs_cnt \
+		member_cnt \
+		jobs='ok_1 fail_1 hang_1 ok_2 ok_3'
+
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
+	rm -f "${FINALIZE_SETS_PREFIX}".*
+
+	print_test_header "${TEST_ID:?}" "Full job-ID list partitions across the four outcome buckets" "${jobs}"
+
+	# shellcheck disable=SC2086
+	set -- ${jobs}
+	jobs_cnt="${#}"
+
+	# SCHED_MAX_JOBS=1: ok_1 and fail_1 complete first; hang_1 is still running
+	# when SCHED_TIMEOUT_S fires (unfinished); ok_2, ok_3 are never dispatched.
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=outcome_09_finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=30 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
+	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
+	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	rm -f "${FINALIZE_SETS_PREFIX}".*
+
+	# Total tokens across all four buckets; exactly-once => equals the job count.
+	# shellcheck disable=SC2086
+	set -- ${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw}
+	member_cnt="${#}"
+
+	if [ "${sched_rv}" = 82 ] &&
+		verify_id_set exp_union act_union "${jobs}" "${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw}" &&
+		[ "${member_cnt}" = "${jobs_cnt}" ]
+	then
+		PASS "union='${act_union}', member_cnt=${member_cnt}/${jobs_cnt}"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv} (expected 82), member_cnt=${member_cnt}, jobs_cnt=${jobs_cnt}"
+		printf '%s\n%s\n%s\n' \
+			"input union expected='${exp_union}'" \
+			"bucket union actual  ='${act_union}'" \
+			"ok='${ok_raw}' fail='${fail_raw}' unfinished='${unfinished_raw}' undispatched='${undispatched_raw}'"
+		return 1
+	fi
+}
