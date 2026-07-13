@@ -270,8 +270,28 @@ echo "filename is '${filename}', url is '${url}'"
 
 This works in every callback and in your application script.
 
-If you want to **export** the variables set by `job_set_params` then prepend the `-export` flag to the command:
+Each requested parameter can also be fetched into a **differently-named variable** by using the `<var_name>=<param_name>` form. This may come useful in some cases when you want to use the param value without assigning it to the variable which matches the param name. E.g.:
+```sh
+local url prev_url
+url="https://winamp"
+job_set_params "job_1" "url=${url}"
+url="https://foobar"
+job_get_params "job_1" "prev_url=url"
+echo "prev url is '$prev_url', current url is '$url'"
 ```
+
+When the parameter name is not itself a valid shell variable name (for example when it starts with a digit), you have to fetch the param value this way because in that case it can not be assigned to a same-named variable:
+
+```sh
+local out_file
+job_get_params "job_1" out_file=2ndfile
+echo "value of param '2ndfile' is '${out_file}'"
+```
+
+The plain and aliased forms may be mixed freely in a single call, e.g. `job_get_params "job_1" filename out_file=2ndfile url` - assigns corresponding values to variables `${filename}`, `${url}` and `${out_file}`.
+
+If you want to **export** the variables set by `job_get_params` then prepend the `-export` flag to the command:
+```sh
 job_get_params -export "job1" filename url
 ```
 
@@ -327,7 +347,8 @@ For job C, file is ''.
 **Notes**:
 - When `SCHED_AUTO_PARAMS` is set to `1`, parameters are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
 - Assigning and fetching parameters is internally implemented via indirection. In order to keep the implementation compatible with Busybox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_params()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
-- Setting job-specific parameters via `job_set_params` requires corresponding **job ID** to contain only following characters: `a-z`, `A-Z`, `0-9`, `_`. It also requires corresponding **param name** to contain only the same set of characters, and not start with a digit (for compliance with POSIX specification of valid variable names). In addition, parameter names can not start with `SCHED_`, `SCH_`, `sch_`, `_sch_` and can not be the same as callback variables (`DO_JOB_CB`, `JOB_DONE_CB`) and the `IFS` variable. These are all reserved for internal use. When either of these requirements is not met, `job_set_params()` will print an error, return code 1, and the parameter will not be set.
+- Setting job-specific parameters via `job_set_params()` requires the **job ID** and each **param name** to contain only the following characters: `a-z`, `A-Z`, `0-9`, `_`. Param names, unlike variable names, **may** start with a digit and **may** coincide with otherwise-reserved names - a param name is only ever used as a lookup key, never assigned to directly. Retrieving a parameter, on the other hand, assigns it to a shell **variable**, so the *destination variable name* used with `job_get_params()` (either the same-named plain form, or `<var_name>` in the `<var_name>=<param_name>` form) must be a valid, non-reserved shell variable name: it must contain only `a-z`, `A-Z`, `0-9`, `_`, must not start with a digit (for compliance with the POSIX specification of valid variable names), must not start with `SCHED_`, `SCH_`, `sch_`, `_sch_`, and must not be a callback variable (`DO_JOB_CB`, `JOB_DONE_CB`) or the `IFS` variable. These prefixes and names are reserved for internal use. When any of these requirements is not met, the corresponding helper prints an error, returns code 1, and does not set the parameter or variable.
+- With `SCHED_AUTO_PARAMS=1`, every registered parameter of a job is exported into a same-named variable before that job runs. All of that job's param names must therefore be valid shell variable names (in particular, they must not start with a digit). A parameter whose name is not a valid variable name can still be registered and retrieved explicitly via the `<var_name>=<param_name>` form of `job_get_params()`, but it can not be delivered through `SCHED_AUTO_PARAMS`.
 
 
 ## Environment variables
