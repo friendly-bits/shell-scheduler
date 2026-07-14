@@ -628,7 +628,9 @@ test_termination_12() {
 	}
 
 	termination_12_dispatch_tick() {
-		[ "${1}" = first ] && sleep 2
+		# 'sleep N & wait' forces a forked sleep: an in-process NOFORK builtin
+		# sleep would be cut short by SIGCHLD from the exiting job
+		[ "${1}" = first ] && { sleep 2 & wait "$!"; }
 	}
 
 	local \
