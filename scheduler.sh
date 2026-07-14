@@ -157,7 +157,7 @@ refresh_remain_time()  {
 	get_remain_time "${1}" || sch_finalize "${?}"
 }
 
-# Sets var named $1 to remaining time to ${SCH_PROC_TIMEOUT_S} or to ${SCH_IDLE_TIMEOUT_S}, whichever is lower
+# Sets var named $1 to remaining time to ${SCH_TIMEOUT_S} or to ${SCH_IDLE_TIMEOUT_S}, whichever is lower
 # If timeout is hit, returns code ${SCH_RV_GLOBAL_TIMEOUT} or ${SCH_RV_IDLE_TIMEOUT}
 # 1: var name to output remaining time
 # 2 (optional): freshly retrieved uptime_cs
@@ -172,12 +172,12 @@ get_remain_time() {
 	fi
 	gt_total_time_cs=$((gt_cur_time_cs - SCH_INIT_UPTIME_CS))
 
-	gt_remain_time_cs=$((SCH_PROC_TIMEOUT_S*100 - gt_total_time_cs))
+	gt_remain_time_cs=$((SCH_TIMEOUT_S*100 - gt_total_time_cs))
 	gt_idle_remain_time_cs=$(( SCH_IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-SCH_LAST_PROGRESS_TIME_CS) ))
 
 	if [ ! "${gt_remain_time_cs}" -gt 0 ]
 	then
-		sch_fail_msg "Processing timeout (${SCH_PROC_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
+		sch_fail_msg "Processing timeout (${SCH_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
 		rv="${SCH_RV_GLOBAL_TIMEOUT}"
 	elif [ ! "${gt_idle_remain_time_cs}" -gt 0 ]
 	then
@@ -226,7 +226,7 @@ job_set_params() {
 		sch_is_included "${sch_param}" "${sch_cur_params}" ||
 		sch_append "SCH_JOB_PARAMS_${sch_job_id}" "${sch_param}" ||
 			return 1
-		export -n "SCH_JOB_PARAM_${sch_job_id}_${sch_param}=${sch_val}"
+		export -n "SCH_JOB_PARAM_${#sch_job_id}_${sch_job_id}_${sch_param}=${sch_val}"
 	done
 
 	[ -n "${sch_pair_seen}" ] &&
@@ -285,7 +285,7 @@ job_get_params() {
 				return 1
 		esac
 
-		eval "${sch_export}${sch_var}=\"\${SCH_JOB_PARAM_${sch_job_id}_${sch_param}}\""
+		eval "${sch_export}${sch_var}=\"\${SCH_JOB_PARAM_${#sch_job_id}_${sch_job_id}_${sch_param}}\""
 	done
 
 	[ -n "${sch_param_seen}" ] &&
@@ -450,14 +450,19 @@ sch_check_cb() {
 	sch_is_cmd "${val}" || { sch_fail_msg "Invalid value of ${1} '${val}'."; return 1; }
 }
 
-# 1: var name
-# 2: required(1/empty)
-sch_check_uint() {
-	local val
-	eval "val=\"\${${1}}\""
-	[ -z "${val}" ] && [ -z "${2}" ] && return 0
+# Validates that <in_val> is a non-zero uint, strips leading zeros and assigns to <out_var>
+# <out_var> must be named SCH_<name>, pairing env var SCHED_<name> (error messages rely on this).
+# 1: out var
+# 2: in value
+# 3: required(1/empty)
+sch_normalize_uint() {
+	local val="${2}"
+	export -n "${1:?}="
+	[ -z "${val}" ] && [ -z "${3}" ] && return 0
 	sch_is_uint "${val}" && [ "${val}" -ge 1 ] ||
-		{ sch_fail_msg "Invalid value '${val}' of env var ${1}."; return 1; }
+		{ sch_fail_msg "Invalid value '${val}' of env var SCHED_${1#SCH_}."; return 1; }
+	val="${val#"${val%%[!0]*}"}"
+	export -n "${1}=${val}"
 }
 
 
@@ -487,8 +492,9 @@ schedule_jobs() {
 		SCH_FAIL_IDS \
 		SCH_RUNNING_PIDS \
 		SCH_LAST_PROGRESS_TIME_CS \
-		SCH_PROC_TIMEOUT_S="${SCHED_TIMEOUT_S:-900}" \
-		SCH_IDLE_TIMEOUT_S="${SCHED_IDLE_TIMEOUT_S:-300}" \
+		SCH_MAX_JOBS \
+		SCH_TIMEOUT_S \
+		SCH_IDLE_TIMEOUT_S \
 		\
 		SCH_JOB_IDS="${1?}"
 	
@@ -510,10 +516,10 @@ schedule_jobs() {
 	sch_check_cb JOB_DONE_CB &&
 	sch_check_cb SCHED_DISPATCH_TICK_CB || return 1
 
-	# Check env vars
-	sch_check_uint SCHED_MAX_JOBS required &&
-	sch_check_uint SCHED_TIMEOUT_S &&
-	sch_check_uint SCHED_IDLE_TIMEOUT_S || return 1
+	# Check env vars, normalize into internal copies
+	sch_normalize_uint SCH_MAX_JOBS "${SCHED_MAX_JOBS}" required &&
+	sch_normalize_uint SCH_TIMEOUT_S "${SCHED_TIMEOUT_S:-900}" &&
+	sch_normalize_uint SCH_IDLE_TIMEOUT_S "${SCHED_IDLE_TIMEOUT_S:-300}" || return 1
 
 	# Removing trailing '/'
 	sch_dir="${sch_dir%"${sch_dir##*[!/]}"}"
@@ -561,7 +567,7 @@ schedule_jobs() {
 	set -f
 	for sch_id in ${SCH_JOB_IDS}; do
 		[ -n "${SCH_HAD_F}" ] || set +f
-		while [ "${sch_running_jobs_cnt}" -ge "${SCHED_MAX_JOBS}" ] &&
+		while [ "${sch_running_jobs_cnt}" -ge "${SCH_MAX_JOBS}" ] &&
 			[ -e "${sch_ipc_fifo}" ]
 		do
 			process_done_record \
