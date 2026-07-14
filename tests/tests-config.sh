@@ -175,7 +175,7 @@ test_config_03() {
 		return 0
 	}
 
-	# SCHED_MAX_JOBS is required (sch_check_uint's 3rd arg); SCHED_TIMEOUT_S
+	# SCHED_MAX_JOBS is required (sch_normalize_uint's 3rd arg); SCHED_TIMEOUT_S
 	# and SCHED_IDLE_TIMEOUT_S are optional, so '' is a *valid* value for
 	# them (means "use default") and must not be included as a bad value.
 	config_03_check_bad_value() {
@@ -399,6 +399,185 @@ test_config_08() {
 	else
 		rm -rf "${custom_dir}"
 		FAIL "sched_rv=${sched_rv}, fifo_in_dir=${fifo_in_dir}, fifo_left=$([ -e "${sched_fifo}" ] && echo yes || echo no), bad_rv=${bad_rv}"
+		return 1
+	fi
+}
+
+# Verify sch_normalize_uint(): accepts non-zero uints, stripping leading zeros
+#   (which would otherwise trigger octal interpretation in $(( )) arithmetic);
+#   rejects and clears the out var for anything else.
+#   Direct calls, no scheduler run.
+test_config_09() {
+	config_09_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+
+	# 1: in value
+	# 2: required flag ('' or 'required')
+	# 3: expected rv
+	# 4: expected out var value
+	config_09_check() {
+		# out var preset to a sentinel: the helper must always overwrite it
+		local rv SCH_C09_OUT=preset
+
+		# stderr silenced: the out-of-range input makes the test builtin
+		# print a diagnostic on some shells
+		SCHED_FAIL_MSG_CB=config_09_fail_msg \
+			sch_normalize_uint SCH_C09_OUT "${1}" ${2} 2>/dev/null
+		rv=$?
+
+		total_cnt=$((total_cnt + 1))
+		if [ "${rv}" = "${3}" ] && [ "${SCH_C09_OUT}" = "${4}" ]
+		then
+			pass_cnt=$((pass_cnt + 1))
+		else
+			printf "Unexpected result for input '%s'%s: rv=%s, out='%s' (expected rv=%s, out='%s')\n" \
+				"${1}" "${2:+" (required)"}" "${rv}" "${SCH_C09_OUT}" "${3}" "${4}" >&2
+		fi
+	}
+
+	local \
+		TEST_ID=config_09 \
+		bad_val \
+		pass_cnt=0 \
+		total_cnt=0 \
+		msg_cnt=0 \
+		expected_msg_cnt
+
+	local MSG_FILE="/tmp/sched.normuint.msg.${TEST_ID:?}.$$"
+	rm -f "${MSG_FILE}"
+
+	print_test_header "${TEST_ID:?}" "sch_normalize_uint(): decimal normalization and rejection" "(direct calls, no scheduler run)"
+
+	# Valid inputs: rv 0, decimal-normalized value assigned
+	config_09_check 1      ''       0 1
+	config_09_check 900    ''       0 900
+	config_09_check 010    ''       0 10
+	config_09_check 09     ''       0 9
+	config_09_check 000700 ''       0 700
+	config_09_check 010    required 0 10
+
+	# Empty input: valid (assigns empty) unless required
+	config_09_check ''     ''       0 ''
+	config_09_check ''     required 1 ''
+
+	# Invalid inputs: rv 1, out var cleared, one message each
+	for bad_val in abc 9x +1 -1 1.5 '1 2' 0 00 99999999999999999999; do
+		config_09_check "${bad_val}" '' 1 ''
+	done
+
+	# 1 message for empty-required + 1 per invalid input
+	expected_msg_cnt=10
+
+	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
+	rm -f "${MSG_FILE}"
+
+	if [ "${pass_cnt}" = "${total_cnt}" ] && [ "${msg_cnt}" = "${expected_msg_cnt}" ]
+	then
+		PASS "${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
+		return 0
+	else
+		FAIL "${pass_cnt}/${total_cnt}, messages=${msg_cnt} (expected ${expected_msg_cnt})"
+		return 1
+	fi
+}
+
+# Regression: leading-zero numeric env values are treated as decimal, not octal.
+#   Before normalization was added, SCHED_IDLE_TIMEOUT_S=09 killed the scheduler
+#   with a fatal 'arithmetic syntax error' (09 is invalid octal) on the first
+#   remaining-time computation, and 010 silently meant 8 seconds.
+test_config_10() {
+	local \
+		TEST_ID=config_10 \
+		sched_rv \
+		jobs='ok_c10a ok_c10b ok_c10c'
+
+	print_test_header "${TEST_ID:?}" "Leading-zero numeric env values are treated as decimal" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=02 \
+	SCHED_TIMEOUT_S=010 \
+	SCHED_IDLE_TIMEOUT_S=09 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	if [ "${sched_rv}" = 0 ]
+	then
+		PASS "sched_rv=${sched_rv}"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, expected 0"
+		return 1
+	fi
+}
+
+# Verify SCHED_AUTO_PARAMS activates only on the exact string '1':
+#   other values (including '01', which a numeric comparison would accept)
+#   must leave registered params undelivered, with the scheduler running normally.
+test_config_11() {
+	config_11_do_job() {
+		if [ -n "${cfg11_param+x}" ]
+		then
+			printf 'set:%s\n' "${cfg11_param}" >> "${AP_RESULT_FILE:?}"
+		else
+			printf 'unset\n' >> "${AP_RESULT_FILE:?}"
+		fi
+	}
+
+	local \
+		TEST_ID=config_11 \
+		ap_val \
+		sched_rv \
+		unset_cnt=0 \
+		line_cnt=0 \
+		rv_pass_cnt=0 \
+		total_cnt=0 \
+		job_id='cfg11_job'
+
+	local AP_RESULT_FILE="/tmp/sched.autoparams.off.${TEST_ID:?}.$$"
+	rm -f "${AP_RESULT_FILE}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_AUTO_PARAMS values other than '1' disable param auto-delivery" "${job_id}"
+
+	job_set_params "${job_id}" cfg11_param=hello ||
+		{ FAIL "job_set_params failed"; return 1; }
+
+	for ap_val in 0 01 true; do
+		total_cnt=$((total_cnt + 1))
+
+		SCHED_FAIL_MSG_CB=echo \
+		SCHED_FINALIZE_CB=finalize_handler \
+		JOB_DONE_CB=done_handler \
+		DO_JOB_CB=config_11_do_job \
+		SCHED_MAX_JOBS=1 \
+		SCHED_TIMEOUT_S=3 \
+		SCHED_IDLE_TIMEOUT_S=2 \
+		SCHED_AUTO_PARAMS="${ap_val}" \
+			schedule_jobs "${job_id}" &
+
+		wait "$!"
+		sched_rv=$?
+
+		[ "${sched_rv}" = 0 ] && rv_pass_cnt=$((rv_pass_cnt + 1))
+	done
+
+	if [ -f "${AP_RESULT_FILE}" ]; then
+		line_cnt=$(wc -l < "${AP_RESULT_FILE}")
+		unset_cnt=$(grep -c '^unset$' "${AP_RESULT_FILE}")
+	fi
+	rm -f "${AP_RESULT_FILE}"
+
+	if [ "${rv_pass_cnt}" = "${total_cnt}" ] &&
+		[ "${line_cnt}" = "${total_cnt}" ] &&
+		[ "${unset_cnt}" = "${total_cnt}" ]
+	then
+		PASS "runs=${total_cnt}, all params undelivered"
+		return 0
+	else
+		FAIL "rv_pass=${rv_pass_cnt}/${total_cnt}, job_runs=${line_cnt}, unset=${unset_cnt}"
 		return 1
 	fi
 }
