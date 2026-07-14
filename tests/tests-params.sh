@@ -244,7 +244,7 @@ test_params_04() {
 }
 
 # Verify job_set_params() accepts reserved-looking param names:
-#   they are namespaced (SCH_JOB_PARAM_<id>_<name>) data keys which may or may not become var names
+#   they are namespaced (SCH_JOB_PARAM_<idlen>_<id>_<name>) data keys which may or may not become var names
 # Verify real internal state (IFS, SCHED_* env) is untouched.
 # Verify each value is retrievable via a safe alias, while a direct fetch into the reserved name is rejected.
 test_params_05() {
