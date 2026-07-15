@@ -1,4 +1,4 @@
-# shell-scheduler — Time-keeping and Timeouts
+# shell-scheduler: Time-keeping and Timeouts
 
 How the scheduler measures time, the timeout mechanisms it implements, and how to perform reliable delays in callbacks. General library documentation lives in [REFERENCE.md](REFERENCE.md); if you're just getting started, read the [README](README.md) first.
 
@@ -7,17 +7,17 @@ How the scheduler measures time, the timeout mechanisms it implements, and how t
 - [How the scheduler measures time](#how-the-scheduler-measures-time)
 - [Global timeout](#global-timeout)
 - [Idle timeout](#idle-timeout)
-- [Reliable delays in callbacks](#reliable-delays-in-callbacks)
 - [Per-job timeouts](#per-job-timeouts)
+- [Reliable delays in callbacks](#reliable-delays-in-callbacks)
 
 ## How the scheduler measures time
 
-The scheduler reads elapsed time from `/proc/uptime` with centisecond (0.01 s) resolution and performs all internal accounting in centiseconds. Because uptime is monotonic, time-keeping is immune to wall-clock changes (NTP corrections, timezone changes, manual `date` calls) — relevant on routers, which commonly boot with a wrong clock and correct it later.
+The scheduler reads elapsed time from `/proc/uptime` with centisecond (0.01 s) resolution and performs all internal accounting in centiseconds. Because uptime is monotonic, time-keeping is immune to wall-clock changes (NTP corrections, timezone changes, manual `date` calls).
 
 Timeout *enforcement* is coarser than the accounting resolution:
 
 - While waiting for job completions, the scheduler sleeps in `read -t` with a timeout in whole seconds (rounded up from the remaining time). A timeout is therefore never declared early, but may be declared up to about one second late.
-- All callbacks except the **job execution callback** run synchronously in the scheduler process. While such a callback runs, the scheduler cannot register completions or declare timeouts — see the note in [Callbacks](REFERENCE.md#callbacks). Keep synchronous callbacks fast. Remaining time is recomputed from a fresh clock reading after each callback returns, so a slow callback delays timeout detection by at most its own duration.
+- All callbacks except the **job execution callback** run synchronously in the scheduler process. While such a callback runs, the scheduler cannot register completions or declare timeouts - see the note in [Callbacks](REFERENCE.md#callbacks). Keep synchronous callbacks fast. Remaining time is recomputed from a fresh clock reading after each callback returns, so a slow callback delays timeout detection by at most its own duration.
 
 ## Global timeout
 
@@ -39,7 +39,7 @@ Both timeout values are validated as non-zero unsigned decimal integers; leading
 
 ### Motivation
 
-Without per-job timeouts, a single hung job is invisible for as long as other jobs keep completing: activity keeps resetting the idle timeout, so the hung job survives until the global timeout — which then aborts the entire run, sacrificing all pending work. Meanwhile the hung job permanently occupies one of the `${SCHED_MAX_JOBS}` concurrency slots. Per-job timeouts convert "one bad job kills the batch" into "one bad job times out, the batch completes", and reclaim the occupied slot.
+Without per-job timeouts, the scheduler will wait for a single permanently hung job until either the idle or the global scheduler timeout is hit, at which point the scheduler will terminate with an error. Meanwhile the hung job permanently occupies one of the `${SCHED_MAX_JOBS}` concurrency slots. Per-job timeouts convert "one bad job kills the batch" into "one bad job times out, the batch completes", and reclaim the occupied slot.
 
 ### Configuration
 
@@ -55,24 +55,23 @@ An individual job's timeout can be set (overriding `${SCHED_JOB_TIMEOUT_S}` for 
 job_set_timeout <job_id> <seconds>
 ```
 
-Value must be non-zero unsigned decimal integer. A per-job timeout may exceed `${SCHED_TIMEOUT_S}`; such a deadline simply never fires (the global timeout wins first). When neither `${SCHED_JOB_TIMEOUT_S}` nor an individual timeout is set, the job will be allowed to run indefinitely. If such job becomes permanently stuck, the scheduler will eventually hit either the idle timeout or the global timeout and terminate with an error.
+Value must be non-zero unsigned decimal integer. A per-job timeout may exceed `${SCHED_TIMEOUT_S}` but such deadline simply never fires (the global scheduler timeout fires first). When neither `${SCHED_JOB_TIMEOUT_S}` nor an individual timeout is set, the job will be allowed to run indefinitely.
 
 ### Semantics
 
-1. **Deadline definition.** A job's deadline is its dispatch time plus its timeout. Per the [enforcement granularity rules](#how-the-scheduler-measures-time), expiry is never declared early and may be declared up to about one second late — later still if a synchronous callback blocks the scheduler at that moment.
-2. **Expiry means abandon, not kill.** The scheduler stops waiting for the job, frees its concurrency slot, classifies it as timed out and calls the **job completion callback** (`JOB_DONE_CB`) — but does **not** signal the job's process, consistent with the [termination policy](REFERENCE.md#termination-of-running-jobs). The process may continue running; terminating it (and any children it spawned, e.g. via `pgrep -P`) is the application's responsibility.
+1. **Deadline definition.** A job's deadline is its dispatch time plus its timeout. Per the [enforcement granularity rules](#how-the-scheduler-measures-time), expiry is never declared early and may be declared up to about one second late - later still if a synchronous callback blocks the scheduler at that moment.
+2. **Expiry means abandon, not kill.** The scheduler stops waiting for the job, frees its concurrency slot, classifies it as timed out and calls the **job completion callback** (`JOB_DONE_CB`) - but does **not** signal the job's process, consistent with the [termination policy](REFERENCE.md#termination-of-running-jobs). The process may continue running; terminating it (and any children it spawned, e.g. via `pgrep -P`) is the application's responsibility.
 3. **Notification.** A timed-out job is reported through the normal completion channel with job return code `124` and one extra argument:
 
    ```sh
    ${JOB_DONE_CB} <job_id> 124 <pid>
    ```
 
-   The **presence of the third argument** marks a scheduler-synthesized timeout (vs similar return code received directly from the job). If a job genuinely exits with code `124`, this third argument will not be present. The `<pid>` enables application-side cleanup at the moment of expiry. The callback's existing contract is unchanged — a non-zero return still terminates the scheduler with that code.
-4. **Arrival wins over expiry.** On each scheduler wake-up, a received completion record is processed before deadlines are checked.
-5. **Scheduler timeouts take precedence.** The global and idle timeout checks run first; a job deadline never masks return codes `82` or `81`.
-6. **Job expiries do not count as progress.** The idle timeout is reset when the scheduler starts a job or processes a genuine completion record — never when it processes an expiry.
-7. **Late completion records are discarded.** If an abandoned job's completion record arrives after its expiry was processed, the record is silently dropped; the job's classification (timed out, code `124`) stands.
-8. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler termination callback** — not in `<fail_job_ids>`, which is reserved for jobs that genuinely exited with a non-zero code. The guarantee that every job ID appears in exactly one outcome list is unchanged, with `<expired_job_ids>` as the fifth list. Abandoned jobs whose process never reported by scheduler exit have their PIDs included in `<running_pids>` (they are, verbatim, "jobs the scheduler started but did not receive completion records for"); abandoned jobs whose late record was discarded do not.
+   The **presence of the third argument** marks a scheduler-synthesized timeout (vs similar return code received directly from the job). If a job itself genuinely exits with code `124`, this third argument will not be present. The `<pid>` enables application-side cleanup at the moment of expiry.
+4. **Completion record arrival wins over expiry.** On each scheduler wake-up, a received completion record is processed before deadlines are checked.
+5. **Job expiries do not count as progress.** The idle timeout is reset when the scheduler starts a job or processes a genuine completion record - never when it processes an expiry.
+6. **Late completion records are discarded.** If an abandoned job's completion record arrives after its expiry was processed, the record is silently dropped; the job's classification (timed out, code `124`) stands.
+7. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler termination callback** - not in `<fail_job_ids>`, which is reserved for jobs that exited with a non-zero code. Abandoned jobs whose process never reported back before scheduler exit have their PIDs included in `<running_pids>`; abandoned jobs whose late record was discarded do not.
 
 ### Implementation notes (internal)
 
