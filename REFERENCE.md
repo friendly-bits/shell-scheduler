@@ -386,7 +386,7 @@ Notes:
 
 If the job completion callback (`JOB_DONE_CB`) returns a non-zero code, the scheduler terminates immediately and returns the same code (after invoking the scheduler termination callback, if defined).
 
-The **scheduler termination callback** (`SCHED_FINALIZE_CB`) is always invoked before the scheduler exits. It receives the scheduler's return code as its first argument, along with the running PIDs and job ID breakdown described in the [Scheduler termination callback](#scheduler-termination-callback-optional) section above. Normally the scheduler exits with that same return code. The only exception is when the scheduler itself would otherwise return `0` but the **scheduler termination callback** returns a non-zero code. In that case, the scheduler exits with the callback's return code instead.
+The **scheduler termination callback** (`SCHED_FINALIZE_CB`) is always invoked before the scheduler exits, except when the scheduler failed with a fatal error during early initialization - in that case it exits with code `1` without starting any jobs and without invoking the callback. Normally the scheduler exits with the same return code that is passed to the **scheduler termination callback**. The only exception is when the scheduler itself would otherwise return `0` but the **scheduler termination callback** returns a non-zero code. In that case, the scheduler exits with the callback's return code instead.
 
 ## Timeouts
 
