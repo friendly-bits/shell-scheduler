@@ -10,7 +10,7 @@ The goal of this project is to implement a reliable, reusable, flexible and reas
 - **Callback-based API** allows for easy integration with a shell-based application while keeping parallelization orchestration code separate from application-specific code.
 - **Extensive test suite** validates that every promise made by the API holds in practice.
 - **Validity checks and error handling** of everything that can go wrong, including configuration, callback definitions and internal scheduler state.
-- **Configurable global and idle timeouts**
+- **Configurable global, idle and per-job timeouts**
 - **Bash and BusyBox ash** support
 - **Negligible performance overhead** for almost any feasible use case. Very few invocations of external binaries, very few filesystem operations, and minimum spawned subshells.
 
@@ -22,7 +22,7 @@ The goal of this project is to implement a reliable, reusable, flexible and reas
 
 ## Quick start
 
-A minimal setup needs to source the library, write one callback that does the work for a single job, set a couple of variables, and call `schedule_jobs()` with a list of job IDs:
+A minimal setup needs to source the library, write one callback that does the work for a single job, set two variables, and call `schedule_jobs()` with a list of job IDs:
 
 ```sh
 #!/bin/sh
@@ -57,11 +57,6 @@ Scheduler finished with exit code 0
 
 This runs five jobs, up to three at a time: jobs 1, 2, 3 start almost simultaneously, and 4 and 5 wait for a slot to free up.
 
-Two things worth knowing:
-
-- The order jobs **start** in is deterministic; the order they **finish** in may not be.
-- The scheduler is started in the background (the `&` after `schedule_jobs()`). This is how it's meant to run. You *can* run it in the foreground, but that interferes with any `trap`s you've set and makes your script exit when the scheduler does.
-
 ## How it works
 
 The mental model is simple: `SCHED_MAX_JOBS` execution **slots**, and a queue of job IDs. The scheduler starts jobs in the background in list order, and whenever a slot frees up it starts the next pending job to fill it. It keeps running until every job has finished — or a timeout or fatal error stops it.
@@ -86,14 +81,22 @@ The two you'll most often want to tune are the timeouts, `SCHED_TIMEOUT_S` (over
 You can set variables inline with the call if you prefer:
 
 ```sh
-DO_JOB_CB=my_exec SCHED_MAX_JOBS=10 schedule_jobs "1 2 3"
+DO_JOB_CB=my_exec SCHED_MAX_JOBS=10 schedule_jobs "1 2 3" &
+wait ${!}
 ```
+
+**Note**: The scheduler is intended to run in a separate process. This may be a background process (with the `&` after `schedule_jobs()`), or a foreground subshell, e.g.:
+```
+( DO_JOB_CB=my_exec SCHED_MAX_JOBS=10 schedule_jobs "1 2 3" )
+```
+
+You *can* run the scheduler in the same process as your application, but that interferes with any `trap`s your application might have set up and makes your script exit when the scheduler does.
 
 ## Full reference
 
 Everything above is enough for most use cases. When you need the complete picture, see **[REFERENCE.md](REFERENCE.md)**:
 
-- **[Scheduler API](REFERENCE.md#scheduler-api)** — full `schedule_jobs()` signature and return value.
+- **[How to use (Scheduler API)](REFERENCE.md#how-to-use-scheduler-api)** — full `schedule_jobs()` signature and return value.
 - **[Callbacks](REFERENCE.md#callbacks)** — all four callbacks with complete signatures and behavior.
 - **[Job parameters](REFERENCE.md#job-parameters)** — passing shared and per-job parameters (`job_set_params` / `job_get_params`, `SCHED_AUTO_PARAMS`).
 - **[Environment variables](REFERENCE.md#environment-variables)** — the complete configuration table.

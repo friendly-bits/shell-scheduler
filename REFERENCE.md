@@ -19,11 +19,42 @@ Complete technical reference for the `shell-scheduler` library. If you're just g
 To start the scheduler:
 
 ```sh
-schedule_jobs "<job_id_list>" [arg1 [arg2 ...]]
+schedule_jobs "<job_id_list>" [arg1 [arg2 ...]] &
 ```
 
 - `<job_id_list>` : a string containing one or more job IDs separated by any combination of spaces, tabs and newlines (prefer spaces for simplicity). Job IDs themselves must not contain any of the above delimiters. Any other character is allowed.
 - `arg1 [arg2 ...]` : optional additional arguments. Passed as-is to every invocation of the **job execution callback** (`DO_JOB_CB`) after the job ID.
+
+As a general rule, run the scheduler in a background process: `schedule_jobs <job_ids> & ... wait ${!}`. Alternatively, for certain use cases, running it in a foreground subshell may be preferable. Below spoiler provides more information.
+
+<details>
+<summary><strong>Background vs foreground subshell considerations</summary></strong>
+
+`schedule_jobs()` is designed to run in a child process of your script: either in the background: `schedule_jobs <job_ids> &`; or in a foreground subshell: `( schedule_jobs <job_ids> )`. The scheduler always terminates via the `exit` command. Called plainly (not in the background or subshell), your script will exit when scheduler exits; this also clobbers your `USR1`/`INT`/`TERM` traps and file descriptor `3`. So in general avoid that.
+
+Both forms support the entire feature set - dispatch, concurrency, timeouts, callbacks, outcome reporting all live inside the scheduler process and behave identically. The difference is what your script can do while the batch runs, and how signals reach the scheduler:
+
+```sh
+# Background: asynchronous - your script keeps control while the batch runs
+schedule_jobs "A B C" &
+sched_pid=$!
+# ... concurrent work, monitoring, cancellation via kill -USR1 "${sched_pid}" ...
+wait "${sched_pid}"
+rv=$?
+```
+
+```sh
+# Foreground subshell: synchronous - blocks until the batch is done
+( schedule_jobs "A B C" )
+rv=$?
+```
+
+- **Background (`& ... wait`)** - use when the application must stay in control while jobs run: doing concurrent work, supervising progress, or cancelling the batch on demand. Because your script keeps running (and `wait` is interruptible by its traps), it can react to terminal or service signals and translate them into a graceful scheduler cancellation with `kill -USR1 "${sched_pid}"` - see [Signal handling](#signal-handling) and the [real-world example](#real-world-example). Note that a backgrounded scheduler may not see `Ctrl-C` itself, so this signal-forwarding pattern is also what connects `Ctrl-C` to the scheduler's cleanup path. This is the pattern used throughout this documentation and the bundled examples.
+- **Foreground subshell (`( ... )`)** - use for the simple synchronous case: run the batch, then continue with its return code. `Ctrl-C` handling gets simpler: the subshell runs in the terminal's foreground process group, so `SIGINT` reaches the scheduler directly and triggers its normal cleanup path (return code `84`, termination callback invoked). The trade-offs: your script is blocked until the scheduler exits - it cannot do concurrent work, and its own traps will not run until then - and there is no scheduler PID at hand, so the batch cannot be cancelled from the application side.
+
+In both modes, a signal delivered only to your application's PID (e.g. `kill -TERM <app_pid>`, as opposed to `Ctrl-C`, which signals the whole process group) leaves the scheduler and its jobs running as orphans. Only the background form lets you close that gap, by forwarding the signal as shown in the [real-world example](#real-world-example).
+
+</details>
 
 Before calling `schedule_jobs()`, the following variables must be set:
 
@@ -33,7 +64,7 @@ Before calling `schedule_jobs()`, the following variables must be set:
 You can set these values inline with the call to `schedule_jobs()` if you want to avoid extra local variable declarations, e.g.:
 
 ```sh
-DO_JOB_CB=my_exec SCHED_MAX_JOBS=10 schedule_jobs "1 2 3"
+DO_JOB_CB=my_exec SCHED_MAX_JOBS=10 schedule_jobs "1 2 3" &
 ```
 
 For each job ID, the scheduler invokes the **job execution callback** as:
