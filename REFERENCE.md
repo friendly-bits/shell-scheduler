@@ -4,7 +4,7 @@ Complete technical reference for the `shell-scheduler` library. If you're just g
 
 ## Contents
 
-- [Scheduler API](#scheduler-api)
+- [How to use](#how-to-use-scheduler-api)
 - [Callbacks](#callbacks)
 - [Job parameters](#job-parameters)
 - [Environment variables](#environment-variables)
@@ -14,7 +14,7 @@ Complete technical reference for the `shell-scheduler` library. If you're just g
 - [Termination of running jobs](#termination-of-running-jobs)
 - [Real-world example](#real-world-example)
 
-## Scheduler API
+## How to use (Scheduler API)
 
 To start the scheduler:
 
@@ -52,7 +52,7 @@ If configuration validation fails, callback execution fails, a timeout is reache
 
 ## Callbacks
 
-All callbacks are specified by assigning the callback name to the corresponding environment variable before calling `schedule_jobs()`. Callback values must be command names only — arguments are not allowed. In practice, this will normally be the name of a shell function implemented by your script. The section [Job parameters](#job-parameters) explains how to pass parameters to each individual job.
+All callbacks are specified by assigning the callback name to the corresponding environment variable before calling `schedule_jobs()`. Callback values must be command names only — arguments are not allowed. A callback will normally be the name of a shell function implemented by your script (alternatively, for a very simple callback which only needs to call a binary without any arguments, you can assign the binary path to the callback variable). The section [Job parameters](#job-parameters) explains how to pass parameters to each individual job.
 
 > **Note**: All callbacks, except the **job execution callback**, are invoked synchronously (in the foreground, from the scheduler's perspective). Synchronous callbacks block scheduler execution, bookkeeping and time-keeping. Previously started jobs do continue to run, but the scheduler will not launch new jobs or register job completions until the callback returns control to the scheduler. For this reason, avoid including commands which may stall for a prolonged time in such callbacks.
 
@@ -81,8 +81,6 @@ If this callback returns a non-zero code, the scheduler terminates immediately w
 It can be used to e.g. collect job results or handle failures.
 
 When [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) are in use, a timed-out job is reported with job return code `124` and the job's PID as an extra third argument — the presence of that argument is what distinguishes a scheduler-synthesized timeout from a job that genuinely exited with code `124`.
-
-**Note**: this callback — like every scheduler callback except the **job execution callback** — runs inside the scheduler process, where a plain `sleep` can be silently cut short on some BusyBox builds. If a callback needs a reliable delay, see [Reliable delays in callbacks](TIMEKEEPING.md#reliable-delays-in-callbacks).
 
 ### Scheduler termination callback (optional)
 
@@ -217,7 +215,7 @@ job_get_params "job_1" out_file=2ndfile
 echo "value of param '2ndfile' is '${out_file}'"
 ```
 
-The plain and aliased forms may be mixed freely in a single call, e.g. `job_get_params "job_1" filename out_file=2ndfile url` — assigns corresponding values to variables `${filename}`, `${url}` and `${out_file}`.
+The plain and aliased forms may be mixed freely in a single call, e.g. `job_get_params "job_1" filename out_file=2ndfile url` - assigns corresponding values to variables `${filename}`, `${url}` and `${out_file}`.
 
 If you want to **export** the variables set by `job_get_params`, then prepend the `-export` flag to the command:
 
@@ -229,7 +227,7 @@ job_get_params -export "job1" filename url
 
 ### Automatic parameters (`SCHED_AUTO_PARAMS`)
 
-If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job — including if the job is implemented as an external command (rather than as a shell function). Note that in that case, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
+If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job, including if the job is implemented as an external command (rather than as a shell function). Note that in that case, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
 
 Example with `SCHED_AUTO_PARAMS=1`:
 
@@ -286,7 +284,7 @@ For job C, file is ''.
 
 - When `SCHED_AUTO_PARAMS` is set to `1`, parameters are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
 - Assigning and fetching parameters is internally implemented via indirection. In order to keep the implementation compatible with BusyBox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_params()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
-- Setting job-specific parameters via `job_set_params()` requires the **job ID** and each **param name** to contain only the following characters: `a-z`, `A-Z`, `0-9`, `_`. Param names, unlike variable names, **may** start with a digit and **may** coincide with otherwise-reserved names — a param name is only ever used as a lookup key, never assigned to directly. Retrieving a parameter, on the other hand, assigns it to a shell **variable**, so the *destination variable name* used with `job_get_params()` (either the same-named plain form, or `<var_name>` in the `<var_name>=<param_name>` form) must be a valid, non-reserved shell variable name: it must contain only `a-z`, `A-Z`, `0-9`, `_`, must not start with a digit (for compliance with the POSIX specification of valid variable names), must not start with `SCHED_`, `SCH_`, `sch_`, `_sch_`, and must not be a callback variable (`DO_JOB_CB`, `JOB_DONE_CB`) or the `IFS` variable. These prefixes and names are reserved for internal use. When any of these requirements is not met, the corresponding helper prints an error, returns code 1, and does not set the parameter or variable.
+- Setting job-specific parameters via `job_set_params()` requires the **job ID** and each **param name** to contain only the following characters: `a-z`, `A-Z`, `0-9`, `_`. Param names, unlike variable names, **may** start with a digit and **may** coincide with otherwise-reserved names. `job_set_params()` treats param name as a **key** and the actual value is assigned to a variable with a different name. Retrieving a parameter, on the other hand, assigns it to a shell **variable**, so the *destination variable name* used with `job_get_params()` (either the same-named plain form, or `<var_name>` in the `<var_name>=<param_name>` form) must be a valid, non-reserved shell variable name: it must contain only `a-z`, `A-Z`, `0-9`, `_`, must not start with a digit (for compliance with the POSIX specification of valid variable names), must not start with `SCHED_`, `SCH_`, `sch_`, `_sch_`, and must not be a callback variable (`DO_JOB_CB`, `JOB_DONE_CB`) or the `IFS` variable. These prefixes and names are reserved for internal use. When any of these requirements is not met, the corresponding helper prints an error, returns code 1, and does not set the parameter or variable.
 - With `SCHED_AUTO_PARAMS=1`, every registered parameter of a job is exported into a same-named variable before that job runs. All of that job's param names must therefore be valid, **non-reserved** shell variable names per the rules above (in particular, they must not start with a digit and must not use the reserved prefixes or names). If any registered parameter of a job violates these rules, that job fails during initialization: an error is reported, the **job execution callback** is never invoked, and the job completes with job return code `1` — the scheduler itself keeps running and handles the failure through the normal completion path, including invoking the **job completion callback** (`JOB_DONE_CB`) if defined. A parameter whose name is not a valid variable name can still be registered and retrieved explicitly via the `<var_name>=<param_name>` form of `job_get_params()`, but it can not be delivered through `SCHED_AUTO_PARAMS`.
 
 </details>
@@ -335,9 +333,12 @@ The **scheduler termination callback** (`SCHED_FINALIZE_CB`) is always invoked b
 
 ## Timeouts
 
-The scheduler implements two independent timeout mechanisms: the **global timeout** (`${SCHED_TIMEOUT_S}`, return code `82`), limiting the scheduler's total run time, and the **idle timeout** (`${SCHED_IDLE_TIMEOUT_S}`, return code `81`), limiting the time the scheduler may go without starting a job or receiving a job completion.
+The scheduler implements three independent timeout mechanisms:
+- **global timeout** (`${SCHED_TIMEOUT_S}`, return code `82`), limiting the scheduler's total run time
+- **idle timeout** (`${SCHED_IDLE_TIMEOUT_S}`, return code `81`), limiting the time the scheduler may go without starting a job or receiving a job completion
+- **per-job timeout** (configurable individually for each job, defaults to `${SCHED_JOB_TIMEOUT_S}` if defined).
 
-Time measurement, both timeout mechanisms, and reliable delays in callbacks are documented in detail in [TIMEKEEPING.md](TIMEKEEPING.md).
+Time measurement, timeout mechanisms, and reliable delays in callbacks are documented in detail in [TIMEKEEPING.md](TIMEKEEPING.md).
 
 ## Signal handling
 
