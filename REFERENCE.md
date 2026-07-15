@@ -80,7 +80,9 @@ If this callback returns a non-zero code, the scheduler terminates immediately w
 
 It can be used to e.g. collect job results or handle failures.
 
-**Note**: this callback — like every scheduler callback except the **job execution callback** — runs inside the scheduler process, which continuously has child processes exiting as jobs complete. On BusyBox builds where `sleep` is a NOFORK shell builtin (e.g. with `CONFIG_FEATURE_SH_STANDALONE` enabled), an in-process `sleep` in such a callback can be silently cut short by the `SIGCHLD` of an exiting job. If a callback needs a reliable delay, force a forked sleep, which is immune to this: `sleep <seconds> & wait "$!"`.
+When [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) are in use, a timed-out job is reported with job return code `124` and the job's PID as an extra third argument — the presence of that argument is what distinguishes a scheduler-synthesized timeout from a job that genuinely exited with code `124`.
+
+**Note**: this callback — like every scheduler callback except the **job execution callback** — runs inside the scheduler process, where a plain `sleep` can be silently cut short on some BusyBox builds. If a callback needs a reliable delay, see [Reliable delays in callbacks](TIMEKEEPING.md#reliable-delays-in-callbacks).
 
 ### Scheduler termination callback (optional)
 
@@ -301,7 +303,8 @@ The scheduler is configured entirely through environment variables. Required var
 | SCHED_FAIL_MSG_CB         |          |  unset  | Command implementing the scheduler error reporting callback.                                                                     |
 | SCHED_MAX_JOBS            |     *    |    -    | Concurrency limit ( integer >= 1 ).                                                                                              |
 | SCHED_TIMEOUT_S           |          |  `900`  | Global scheduler timeout in seconds ( integer >= 1 ).                                                                            |
-| SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job completions ( integer >= 1 ).                                                  |
+| SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job starts or completions ( integer >= 1 ).                                       |
+| SCHED_JOB_TIMEOUT_S       |          |  unset  | Default per-job timeout in seconds ( integer >= 1 ); override per job via `job_set_timeout()`. See [TIMEKEEPING.md](TIMEKEEPING.md#per-job-timeouts). |
 | SCHED_DIR                 |          |  `/tmp` | Directory in which the scheduler creates its FIFO used for communication with running jobs. Trailing `/` characters are ignored. |
 | SCHED_AUTO_PARAMS         |          |  unset  | Whether to export job-specific params when initializing each job ( 1 to enable, any other value to disable ).                    |
 
@@ -309,6 +312,7 @@ Notes:
 
 - Callback variables must contain command names only. Arguments are not allowed.
 - Invalid value of any required or optional variable causes `schedule_jobs()` to fail before starting any jobs.
+- Timeout behavior is documented in detail in [TIMEKEEPING.md](TIMEKEEPING.md).
 
 ## Return codes
 
@@ -331,21 +335,9 @@ The **scheduler termination callback** (`SCHED_FINALIZE_CB`) is always invoked b
 
 ## Timeouts
 
-The scheduler implements two independent timeout mechanisms. Their default values are documented in the [Environment variables](#environment-variables) section.
+The scheduler implements two independent timeout mechanisms: the **global timeout** (`${SCHED_TIMEOUT_S}`, return code `82`), limiting the scheduler's total run time, and the **idle timeout** (`${SCHED_IDLE_TIMEOUT_S}`, return code `81`), limiting the time the scheduler may go without starting a job or receiving a job completion.
 
-### Global timeout
-
-The global timeout (`${SCHED_TIMEOUT_S}`) limits the total time the scheduler is allowed to run. It starts when the scheduler begins execution and continues to run regardless of how many jobs are currently executing or waiting to be started.
-
-If the global timeout is reached, the scheduler reports an error, invokes the **scheduler termination callback** (if defined), and exits with return code `82`.
-
-### Idle timeout
-
-The idle timeout (`${SCHED_IDLE_TIMEOUT_S}`) limits the maximum time the scheduler may go without receiving a job completion. The timeout is reset whenever the scheduler successfully processes a job completion.
-
-This timeout is useful for detecting situations where no progress is being made, for example because one or more jobs became stuck.
-
-If the idle timeout is reached, the scheduler reports an error, invokes the **scheduler termination callback** (if defined), and exits with return code `81`.
+Time measurement, both timeout mechanisms, and reliable delays in callbacks are documented in detail in [TIMEKEEPING.md](TIMEKEEPING.md).
 
 ## Signal handling
 
