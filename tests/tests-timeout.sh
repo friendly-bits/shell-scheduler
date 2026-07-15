@@ -6,21 +6,25 @@
 
 # Category: Per-job timeouts (see TIMEKEEPING.md)
 # This file is sourced by tests.sh; it defines test_N functions only.
-# Tests 01-04 use direct helper calls (no scheduler runs);
-# tests 05+ are scheduler-level behavior tests.
+# All tests exercise the public interface only: schedule_jobs(), the
+# documented helpers (job_set_timeout etc.), environment variables and
+# callbacks. No test depends on scheduler internals.
 
 #
 # Tests
 #
 
-# Verify job_set_timeout(): accepts and decimal-normalizes valid values,
-#   rejects invalid values and invalid job IDs without setting anything.
+# Verify job_set_timeout(): accepts valid values and rejects invalid values
+#   and job IDs (API return values and error messages); behaviorally, the
+#   last value set for a job wins, and a leading-zero value is treated as
+#   decimal (a regression there would abort the scheduler with an arithmetic
+#   error at deadline registration).
 test_timeout_01() {
 	timeout_01_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
 	local \
 		TEST_ID=timeout_01 \
-		tc rv stored bad \
+		val rv rv_lsw rv_oct \
 		pass_cnt=0 \
 		total_cnt=0 \
 		msg_cnt=0 \
@@ -29,261 +33,278 @@ test_timeout_01() {
 	local MSG_FILE="/tmp/sched.jobtimeout.msg.${TEST_ID:?}.$$"
 	rm -f "${MSG_FILE}"
 
-	print_test_header "${TEST_ID:?}" "job_set_timeout(): validation and normalization" "(direct calls, no scheduler run)"
+	print_test_header "${TEST_ID:?}" "job_set_timeout(): validation and behavioral effect" "hang_t01lsw / hang_t01oct"
 
-	# Valid values: rv 0, normalized decimal stored (t01_a set twice: override)
-	for tc in "t01_a 5 5" "t01_b 010 10" "t01_a 7 7" "t01_c 0900 900"; do
-		# shellcheck disable=SC2086
-		set -- ${tc}
+	# Valid values (incl. leading zeros and re-setting): rv 0, no message
+	for val in 5 010 0900 1; do
 		total_cnt=$((total_cnt + 1))
-		SCHED_FAIL_MSG_CB=timeout_01_fail_msg job_set_timeout "${1}" "${2}"
+		SCHED_FAIL_MSG_CB=timeout_01_fail_msg job_set_timeout t01_ok "${val}"
 		rv=$?
-		eval "stored=\"\${SCH_TIMEOUT_JOB_${1}}\""
-		if [ "${rv}" = 0 ] && [ "${stored}" = "${3}" ]; then
+		if [ "${rv}" = 0 ]; then
 			pass_cnt=$((pass_cnt + 1))
 		else
-			printf "Unexpected result for id '%s' value '%s': rv=%s, stored='%s' (expected rv=0, stored='%s')\n" \
-				"${1}" "${2}" "${rv}" "${stored}" "${3}" >&2
+			printf "Unexpectedly rejected value '%s' (rv=%s)\n" "${val}" "${rv}" >&2
 		fi
 	done
 
-	# Invalid values: rv 1, one message each, nothing stored
+	# Invalid values: rv 1, one message each
 	# (stderr silenced: the out-of-range input makes the test builtin
 	#  print a diagnostic on some shells)
-	for bad in '' 0 00 abc -1 1.5 +1 99999999999999999999; do
+	for val in '' 0 00 abc -1 1.5 +1 99999999999999999999; do
 		total_cnt=$((total_cnt + 1))
-		SCHED_FAIL_MSG_CB=timeout_01_fail_msg job_set_timeout t01_d "${bad}" 2>/dev/null
+		SCHED_FAIL_MSG_CB=timeout_01_fail_msg job_set_timeout t01_bad "${val}" 2>/dev/null
 		rv=$?
 		if [ "${rv}" = 1 ]; then
 			pass_cnt=$((pass_cnt + 1))
 		else
-			printf "Unexpectedly accepted timeout value '%s' (rv=%s)\n" "${bad}" "${rv}" >&2
+			printf "Unexpectedly accepted timeout value '%s' (rv=%s)\n" "${val}" "${rv}" >&2
 		fi
 	done
 
-	total_cnt=$((total_cnt + 1))
-	if [ -z "${SCH_TIMEOUT_JOB_t01_d+x}" ]; then
-		pass_cnt=$((pass_cnt + 1))
-	else
-		printf "SCH_TIMEOUT_JOB_t01_d unexpectedly set to '%s'\n" "${SCH_TIMEOUT_JOB_t01_d}" >&2
-	fi
-
 	# Invalid job IDs: rv 1, one message each
-	for bad in 'bad-id' ''; do
+	for val in 'bad-id' ''; do
 		total_cnt=$((total_cnt + 1))
-		SCHED_FAIL_MSG_CB=timeout_01_fail_msg job_set_timeout "${bad}" 5
+		SCHED_FAIL_MSG_CB=timeout_01_fail_msg job_set_timeout "${val}" 5
 		rv=$?
 		if [ "${rv}" = 1 ]; then
 			pass_cnt=$((pass_cnt + 1))
 		else
-			printf "Unexpectedly accepted job ID '%s' (rv=%s)\n" "${bad}" "${rv}" >&2
+			printf "Unexpectedly accepted job ID '%s' (rv=%s)\n" "${val}" "${rv}" >&2
 		fi
 	done
 
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
 	rm -f "${MSG_FILE}"
 
-	if [ "${pass_cnt}" = "${total_cnt}" ] && [ "${msg_cnt}" = "${expected_msg_cnt}" ]
+	# Behavior: the last value set wins - with the 1s override in effect the
+	# hung job expires before the 3s idle timeout (rv 0); a stale first
+	# value (5s) would instead end the run with rv 81
+	job_set_timeout hang_t01lsw 5 &&
+	job_set_timeout hang_t01lsw 1 || { FAIL "job_set_timeout failed"; return 1; }
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=3 \
+		schedule_jobs 'hang_t01lsw' &
+
+	wait "$!"
+	rv_lsw=$?
+
+	# Behavior: a leading-zero value must be handled as decimal - stored
+	# verbatim, '09' would abort the scheduler at deadline registration
+	# (invalid octal in arithmetic) instead of reaching the global timeout
+	job_set_timeout hang_t01oct 09 || { FAIL "job_set_timeout failed"; return 1; }
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=2 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+		schedule_jobs 'hang_t01oct' &
+
+	wait "$!"
+	rv_oct=$?
+
+	if [ "${pass_cnt}" = "${total_cnt}" ] && [ "${msg_cnt}" = "${expected_msg_cnt}" ] &&
+		[ "${rv_lsw}" = 0 ] && [ "${rv_oct}" = 82 ]
 	then
-		PASS "${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
+		PASS "${pass_cnt}/${total_cnt}, messages=${msg_cnt}, rv_lsw=${rv_lsw}, rv_oct=${rv_oct}"
 		return 0
 	else
-		FAIL "${pass_cnt}/${total_cnt}, messages=${msg_cnt} (expected ${expected_msg_cnt})"
+		FAIL "${pass_cnt}/${total_cnt}, messages=${msg_cnt} (expected ${expected_msg_cnt}), rv_lsw=${rv_lsw} (expected 0), rv_oct=${rv_oct} (expected 82)"
 		return 1
 	fi
 }
 
-# Verify sch_sweep_deadlines() list bookkeeping: sweeps with nothing expired
-#   are no-ops (in particular, repeated sweeps must not duplicate pending
-#   entries - regression test for a real bug), and a mixed list splits
-#   cleanly with order preserved on both sides. Direct calls, no scheduler run.
+# Verify deadline-list integrity across completion wakes (regression test for
+#   a real bug where each wake duplicated pending deadline entries): instant
+#   jobs complete while two staggered deadlines (1s/3s) are pending; each
+#   hung job must time out exactly once, with no duplicate pids reported.
 test_timeout_02() {
 	timeout_02_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
-
-	# 1: description  2: expected  3: actual
-	timeout_02_check() {
-		total_cnt=$((total_cnt + 1))
-		if [ "${3}" = "${2}" ]; then
-			pass_cnt=$((pass_cnt + 1))
-		else
-			printf "%s: got '%s', expected '%s'\n" "${1}" "${3}" "${2}" >&2
-		fi
+	timeout_02_finalize() {
+		finalize_handler "$1" "$2"
+		printf '%s\n' "pids=$2" "fail=$4" "unfin=$5" > "${FIN_FILE:?}"
 	}
 
 	local \
 		TEST_ID=timeout_02 \
-		now e_a e_b e_gone e_xy \
-		pass_cnt=0 \
-		total_cnt=0 \
-		SCH_RUNNING_PIDS SCH_RUNNING_JOBS_CNT \
-		SCH_DEADLINES SCH_EXPIRED SCH_FAIL_IDS
+		sched_rv pid_a pid_b \
+		checks_ok=1 \
+		jobs='hang_t02a hang_t02b instant_t02a instant_t02b instant_t02c'
 
-	local DONE_FILE="/tmp/sched.t02.done.$$"
-	rm -f "${DONE_FILE}"
+	local \
+		DONE_FILE="/tmp/sched.t02.done.$$" \
+		FIN_FILE="/tmp/sched.t02.fin.$$"
+	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	print_test_header "${TEST_ID:?}" "sch_sweep_deadlines(): no-op and split bookkeeping" "(direct calls, no scheduler run)"
+	print_test_header "${TEST_ID:?}" "Pending deadlines survive completion wakes; each job times out exactly once" "${jobs}"
 
-	sch_get_uptime_cs now || { FAIL "sch_get_uptime_cs failed"; return 1; }
+	job_set_timeout hang_t02a 1 &&
+	job_set_timeout hang_t02b 3 || { FAIL "job_set_timeout failed"; return 1; }
 
-	# Pending deadlines are 600+ s in the future; expired ones are <= now
-	# (the sweep re-reads the clock, which can only move forward)
-	e_a="11:$((now + 60000)):t02_a"
-	e_b="22:$((now + 70000)):t02:b:c"
-	e_gone="44:$((now - 100)):t02_gone"
-	e_xy="55:${now}:t02:x:y"
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=timeout_02_finalize \
+	JOB_DONE_CB=timeout_02_done \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=5 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${jobs}" &
 
-	# Pending-only list: two consecutive sweeps must change nothing
-	SCH_DEADLINES="${e_a} ${e_b}"
-	SCH_EXPIRED='' SCH_FAIL_IDS=''
-	SCH_RUNNING_PIDS="11 22" SCH_RUNNING_JOBS_CNT=2
+	wait "$!"
+	sched_rv=$?
 
-	sch_sweep_deadlines timeout_02_done
-	timeout_02_check "deadlines after 1st no-op sweep" "${e_a} ${e_b}" "${SCH_DEADLINES}"
-	sch_sweep_deadlines timeout_02_done
-	timeout_02_check "deadlines after 2nd no-op sweep" "${e_a} ${e_b}" "${SCH_DEADLINES}"
-	timeout_02_check "count untouched" 2 "${SCH_RUNNING_JOBS_CNT}"
-	timeout_02_check "pids untouched" "11 22" "${SCH_RUNNING_PIDS}"
-	timeout_02_check "expired list untouched" "" "${SCH_EXPIRED}"
-	timeout_02_check "fail ids untouched" "" "${SCH_FAIL_IDS}"
-	timeout_02_check "no callbacks invoked" "" "$(cat "${DONE_FILE}" 2>/dev/null)"
+	# Exactly one timeout record per hung job (a multi-line result here
+	# means duplicates and fails the uint check)
+	pid_a="$(sed -n 's/^3|hang_t02a|124|\([0-9][0-9]*\)$/\1/p' "${DONE_FILE}" 2>/dev/null)"
+	pid_b="$(sed -n 's/^3|hang_t02b|124|\([0-9][0-9]*\)$/\1/p' "${DONE_FILE}" 2>/dev/null)"
 
-	# Mixed list: expired entries (deadline <= now) leave, pending survive
-	# exactly once, order preserved on both sides
-	SCH_DEADLINES="${e_gone} ${e_a} ${e_xy} ${e_b}"
-	SCH_EXPIRED='' SCH_FAIL_IDS=''
-	SCH_RUNNING_PIDS="44 11 55 22" SCH_RUNNING_JOBS_CNT=4
+	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
+	is_uint "${pid_a}" && is_uint "${pid_b}" ||
+		{ checks_ok=; echo "expected exactly one timeout record per hung job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	[ "$(wc -l < "${DONE_FILE}" 2>/dev/null)" -eq 5 ] 2>/dev/null ||
+		{ checks_ok=; echo "expected exactly 5 callback records: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	grep -q '^fail=hang_t02a hang_t02b$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^unfin=$' "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
+	grep -q "^pids=${pid_a} ${pid_b}$" "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "abandoned pids mismatch or duplicated" >&2; }
 
-	sch_sweep_deadlines timeout_02_done
-	timeout_02_check "pending survive once, in order" "${e_a} ${e_b}" "${SCH_DEADLINES}"
-	timeout_02_check "count decremented by expired count" 2 "${SCH_RUNNING_JOBS_CNT}"
-	timeout_02_check "expired pids removed" "11 22" "${SCH_RUNNING_PIDS}"
-	timeout_02_check "expired entries recorded in order" "${e_gone} ${e_xy}" "${SCH_EXPIRED}"
-	timeout_02_check "fail ids in order" "t02_gone t02:x:y" "${SCH_FAIL_IDS}"
-	timeout_02_check "callback records (id, 124, pid)" "3|t02_gone|124|44
-3|t02:x:y|124|55" "$(cat "${DONE_FILE}" 2>/dev/null)"
+	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	rm -f "${DONE_FILE}"
-
-	if [ "${pass_cnt}" = "${total_cnt}" ]
-	then
-		PASS "${pass_cnt}/${total_cnt}"
+	if [ -n "${checks_ok}" ]; then
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		FAIL "${pass_cnt}/${total_cnt}"
+		FAIL "sched_rv=${sched_rv}"
 		return 1
 	fi
 }
 
-# Verify sch_sweep_deadlines() expiry effects: exact multi-expiry accounting
-#   (counter, pid removal), callback arguments (id, 124, pid), and
-#   accumulation onto pre-existing SCH_EXPIRED/SCH_FAIL_IDS state.
-#   Direct calls, no scheduler run.
+# Verify simultaneous multi-expiry through the public interface: three hung
+#   jobs sharing a 1s default budget - with IDs containing ':' and glob
+#   characters - are all classified as timed out: one (id, 124, pid) callback
+#   each, exact fail set, all abandoned pids reported, scheduler exits 0.
 test_timeout_03() {
 	timeout_03_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
-
-	# 1: description  2: expected  3: actual
-	timeout_03_check() {
-		total_cnt=$((total_cnt + 1))
-		if [ "${3}" = "${2}" ]; then
-			pass_cnt=$((pass_cnt + 1))
-		else
-			printf "%s: got '%s', expected '%s'\n" "${1}" "${3}" "${2}" >&2
-		fi
+	timeout_03_finalize() {
+		finalize_handler "$1" "$2"
+		printf '%s\n' "pids=$2" "fail=$4" "unfin=$5" > "${FIN_FILE:?}"
 	}
 
 	local \
 		TEST_ID=timeout_03 \
-		now e_p e_qr e_glob \
-		pass_cnt=0 \
-		total_cnt=0 \
-		SCH_RUNNING_PIDS SCH_RUNNING_JOBS_CNT \
-		SCH_DEADLINES SCH_EXPIRED SCH_FAIL_IDS
+		sched_rv pid_cnt \
+		checks_ok=1 \
+		jobs='hang_t03a hang_t03:q:r hang_t03*g'
 
-	local DONE_FILE="/tmp/sched.t03.done.$$"
-	rm -f "${DONE_FILE}"
+	local \
+		DONE_FILE="/tmp/sched.t03.done.$$" \
+		FIN_FILE="/tmp/sched.t03.fin.$$"
+	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	print_test_header "${TEST_ID:?}" "sch_sweep_deadlines(): multi-expiry accounting and callbacks" "(direct calls, no scheduler run)"
+	print_test_header "${TEST_ID:?}" "Simultaneous expiries with adversarial job IDs (SCHED_JOB_TIMEOUT_S)" "${jobs}"
 
-	sch_get_uptime_cs now || { FAIL "sch_get_uptime_cs failed"; return 1; }
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=timeout_03_finalize \
+	JOB_DONE_CB=timeout_03_done \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=3 \
+	SCHED_TIMEOUT_S=6 \
+	SCHED_IDLE_TIMEOUT_S=4 \
+	SCHED_JOB_TIMEOUT_S=1 \
+		schedule_jobs "${jobs}" &
 
-	e_p="77:$((now - 300)):t03_p"
-	e_qr="88:$((now - 200)):t03:q:r"
-	e_glob="99:$((now - 100)):*"
+	wait "$!"
+	sched_rv=$?
 
-	SCH_DEADLINES="${e_p} ${e_qr} ${e_glob}"
-	SCH_EXPIRED="9:1:t03_old"
-	SCH_FAIL_IDS="t03_old"
-	SCH_RUNNING_PIDS="500 77 88 99" SCH_RUNNING_JOBS_CNT=4
+	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
+	[ "$(grep -c -F '|124|' "${DONE_FILE}" 2>/dev/null)" = 3 ] &&
+	grep -q -F '3|hang_t03a|124|' "${DONE_FILE}" 2>/dev/null &&
+	grep -q -F '3|hang_t03:q:r|124|' "${DONE_FILE}" 2>/dev/null &&
+	grep -q -F '3|hang_t03*g|124|' "${DONE_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "expected one timeout record per job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	grep -qxF 'fail=hang_t03a hang_t03:q:r hang_t03*g' "${FIN_FILE}" 2>/dev/null &&
+	grep -qxF 'unfin=' "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
+	pid_cnt="$(sed -n 's/^pids=//p' "${FIN_FILE}" 2>/dev/null | wc -w)"
+	[ "${pid_cnt}" = 3 ] ||
+		{ checks_ok=; echo "expected 3 abandoned pids, got '${pid_cnt}'" >&2; }
 
-	sch_sweep_deadlines timeout_03_done
+	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	timeout_03_check "all deadlines consumed" "" "${SCH_DEADLINES}"
-	timeout_03_check "count decremented by 3" 1 "${SCH_RUNNING_JOBS_CNT}"
-	timeout_03_check "unrelated pid kept" 500 "${SCH_RUNNING_PIDS}"
-	timeout_03_check "expired accumulates onto existing state" \
-		"9:1:t03_old ${e_p} ${e_qr} ${e_glob}" "${SCH_EXPIRED}"
-	timeout_03_check "fail ids accumulate in order" "t03_old t03_p t03:q:r *" "${SCH_FAIL_IDS}"
-	timeout_03_check "callback records (id, 124, pid)" "3|t03_p|124|77
-3|t03:q:r|124|88
-3|*|124|99" "$(cat "${DONE_FILE}" 2>/dev/null)"
-
-	rm -f "${DONE_FILE}"
-
-	if [ "${pass_cnt}" = "${total_cnt}" ]
-	then
-		PASS "${pass_cnt}/${total_cnt}"
+	if [ -n "${checks_ok}" ]; then
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		FAIL "${pass_cnt}/${total_cnt}"
+		FAIL "sched_rv=${sched_rv}"
 		return 1
 	fi
 }
 
-# Verify sch_deadline_rm_pid(): exact pid match only, order preserved,
-#   absent pid reported via return code.
+# Verify a completed job's pending deadline is retired with it: ok1 (1s run,
+#   2s budget) completes and must never be reported as timed out, while a
+#   second hung job (3s budget) keeps the scheduler alive past the retired
+#   deadline and then drains normally.
 test_timeout_04() {
-	# 1: description  2: expected rv  3: expected list  4: actual rv  5: actual list
-	timeout_04_check() {
-		total_cnt=$((total_cnt + 1))
-		if [ "${4}" = "${2}" ] && [ "${5}" = "${3}" ]; then
-			pass_cnt=$((pass_cnt + 1))
-		else
-			printf "%s: got rv=%s list='%s', expected rv=%s list='%s'\n" \
-				"${1}" "${4}" "${5}" "${2}" "${3}" >&2
-		fi
+	timeout_04_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
+	timeout_04_finalize() {
+		finalize_handler "$1" "$2"
+		printf '%s\n' "ok=$3" "fail=$4" > "${FIN_FILE:?}"
 	}
 
 	local \
 		TEST_ID=timeout_04 \
-		tl_list="12:100:t04_a 123:200:t04:b 45:300:*" \
-		tl_out rv \
-		pass_cnt=0 \
-		total_cnt=0
+		sched_rv \
+		checks_ok=1 \
+		jobs='ok1_t04 hang_t04'
 
-	print_test_header "${TEST_ID:?}" "sch_deadline_rm_pid(): exact match and ordering" "(direct calls, no scheduler run)"
+	local \
+		DONE_FILE="/tmp/sched.t04.done.$$" \
+		FIN_FILE="/tmp/sched.t04.fin.$$"
+	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	# Exact pid match: pid 12 must not match entry with pid 123
-	sch_deadline_rm_pid tl_out 12 "${tl_list}"
-	timeout_04_check "remove pid 12 (not 123)" 0 "123:200:t04:b 45:300:*" "$?" "${tl_out}"
+	print_test_header "${TEST_ID:?}" "A completed job's deadline is retired (no late timeout for it)" "${jobs}"
 
-	sch_deadline_rm_pid tl_out 123 "${tl_list}"
-	timeout_04_check "remove middle pid 123" 0 "12:100:t04_a 45:300:*" "$?" "${tl_out}"
+	job_set_timeout ok1_t04 2 &&
+	job_set_timeout hang_t04 3 || { FAIL "job_set_timeout failed"; return 1; }
 
-	sch_deadline_rm_pid tl_out 45 "${tl_list}"
-	timeout_04_check "remove last pid 45" 0 "12:100:t04_a 123:200:t04:b" "$?" "${tl_out}"
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=timeout_04_finalize \
+	JOB_DONE_CB=timeout_04_done \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=6 \
+	SCHED_IDLE_TIMEOUT_S=4 \
+		schedule_jobs "${jobs}" &
 
-	sch_deadline_rm_pid tl_out 999 "${tl_list}"
-	timeout_04_check "absent pid" 1 "${tl_list}" "$?" "${tl_out}"
+	wait "$!"
+	sched_rv=$?
 
-	sch_deadline_rm_pid tl_out 12 ""
-	timeout_04_check "remove from empty list" 1 "" "$?" "${tl_out}"
+	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
+	grep -q '^2|ok1_t04|0|$' "${DONE_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "missing normal completion record for ok1_t04" >&2; }
+	[ "$(grep -c -F '|124|' "${DONE_FILE}" 2>/dev/null)" = 1 ] &&
+	grep -q '^3|hang_t04|124|' "${DONE_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "expected exactly one timeout record (hang_t04): $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	grep -q '^ok=ok1_t04$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^fail=hang_t04$' "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
 
-	if [ "${pass_cnt}" = "${total_cnt}" ]
-	then
-		PASS "${pass_cnt}/${total_cnt}"
+	rm -f "${DONE_FILE}" "${FIN_FILE}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
-		FAIL "${pass_cnt}/${total_cnt}"
+		FAIL "sched_rv=${sched_rv}"
 		return 1
 	fi
 }
