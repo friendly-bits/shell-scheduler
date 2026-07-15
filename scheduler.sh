@@ -534,22 +534,22 @@ schedule_jobs() {
 	sch_check_cb SCHED_FINALIZE_CB &&
 	sch_check_cb DO_JOB_CB required &&
 	sch_check_cb JOB_DONE_CB &&
-	sch_check_cb SCHED_DISPATCH_TICK_CB || return 1
+	sch_check_cb SCHED_DISPATCH_TICK_CB || exit 1
 
 	# Check env vars, normalize into internal copies
 	sch_normalize_uint SCH_MAX_JOBS "${SCHED_MAX_JOBS}" required &&
 	sch_normalize_uint SCH_TIMEOUT_S "${SCHED_TIMEOUT_S:-900}" &&
 	sch_normalize_uint SCH_IDLE_TIMEOUT_S "${SCHED_IDLE_TIMEOUT_S:-300}" &&
-	sch_normalize_uint SCH_JOB_TIMEOUT_S "${SCHED_JOB_TIMEOUT_S}" || return 1
+	sch_normalize_uint SCH_JOB_TIMEOUT_S "${SCHED_JOB_TIMEOUT_S}" || exit 1
 
 	# Removing trailing '/'
 	sch_dir="${sch_dir%"${sch_dir##*[!/]}"}"
 
 	[ -n "${sch_dir}" ] ||
-		{ sch_fail_msg "Invalid value '${SCHED_DIR}' of env var SCHED_DIR."; return 1; }
+		{ sch_fail_msg "Invalid value '${SCHED_DIR}' of env var SCHED_DIR."; exit 1; }
 
 	# Convert ${SCH_JOB_IDS} to space-separated list
-	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || return 1
+	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || exit 1
 
 	set -f
 	for sch_id in ${SCH_JOB_IDS}; do
@@ -557,7 +557,7 @@ schedule_jobs() {
 			{
 				[ -n "${SCH_HAD_F}" ] || set +f
 				sch_fail_msg "Duplicate Job ID '${sch_id}'."
-				return 1
+				exit 1
 			}
 		sch_append sch_seen_ids "${sch_id}"
 	done
@@ -569,7 +569,7 @@ schedule_jobs() {
 
 	sch_get_uptime_cs SCH_INIT_UPTIME_CS &&
 	sch_get_cur_pid SCH_PID ||
-		return 1
+		exit 1
 
 	SCH_LAST_PROGRESS_TIME_CS="${SCH_INIT_UPTIME_CS}"
 
