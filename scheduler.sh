@@ -242,12 +242,9 @@ sch_start_job() {
 
 process_done_record() {
 	local \
-		_sch_remain_time_cs \
-		_sch_cur_time_cs \
-		_sch_running_pids \
-		_sch_running_cnt \
 		sch_cs \
 		sch_dl_min \
+		sch_now_cs \
 		\
 		sch_done_pid \
 		sch_done_rv \
@@ -259,28 +256,19 @@ process_done_record() {
 		sch_had_f \
 		sch_e \
 		\
-		sch_rem_time_var="${1:?}" \
-		sch_pids_var="${2:?}" \
-		sch_running_cnt_var="${3:?}" \
-		sch_last_progr_time_var="${4:?}" \
-		sch_ipc_fifo="${5:?}" \
-		sch_job_done_cb="${6}"
-
-	eval \
-		"_sch_remain_time_cs=\"\${${sch_rem_time_var}}\"" \
-		"_sch_running_pids=\"\${${sch_pids_var}}\"" \
-		"_sch_running_cnt=\"\${${sch_running_cnt_var}}\""
+		sch_ipc_fifo="${1:?}" \
+		sch_job_done_cb="${2}"
 
 	[ -e "${sch_ipc_fifo}" ] ||
 		sch_finalize 1 "FIFO file '${sch_ipc_fifo}' does not exist."
 
 	sch_had_f && sch_had_f=1
 
-	sch_read_t_cs="${_sch_remain_time_cs}"
+	sch_read_t_cs="${SCH_REMAIN_TIME_CS}"
 
 	# Cap the wait by the nearest job deadline, if any (see TIMEKEEPING.md)
 	[ -n "${SCH_DEADLINES}" ] && {
-		sch_get_uptime_cs _sch_cur_time_cs || sch_finalize 1
+		sch_get_uptime_cs sch_now_cs || sch_finalize 1
 
 		set -f
 		for sch_e in ${SCH_DEADLINES}; do
@@ -291,7 +279,7 @@ process_done_record() {
 		done
 		[ -n "${sch_had_f}" ] || set +f
 
-		[ -n "${sch_dl_min}" ] && sch_dl_min=$((sch_dl_min - _sch_cur_time_cs))
+		[ -n "${sch_dl_min}" ] && sch_dl_min=$((sch_dl_min - sch_now_cs))
 
 		[ -n "${sch_dl_min}" ] && [ "${sch_dl_min}" -lt "${sch_read_t_cs}" ] &&
 			sch_read_t_cs="${sch_dl_min}"
@@ -299,89 +287,66 @@ process_done_record() {
 
 	sch_read_t_s=$(( (sch_read_t_cs + 99) / 100 ))
 
-	# Wait for the next completion record
+	# Wait for the next completion record; an empty record means read -t
+	# timed out (or was skipped): a job deadline and/or a scheduler timeout
+	# is due, both handled by the common tail below
 	[ "${sch_read_t_s}" -gt 0 ] &&
 	read -t "${sch_read_t_s}" -r sch_done_pid sch_done_rv sch_done_id < "${sch_ipc_fifo}"
 
-	# Process completion record
+	# Process the completion record, if any (arrival wins over expiry: the
+	# record is handled before deadlines are swept - see TIMEKEEPING.md)
+	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] && {
+		sch_is_uint "${sch_done_pid}" "${sch_done_rv}" &&
+		[ -n "${sch_done_id}" ] &&
+		sch_is_included "${sch_done_id}" "${SCH_JOB_IDS}" ||
+			sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}'."
 
-	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] || {
-		# Empty completion record: read -t timed out (or was skipped) with
-		# nothing to report - a job deadline and/or a scheduler timeout is due.
-		# Job deadlines are processed here; a due scheduler timeout is
-		# triggered by refresh_remain_time()
-		sch_sweep_deadlines "${sch_pids_var}" "${sch_running_cnt_var}" "${sch_job_done_cb}"
-		refresh_remain_time "${sch_rem_time_var}"
-		return 0
+		if sch_is_included "${sch_done_pid}" "${SCH_RUNNING_PIDS}"; then
+			# Normal completion
+			sch_rm_elem SCH_RUNNING_PIDS "${sch_done_pid}" "${SCH_RUNNING_PIDS}"
+			SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
+
+			# Remove the job's deadline entry, if it had one
+			[ -z "${SCH_DEADLINES}" ] ||
+				sch_deadline_rm_pid SCH_DEADLINES "${sch_done_pid}" "${SCH_DEADLINES}"
+
+			if [ "${sch_done_rv}" = 0 ]; then
+				sch_append SCH_OK_IDS "${sch_done_id}"
+			else
+				sch_append SCH_FAIL_IDS "${sch_done_id}"
+			fi || sch_finalize 1
+
+			sch_get_uptime_cs SCH_LAST_PROGRESS_TIME_CS || sch_finalize 1
+
+			[ -z "${sch_job_done_cb}" ] ||
+			"${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
+				sch_finalize ${?}
+		else
+			# Unknown pid: either a late record from a job already classified
+			# as timed out - the timeout classification stands (see
+			# TIMEKEEPING.md) - or a fatal protocol error
+			sch_rec_verdict=malformed
+			set -f
+			for sch_e in ${SCH_EXPIRED}; do
+				[ "${sch_e%%:*}" = "${sch_done_pid}" ] || continue
+				[ "${sch_e#*:*:}" = "${sch_done_id}" ] && sch_rec_verdict=discard
+				break
+			done
+			[ -n "${sch_had_f}" ] || set +f
+
+			[ "${sch_rec_verdict}" = discard ] ||
+				sch_finalize 1 "Unknown PID '${sch_done_pid}'."
+
+			sch_deadline_rm_pid SCH_EXPIRED "${sch_done_pid}" "${SCH_EXPIRED}"
+		fi
 	}
 
-	sch_is_uint "${sch_done_pid}" "${sch_done_rv}" &&
-	[ -n "${sch_done_id}" ] &&
-	sch_is_included "${sch_done_id}" "${SCH_JOB_IDS}" ||
-		sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}'."
-
-	# Decide how to treat completion record
-	#   normal    - pid belongs to a currently running job
-	#   discard   - late record from a job already processed as timed out
-	#   malformed - neither: fatal protocol error
-	sch_rec_verdict=malformed
-	if sch_is_included "${sch_done_pid}" "${_sch_running_pids}"; then
-		sch_rec_verdict=normal
-	else
-		set -f
-		for sch_e in ${SCH_EXPIRED}; do
-			[ "${sch_e%%:*}" = "${sch_done_pid}" ] || continue
-			[ "${sch_e#*:*:}" = "${sch_done_id}" ] && sch_rec_verdict=discard
-			break
-		done
-		[ -n "${sch_had_f}" ] || set +f
-	fi
-
-	case "${sch_rec_verdict}" in
-		normal) ;;
-		discard)
-			# Late record from a job already classified as timed out
-			# (see TIMEKEEPING.md): the timeout classification stands
-			sch_deadline_rm_pid SCH_EXPIRED "${sch_done_pid}" "${SCH_EXPIRED}"
-			sch_sweep_deadlines "${sch_pids_var}" "${sch_running_cnt_var}" "${sch_job_done_cb}"
-			refresh_remain_time "${sch_rem_time_var}"
-			return 0
-		;;
-		*)
-			sch_finalize 1 "Unknown PID '${sch_done_pid}'."
-	esac
-
-	# Remove done pid from list
-	sch_rm_elem _sch_running_pids "${sch_done_pid}" "${_sch_running_pids}"
-
-	# Remove the job's deadline entry, if it had one
-	[ -z "${SCH_DEADLINES}" ] ||
-		sch_deadline_rm_pid SCH_DEADLINES "${sch_done_pid}" "${SCH_DEADLINES}"
-
-	_sch_running_cnt=$((_sch_running_cnt - 1))
-	export -n \
-		"${sch_running_cnt_var}=${_sch_running_cnt}" \
-		"${sch_pids_var}=${_sch_running_pids}"
-
-	if [ "${sch_done_rv}" = 0 ]; then
-		sch_append SCH_OK_IDS "${sch_done_id}"
-	else
-		sch_append SCH_FAIL_IDS "${sch_done_id}"
-	fi || sch_finalize 1
-
-	sch_get_uptime_cs _sch_cur_time_cs || sch_finalize 1
-	export -n "${sch_last_progr_time_var}=${_sch_cur_time_cs}"
-
-	[ -z "${sch_job_done_cb}" ] ||
-	"${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
-		sch_finalize ${?}
-
-	# Record processed first, deadlines checked second (see TIMEKEEPING.md)
-	sch_sweep_deadlines "${sch_pids_var}" "${sch_running_cnt_var}" "${sch_job_done_cb}"
-
-	# Fresh time, not ${_sch_cur_time_cs}: the callbacks above may have
-	# consumed a substantial part of the remaining time
-	get_remain_time "${sch_rem_time_var}" || sch_finalize "${?}"
+	# Every wake ends the same way: sweep expired deadlines (updates
+	# SCH_RUNNING_JOBS_CNT, SCH_RUNNING_PIDS), then recompute the remaining
+	# time from a fresh clock reading (the callbacks above may have consumed
+	# a substantial part of it); a due scheduler timeout finalizes here
+	sch_sweep_deadlines "${sch_job_done_cb}"
+	refresh_remain_time SCH_REMAIN_TIME_CS
 
 	return 0
 }
@@ -462,18 +427,14 @@ sch_deadline_rm_pid() {
 # timeout: only job starts and genuine completions count as progress.
 # Abandoned jobs are recorded in ${SCH_EXPIRED} so that their completion
 # records can be recognized (and discarded) if they arrive later.
-# Reads/writes schedule_jobs() state: SCH_DEADLINES, SCH_EXPIRED, SCH_FAIL_IDS.
-# 1: running pids var name
-# 2: running count var name
-# 3: job done callback
+# Reads/writes schedule_jobs() state: SCH_DEADLINES, SCH_EXPIRED, SCH_FAIL_IDS,
+# SCH_RUNNING_PIDS, SCH_RUNNING_JOBS_CNT.
+# 1: job done callback
 sch_sweep_deadlines() {
 	[ -n "${SCH_DEADLINES}" ] || return 0
 
 	local sch_now_cs sch_expired sch_e sch_pid sch_id sch_had_f sch_cs sch_dl_prev \
-		_sch_pids _sch_cnt \
-		sch_pids_var="${1:?}" \
-		sch_cnt_var="${2:?}" \
-		sch_done_cb="${3}"
+		sch_done_cb="${1}"
 
 	sch_get_uptime_cs sch_now_cs || sch_finalize 1
 
@@ -495,9 +456,6 @@ sch_sweep_deadlines() {
 
 	[ -n "${sch_expired}" ] || return 0
 
-	eval \
-		"_sch_pids=\"\${${sch_pids_var}}\"" \
-		"_sch_cnt=\"\${${sch_cnt_var}}\""
 
 	# Chomp entries one by one (no word-splitting: job IDs may contain glob
 	# characters, and the callback below must run with unmodified glob state)
@@ -509,16 +467,12 @@ sch_sweep_deadlines() {
 		sch_pid="${sch_e%%:*}"
 		sch_id="${sch_e#*:*:}"
 
-		sch_rm_elem _sch_pids "${sch_pid}" "${_sch_pids}"
-		_sch_cnt=$((_sch_cnt - 1))
+		sch_rm_elem SCH_RUNNING_PIDS "${sch_pid}" "${SCH_RUNNING_PIDS}"
+		SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
 
 		sch_append SCH_FAIL_IDS "${sch_id}" &&
 		sch_append SCH_EXPIRED "${sch_e}" ||
 			sch_finalize 1
-
-		export -n \
-			"${sch_cnt_var}=${_sch_cnt}" \
-			"${sch_pids_var}=${_sch_pids}"
 
 		[ -z "${sch_done_cb}" ] ||
 		"${sch_done_cb}" "${sch_id}" 124 "${sch_pid}" ||
@@ -569,7 +523,7 @@ schedule_jobs() {
 	local \
 		IFS=" "$'\t'$'\n' \
 		SCH_PID \
-		sch_remain_time_cs \
+		SCH_REMAIN_TIME_CS \
 		SCH_INIT_UPTIME_CS \
 		sch_id \
 		sch_seen_ids \
@@ -577,7 +531,7 @@ schedule_jobs() {
 		sch_job_to \
 		sch_deadline_cs \
 		sch_dl_now_cs \
-		sch_running_jobs_cnt=0 \
+		SCH_RUNNING_JOBS_CNT=0 \
 		sch_ipc_fifo \
 		sch_dir="${SCHED_DIR:-/tmp}" \
 		\
@@ -596,7 +550,7 @@ schedule_jobs() {
 		\
 		SCH_JOB_IDS="${1?}"
 	
-	: "${sch_remain_time_cs}" # Silence shellcheck warning
+	: "${SCH_REMAIN_TIME_CS}" # Silence shellcheck warning
 
 	shift 1
 
@@ -664,20 +618,17 @@ schedule_jobs() {
 	set -f
 	for sch_id in ${SCH_JOB_IDS}; do
 		[ -n "${SCH_HAD_F}" ] || set +f
-		while [ "${sch_running_jobs_cnt}" -ge "${SCH_MAX_JOBS}" ] &&
+		while [ "${SCH_RUNNING_JOBS_CNT}" -ge "${SCH_MAX_JOBS}" ] &&
 			[ -e "${sch_ipc_fifo}" ]
 		do
+			# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING_PIDS}; ${SCH_REMAIN_TIME_CS}; ${SCH_LAST_PROGRESS_TIME_CS}
 			process_done_record \
-				sch_remain_time_cs \
-				SCH_RUNNING_PIDS \
-				sch_running_jobs_cnt \
-				SCH_LAST_PROGRESS_TIME_CS \
 				"${sch_ipc_fifo}" \
 				"${JOB_DONE_CB}"
 		done
-		refresh_remain_time sch_remain_time_cs
+		refresh_remain_time SCH_REMAIN_TIME_CS
 
-		sch_running_jobs_cnt=$((sch_running_jobs_cnt + 1))
+		SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT + 1))
 
 		sch_start_job "${sch_id}" "${@}" &
 		sch_pid="${!}"
@@ -711,22 +662,19 @@ schedule_jobs() {
 	[ -n "${SCH_HAD_F}" ] || set +f
 
 	# Wait for running jobs
-	while [ "${sch_running_jobs_cnt}" -gt 0 ] &&
+	while [ "${SCH_RUNNING_JOBS_CNT}" -gt 0 ] &&
 		[ -e "${sch_ipc_fifo}" ]
 	do
+		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING_PIDS}; ${SCH_REMAIN_TIME_CS}; ${SCH_LAST_PROGRESS_TIME_CS}
 		process_done_record \
-			sch_remain_time_cs \
-			SCH_RUNNING_PIDS \
-			sch_running_jobs_cnt \
-			SCH_LAST_PROGRESS_TIME_CS \
 			"${sch_ipc_fifo}" \
 			"${JOB_DONE_CB}"
 	done
 
-	[ "${sch_running_jobs_cnt}" = 0 ] ||
+	[ "${SCH_RUNNING_JOBS_CNT}" = 0 ] ||
 	{
-		refresh_remain_time sch_remain_time_cs
-		sch_finalize 1 "Not all jobs are done: sch_running_jobs_cnt=${sch_running_jobs_cnt}"
+		refresh_remain_time SCH_REMAIN_TIME_CS
+		sch_finalize 1 "Not all jobs are done: SCH_RUNNING_JOBS_CNT=${SCH_RUNNING_JOBS_CNT}"
 	}
 
 	sch_finalize 0

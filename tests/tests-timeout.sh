@@ -115,7 +115,7 @@ test_timeout_02() {
 		now e_a e_b e_gone e_xy \
 		pass_cnt=0 \
 		total_cnt=0 \
-		t02_pids t02_cnt \
+		SCH_RUNNING_PIDS SCH_RUNNING_JOBS_CNT \
 		SCH_DEADLINES SCH_EXPIRED SCH_FAIL_IDS
 
 	local DONE_FILE="/tmp/sched.t02.done.$$"
@@ -135,14 +135,14 @@ test_timeout_02() {
 	# Pending-only list: two consecutive sweeps must change nothing
 	SCH_DEADLINES="${e_a} ${e_b}"
 	SCH_EXPIRED='' SCH_FAIL_IDS=''
-	t02_pids="11 22" t02_cnt=2
+	SCH_RUNNING_PIDS="11 22" SCH_RUNNING_JOBS_CNT=2
 
-	sch_sweep_deadlines t02_pids t02_cnt timeout_02_done
+	sch_sweep_deadlines timeout_02_done
 	timeout_02_check "deadlines after 1st no-op sweep" "${e_a} ${e_b}" "${SCH_DEADLINES}"
-	sch_sweep_deadlines t02_pids t02_cnt timeout_02_done
+	sch_sweep_deadlines timeout_02_done
 	timeout_02_check "deadlines after 2nd no-op sweep" "${e_a} ${e_b}" "${SCH_DEADLINES}"
-	timeout_02_check "count untouched" 2 "${t02_cnt}"
-	timeout_02_check "pids untouched" "11 22" "${t02_pids}"
+	timeout_02_check "count untouched" 2 "${SCH_RUNNING_JOBS_CNT}"
+	timeout_02_check "pids untouched" "11 22" "${SCH_RUNNING_PIDS}"
 	timeout_02_check "expired list untouched" "" "${SCH_EXPIRED}"
 	timeout_02_check "fail ids untouched" "" "${SCH_FAIL_IDS}"
 	timeout_02_check "no callbacks invoked" "" "$(cat "${DONE_FILE}" 2>/dev/null)"
@@ -151,12 +151,12 @@ test_timeout_02() {
 	# exactly once, order preserved on both sides
 	SCH_DEADLINES="${e_gone} ${e_a} ${e_xy} ${e_b}"
 	SCH_EXPIRED='' SCH_FAIL_IDS=''
-	t02_pids="44 11 55 22" t02_cnt=4
+	SCH_RUNNING_PIDS="44 11 55 22" SCH_RUNNING_JOBS_CNT=4
 
-	sch_sweep_deadlines t02_pids t02_cnt timeout_02_done
+	sch_sweep_deadlines timeout_02_done
 	timeout_02_check "pending survive once, in order" "${e_a} ${e_b}" "${SCH_DEADLINES}"
-	timeout_02_check "count decremented by expired count" 2 "${t02_cnt}"
-	timeout_02_check "expired pids removed" "11 22" "${t02_pids}"
+	timeout_02_check "count decremented by expired count" 2 "${SCH_RUNNING_JOBS_CNT}"
+	timeout_02_check "expired pids removed" "11 22" "${SCH_RUNNING_PIDS}"
 	timeout_02_check "expired entries recorded in order" "${e_gone} ${e_xy}" "${SCH_EXPIRED}"
 	timeout_02_check "fail ids in order" "t02_gone t02:x:y" "${SCH_FAIL_IDS}"
 	timeout_02_check "callback records (id, 124, pid)" "3|t02_gone|124|44
@@ -196,7 +196,7 @@ test_timeout_03() {
 		now e_p e_qr e_glob \
 		pass_cnt=0 \
 		total_cnt=0 \
-		t03_pids t03_cnt \
+		SCH_RUNNING_PIDS SCH_RUNNING_JOBS_CNT \
 		SCH_DEADLINES SCH_EXPIRED SCH_FAIL_IDS
 
 	local DONE_FILE="/tmp/sched.t03.done.$$"
@@ -213,13 +213,13 @@ test_timeout_03() {
 	SCH_DEADLINES="${e_p} ${e_qr} ${e_glob}"
 	SCH_EXPIRED="9:1:t03_old"
 	SCH_FAIL_IDS="t03_old"
-	t03_pids="500 77 88 99" t03_cnt=4
+	SCH_RUNNING_PIDS="500 77 88 99" SCH_RUNNING_JOBS_CNT=4
 
-	sch_sweep_deadlines t03_pids t03_cnt timeout_03_done
+	sch_sweep_deadlines timeout_03_done
 
 	timeout_03_check "all deadlines consumed" "" "${SCH_DEADLINES}"
-	timeout_03_check "count decremented by 3" 1 "${t03_cnt}"
-	timeout_03_check "unrelated pid kept" 500 "${t03_pids}"
+	timeout_03_check "count decremented by 3" 1 "${SCH_RUNNING_JOBS_CNT}"
+	timeout_03_check "unrelated pid kept" 500 "${SCH_RUNNING_PIDS}"
 	timeout_03_check "expired accumulates onto existing state" \
 		"9:1:t03_old ${e_p} ${e_qr} ${e_glob}" "${SCH_EXPIRED}"
 	timeout_03_check "fail ids accumulate in order" "t03_old t03_p t03:q:r *" "${SCH_FAIL_IDS}"
