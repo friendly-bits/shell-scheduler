@@ -1,6 +1,6 @@
-# shell-scheduler — Reference
+# shell-scheduler - Reference
 
-Complete technical reference for the `shell-scheduler` library. If you're just getting started, read the [README](README.md) first — it covers the common case in a few minutes. This document covers everything else.
+Complete technical reference for the `shell-scheduler` library. If you're just getting started, read the [README](README.md) first - it covers the common case in a few minutes. This document covers everything else.
 
 ## Contents
 
@@ -52,7 +52,7 @@ If configuration validation fails, callback execution fails, a timeout is reache
 
 ## Callbacks
 
-All callbacks are specified by assigning the callback name to the corresponding environment variable before calling `schedule_jobs()`. Callback values must be command names only — arguments are not allowed. A callback will normally be the name of a shell function implemented by your script (alternatively, for a very simple callback which only needs to call a binary without any arguments, you can assign the binary path to the callback variable). The section [Job parameters](#job-parameters) explains how to pass parameters to each individual job.
+All callbacks are specified by assigning the callback name to the corresponding environment variable before calling `schedule_jobs()`. Callback values must be command names only - arguments are not allowed. A callback will normally be the name of a shell function implemented by your script (alternatively, for a very simple callback which only needs to call a binary without any arguments, you can assign the binary path to the callback variable). The section [Job parameters](#job-parameters) explains how to pass parameters to each individual job.
 
 > **Note**: All callbacks, except the **job execution callback**, are invoked synchronously (in the foreground, from the scheduler's perspective). Synchronous callbacks block scheduler execution, bookkeeping and time-keeping. Previously started jobs do continue to run, but the scheduler will not launch new jobs or register job completions until the callback returns control to the scheduler. For this reason, avoid including commands which may stall for a prolonged time in such callbacks.
 
@@ -80,7 +80,7 @@ If this callback returns a non-zero code, the scheduler terminates immediately w
 
 It can be used to e.g. collect job results or handle failures.
 
-When [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) are in use, a timed-out job is reported with job return code `124` and the job's PID as an extra third argument — the presence of that argument is what distinguishes a scheduler-synthesized timeout from a job that genuinely exited with code `124`.
+When [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) are in use, a timed-out job is reported with job return code `124` and the job's PID as an extra third argument - the presence of that argument is what distinguishes a scheduler-synthesized timeout from a job that genuinely exited with code `124`.
 
 ### Scheduler termination callback (optional)
 
@@ -91,7 +91,7 @@ Under normal operation, all jobs have already finished when this callback is inv
 Defined by the value of **`${SCHED_FINALIZE_CB}`**. Invoked this way immediately before the scheduler exits:
 
 ```sh
-${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <unfinished_job_ids> <undispatched_job_ids>
+${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <unfinished_job_ids> <undispatched_job_ids> <expired_job_ids>
 ```
 
 - `<running_pids>`: PIDs corresponding to jobs that the scheduler started but did not receive completion records for. Under normal operation this is an empty string.
@@ -99,12 +99,23 @@ ${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_j
 - `<fail_job_ids>`: job IDs whose **job execution callback** returned a non-zero code.
 - `<unfinished_job_ids>`: job IDs that were dispatched (i.e. a process was started for them) but for which no completion record was received before the scheduler exited. Under normal operation this is an empty string; it becomes non-empty when the scheduler exits before all dispatched jobs report back, e.g. due to a timeout, a signal, a fatal error, or a non-zero return code from `JOB_DONE_CB`.
 - `<undispatched_job_ids>`: job IDs that were never started at all. Under normal operation this is an empty string; it becomes non-empty when the scheduler exits before it has dispatched every job ID from the original list.
+- `<expired_job_ids>`: job IDs abandoned via a [per-job timeout](TIMEKEEPING.md#per-job-timeouts). Empty unless per-job timeouts are in use. Unlike a failed job, an expired job's process may still be running at this point - and unless your code kills it, may even complete later. The PIDs of expired jobs which the scheduler never got a completion record from (including after expiration time) will be included in the list of `<running_pids>`.
 
 (all above lists are space-separated)
 
-**Note**: every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of `<ok_job_ids>`, `<fail_job_ids>`, `<unfinished_job_ids>`, `<undispatched_job_ids>`. This makes them a convenient basis for final bookkeeping, logging, or cleanup in the **scheduler termination callback**, without having to separately track job status yourself.
-
 If this callback returns a non-zero code while `<scheduler_return_code>` is `0`, the scheduler exits with the callback's return code instead. Otherwise, the scheduler's return code is unchanged.
+
+**Note**: every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of `<ok_job_ids>`, `<fail_job_ids>`, `<unfinished_job_ids>`, `<undispatched_job_ids>`, `<expired_job_ids>`. This makes them a convenient basis for final bookkeeping, logging, or cleanup in the **scheduler termination callback**, without having to separately track job status yourself.
+**Note**: If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" job IDs, e.g.:
+<details>
+<summary><strong>Example: concatenate unsuccessful job IDs</strong></summary>
+```
+all_failed_ids=
+for fail_list in "${fail_job_ids}" "${unfinished_job_ids}" "${undispatched_job_ids}" "${expired_job_ids}"; do
+    [ -n "${fail_list}" ] && all_failed_lists="${all_failed_lists}${all_failed_lists: }${fail_list}"
+done
+```
+</details>
 
 <details>
 <summary><strong>Example: inspecting final job status</strong></summary>
@@ -123,19 +134,20 @@ do_job() {
 	return 0
 }
 
-finalize_report() {
+report_results() {
 	local rv="${1}" running_pids="${2}" ok_ids="${3}" fail_ids="${4}" \
-		unfinished_ids="${5}" undispatched_ids="${6}"
+		unfinished_ids="${5}" undispatched_ids="${6}" expired_ids="${7}"
 
 	echo "Scheduler exited with code ${rv}"
 	echo "Succeeded:    ${ok_ids:-<none>}"
 	echo "Failed:       ${fail_ids:-<none>}"
 	echo "Unfinished:   ${unfinished_ids:-<none>}"
 	echo "Undispatched: ${undispatched_ids:-<none>}"
+	echo "Timed out:    ${expired_ids:-<none>}"
 }
 
 DO_JOB_CB=do_job
-SCHED_FINALIZE_CB=finalize_report
+SCHED_FINALIZE_CB=report_results
 SCHED_MAX_JOBS=3
 
 schedule_jobs "A B C D E" &
@@ -150,9 +162,10 @@ Succeeded:    A B D E
 Failed:       C
 Unfinished:   <none>
 Undispatched: <none>
+Timed out:    <none>
 ```
 
-Since all five jobs run to completion in this example, `<unfinished_job_ids>` and `<undispatched_job_ids>` are both empty — see the [Timeouts](#timeouts) and [Signal handling](#signal-handling) sections below for cases where they are populated.
+Since all five jobs run to completion in this example, `<unfinished_job_ids>`, `<undispatched_job_ids>` and `<expired_job_ids>` are all empty - see the [Timeouts](#timeouts) and [Signal handling](#signal-handling) sections below for cases where the first two are populated, and [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) for the third.
 
 </details>
 
@@ -182,7 +195,10 @@ To retrieve values of previously set params, use the helper `job_get_params()`:
 job_get_params <job_ID> <param_name_1> <param_name_2> ...
 ```
 
-`job_get_params` will assign the value for each specified parameter to a same-named variable, e.g.:
+`job_get_params` will assign the value for each specified parameter to a same-named variable.
+
+<details>
+<summary><strong>job_get_params example</strong></summary>
 
 ```sh
 local filename
@@ -190,6 +206,7 @@ local url
 job_get_params "job_1" filename url
 echo "filename is '${filename}', url is '${url}'"
 ```
+</details>
 
 This works in every callback and in your application script.
 
@@ -229,7 +246,8 @@ job_get_params -export "job1" filename url
 
 If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job, including if the job is implemented as an external command (rather than as a shell function). Note that in that case, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
 
-Example with `SCHED_AUTO_PARAMS=1`:
+<details>
+<summary><strong>Example with `SCHED_AUTO_PARAMS=1`</strong></summary>
 
 ```sh
 . ./scheduler.sh
@@ -249,7 +267,10 @@ SCHED_AUTO_PARAMS=1 \
 wait ${!}
 ```
 
-Example with `SCHED_AUTO_PARAMS` unset:
+</details>
+
+<details>
+<summary><strong>Example with `SCHED_AUTO_PARAMS` unset</strong></summary>
 
 ```sh
 . ./scheduler.sh
@@ -271,7 +292,10 @@ SCHED_MAX_JOBS=3 \
 wait ${!}
 ```
 
-Output in both cases:
+</details>
+
+<details>
+<summary><strong>Output in both cases</strong></summary>
 
 ```text
 For job A, file is 'foo.bz2'.
@@ -279,13 +303,15 @@ For job B, file is 'bar.gz'.
 For job C, file is ''.
 ```
 
+</details>
+
 <details>
 <summary><strong>Notes: naming rules, validation, and security</strong></summary>
 
 - When `SCHED_AUTO_PARAMS` is set to `1`, parameters are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
 - Assigning and fetching parameters is internally implemented via indirection. In order to keep the implementation compatible with BusyBox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_params()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
 - Setting job-specific parameters via `job_set_params()` requires the **job ID** and each **param name** to contain only the following characters: `a-z`, `A-Z`, `0-9`, `_`. Param names, unlike variable names, **may** start with a digit and **may** coincide with otherwise-reserved names. `job_set_params()` treats param name as a **key** and the actual value is assigned to a variable with a different name. Retrieving a parameter, on the other hand, assigns it to a shell **variable**, so the *destination variable name* used with `job_get_params()` (either the same-named plain form, or `<var_name>` in the `<var_name>=<param_name>` form) must be a valid, non-reserved shell variable name: it must contain only `a-z`, `A-Z`, `0-9`, `_`, must not start with a digit (for compliance with the POSIX specification of valid variable names), must not start with `SCHED_`, `SCH_`, `sch_`, `_sch_`, and must not be a callback variable (`DO_JOB_CB`, `JOB_DONE_CB`) or the `IFS` variable. These prefixes and names are reserved for internal use. When any of these requirements is not met, the corresponding helper prints an error, returns code 1, and does not set the parameter or variable.
-- With `SCHED_AUTO_PARAMS=1`, every registered parameter of a job is exported into a same-named variable before that job runs. All of that job's param names must therefore be valid, **non-reserved** shell variable names per the rules above (in particular, they must not start with a digit and must not use the reserved prefixes or names). If any registered parameter of a job violates these rules, that job fails during initialization: an error is reported, the **job execution callback** is never invoked, and the job completes with job return code `1` — the scheduler itself keeps running and handles the failure through the normal completion path, including invoking the **job completion callback** (`JOB_DONE_CB`) if defined. A parameter whose name is not a valid variable name can still be registered and retrieved explicitly via the `<var_name>=<param_name>` form of `job_get_params()`, but it can not be delivered through `SCHED_AUTO_PARAMS`.
+- With `SCHED_AUTO_PARAMS=1`, every registered parameter of a job is exported into a same-named variable before that job runs. All of that job's param names must therefore be valid, **non-reserved** shell variable names per the rules above (in particular, they must not start with a digit and must not use the reserved prefixes or names). If any registered parameter of a job violates these rules, that job fails during initialization: an error is reported, the **job execution callback** is never invoked, and the job completes with job return code `1` - the scheduler itself keeps running and handles the failure through the normal completion path, including invoking the **job completion callback** (`JOB_DONE_CB`) if defined. A parameter whose name is not a valid variable name can still be registered and retrieved explicitly via the `<var_name>=<param_name>` form of `job_get_params()`, but it can not be delivered through `SCHED_AUTO_PARAMS`.
 
 </details>
 
@@ -346,7 +372,7 @@ The scheduler installs handlers for signals `USR1`, `INT`, `TERM`. When any of t
 
 ## Termination of running jobs
 
-The scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received. If your application needs to stop unfinished jobs, implement this in the **scheduler termination callback** using the list of unfinished job PIDs (`<running_pids>`) passed to it. The corresponding job IDs are also available, as `<unfinished_job_ids>`, if your cleanup or logging is keyed by job ID rather than by PID.
+The scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received. If your application needs to stop unfinished jobs, implement this in the **scheduler termination callback** using the list of unfinished job PIDs (`<running_pids>`) passed to it. The corresponding job IDs are also available - in `<unfinished_job_ids>` and, for jobs abandoned via [per-job timeout](TIMEKEEPING.md#per-job-timeouts), in `<expired_job_ids>` - if your cleanup or logging is keyed by job ID rather than by PID.
 
 ## Real-world example
 
@@ -388,7 +414,7 @@ SCHED_AUTO_PARAMS=1 \
 
 ### 2. Signal forwarding
 
-Because the scheduler is designed to run asynchronously (in the background), terminating the application script with a signal does not automatically terminate the scheduler or its jobs, so if such termination happens, job subshells — as well as any commands started by those subshells — may continue execution.
+Because the scheduler is designed to run asynchronously (in the background), terminating the application script with a signal does not automatically terminate the scheduler or its jobs, so if such termination happens, job subshells - as well as any commands started by those subshells - may continue execution.
 
 To handle this reliably, the example script traps signals `INT` and `TERM` and translates these signals into `USR1` sent to the scheduler's PID. This ensures the scheduler's native cleanup path is triggered and the **scheduler termination callback** (`SCHED_FINALIZE_CB`) is invoked and gets the chance to perform application-specific cleanup and/or to kill orphaned child processes, regardless of whether the interruption came from `Ctrl-C` or a direct `kill` command. The scheduler behaves identically when receiving signals `USR1`, `INT`, or `TERM`, except it exits with code `83` for `USR1` and with code `84` for `INT` or `TERM`.
 
@@ -420,6 +446,6 @@ kill -TERM ${child_pids} ${running_pids} 2>/dev/null
 
 ### 4. Tracking state across callbacks
 
-This example implements a rudimentary application-specific bookkeeping (incrementing `SUCCESS_CNT` for each successful job) and combines that with scheduler-backed bookkeeping (fetching and reporting the list of jobs by status, i.e. `ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`).
+This example implements a rudimentary application-specific bookkeeping (incrementing `SUCCESS_CNT` for each successful job) and combines that with scheduler-backed bookkeeping (fetching and reporting the list of jobs by status, i.e. `ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`, `expired_ids`).
 
-Because, from the application point of view, `schedule_jobs` runs in a background child process, any callbacks invoked by the scheduler are isolated from the application process. Hence variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks will not be visible in the scope of the application script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. Rudimentary in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`), while final processing of the collected information is in the **scheduler termination callback** (`SCHED_FINALIZE_CB`) and utilizes both information collected by the application (`SUCCESS_CNT`) and information collected by the scheduler (`ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`).
+Because, from the application point of view, `schedule_jobs` runs in a background child process, any callbacks invoked by the scheduler are isolated from the application process. Hence variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks will not be visible in the scope of the application script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. Rudimentary in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`), while final processing of the collected information is in the **scheduler termination callback** (`SCHED_FINALIZE_CB`) and utilizes both information collected by the application (`SUCCESS_CNT`) and information collected by the scheduler (`ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`, `expired_ids`).

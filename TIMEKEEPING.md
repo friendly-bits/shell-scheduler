@@ -39,7 +39,7 @@ Both timeout values are validated as non-zero unsigned decimal integers; leading
 
 ### Motivation
 
-Without per-job timeouts, a single hung job is invisible for as long as other jobs keep completing: activity keeps resetting the idle timeout, so the hung job survives until the global timeout — which then aborts the entire run, sacrificing all pending work. Meanwhile the hung job permanently occupies one of the `${SCHED_MAX_JOBS}` concurrency slots. Per-job timeouts convert "one bad job kills the batch" into "one bad job fails, the batch completes", and reclaim the occupied slot.
+Without per-job timeouts, a single hung job is invisible for as long as other jobs keep completing: activity keeps resetting the idle timeout, so the hung job survives until the global timeout — which then aborts the entire run, sacrificing all pending work. Meanwhile the hung job permanently occupies one of the `${SCHED_MAX_JOBS}` concurrency slots. Per-job timeouts convert "one bad job kills the batch" into "one bad job times out, the batch completes", and reclaim the occupied slot.
 
 ### Configuration
 
@@ -60,7 +60,7 @@ Value must be non-zero unsigned decimal integer. A per-job timeout may exceed `$
 ### Semantics
 
 1. **Deadline definition.** A job's deadline is its dispatch time plus its timeout. Per the [enforcement granularity rules](#how-the-scheduler-measures-time), expiry is never declared early and may be declared up to about one second late — later still if a synchronous callback blocks the scheduler at that moment.
-2. **Expiry means abandon, not kill.** The scheduler stops waiting for the job, frees its concurrency slot, classifies it as failed and calls the **job completion callback** (`JOB_DONE_CB`) — but does **not** signal the job's process, consistent with the [termination policy](REFERENCE.md#termination-of-running-jobs). The process may continue running; terminating it (and any children it spawned, e.g. via `pgrep -P`) is the application's responsibility.
+2. **Expiry means abandon, not kill.** The scheduler stops waiting for the job, frees its concurrency slot, classifies it as timed out and calls the **job completion callback** (`JOB_DONE_CB`) — but does **not** signal the job's process, consistent with the [termination policy](REFERENCE.md#termination-of-running-jobs). The process may continue running; terminating it (and any children it spawned, e.g. via `pgrep -P`) is the application's responsibility.
 3. **Notification.** A timed-out job is reported through the normal completion channel with job return code `124` and one extra argument:
 
    ```sh
@@ -72,7 +72,7 @@ Value must be non-zero unsigned decimal integer. A per-job timeout may exceed `$
 5. **Scheduler timeouts take precedence.** The global and idle timeout checks run first; a job deadline never masks return codes `82` or `81`.
 6. **Job expiries do not count as progress.** The idle timeout is reset when the scheduler starts a job or processes a genuine completion record — never when it processes an expiry.
 7. **Late completion records are discarded.** If an abandoned job's completion record arrives after its expiry was processed, the record is silently dropped; the job's classification (timed out, code `124`) stands.
-8. **Final accounting.** Timed-out job IDs appear in the `<fail_job_ids>` list passed to the **scheduler termination callback**; the guarantee that every job ID appears in exactly one outcome list is unchanged. Abandoned jobs whose process never reported by scheduler exit have their PIDs included in `<running_pids>` (they are, verbatim, "jobs the scheduler started but did not receive completion records for"); abandoned jobs whose late record was discarded do not.
+8. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler termination callback** — not in `<fail_job_ids>`, which is reserved for jobs that genuinely exited with a non-zero code. The guarantee that every job ID appears in exactly one outcome list is unchanged, with `<expired_job_ids>` as the fifth list. Abandoned jobs whose process never reported by scheduler exit have their PIDs included in `<running_pids>` (they are, verbatim, "jobs the scheduler started but did not receive completion records for"); abandoned jobs whose late record was discarded do not.
 
 ### Implementation notes (internal)
 
