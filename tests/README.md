@@ -1,8 +1,8 @@
 ## Test suite
 
-Consists of tests.sh and (currently) 7 category-specific test files. tests.sh is the launcher/entry point, the other files are categorized libraries of tests.
+Consists of tests.sh and (currently) 8 category-specific test files. tests.sh is the launcher/entry point, the other files are categorized libraries of tests.
 
-Categories: `dispatch`, `core`, `termination`, `config`, `params`, `misc`, `outcome`
+Categories: `dispatch`, `core`, `termination`, `config`, `params`, `misc`, `outcome`, `timeout`
 
 ### Testing suite command line options
 

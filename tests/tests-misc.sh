@@ -71,7 +71,6 @@ EOF
 test_misc_02() {
 	misc_02_do_job() {
 		printf '%s\n' "$1" >> "${ARGS_FILE:?}"
-		sleep 1
 		return 0
 	}
 
@@ -360,7 +359,7 @@ test_misc_05() {
 		sched_rv \
 		scheduler_pid \
 		sched_fifo \
-		jobs='ok_1 ok_2 ok_3'
+		jobs='instant_1 instant_2 instant_3'
 
 	print_test_header "${TEST_ID:?}" "FIFO cleanup after successful completion" "${jobs}"
 

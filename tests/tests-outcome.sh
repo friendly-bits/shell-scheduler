@@ -55,7 +55,7 @@ test_outcome_01() {
 		sched_rv \
 		ok_raw fail_raw unfinished_raw undispatched_raw \
 		exp_ok act_ok exp_fail act_fail \
-		jobs='ok1 ok2 fail'
+		jobs='instant_1 instant_2 fail'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
@@ -81,7 +81,7 @@ test_outcome_01() {
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
 	if [ "${sched_rv}" = 0 ] &&
-		verify_id_set exp_ok act_ok "ok1 ok2" "${ok_raw}" &&
+		verify_id_set exp_ok act_ok "instant_1 instant_2" "${ok_raw}" &&
 		verify_id_set exp_fail act_fail "fail" "${fail_raw}" &&
 		[ -z "${unfinished_raw}" ] &&
 		[ -z "${undispatched_raw}" ]
@@ -112,7 +112,7 @@ test_outcome_02() {
 		sched_rv \
 		ok_raw fail_raw unfinished_raw undispatched_raw \
 		exp_ok act_ok exp_fail act_fail exp_unfinished act_unfinished \
-		jobs='ok fail hang'
+		jobs='instant_o02 fail hang'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
@@ -124,8 +124,8 @@ test_outcome_02() {
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=3 \
-	SCHED_TIMEOUT_S=10 \
-	SCHED_IDLE_TIMEOUT_S=3 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
@@ -138,7 +138,7 @@ test_outcome_02() {
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
 	if [ "${sched_rv}" = 81 ] &&
-		verify_id_set exp_ok act_ok "ok" "${ok_raw}" &&
+		verify_id_set exp_ok act_ok "instant_o02" "${ok_raw}" &&
 		verify_id_set exp_fail act_fail "fail" "${fail_raw}" &&
 		verify_id_set exp_unfinished act_unfinished "hang" "${unfinished_raw}" &&
 		[ -z "${undispatched_raw}" ]
@@ -381,7 +381,7 @@ test_outcome_06() {
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=outcome_06_do_job \
 	SCHED_MAX_JOBS=1 \
-	SCHED_TIMEOUT_S=5 \
+	SCHED_TIMEOUT_S=4 \
 	SCHED_IDLE_TIMEOUT_S=30 \
 		schedule_jobs "${jobs}" &
 
@@ -575,7 +575,7 @@ test_outcome_09() {
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \
-	SCHED_TIMEOUT_S=5 \
+	SCHED_TIMEOUT_S=4 \
 	SCHED_IDLE_TIMEOUT_S=30 \
 		schedule_jobs "${jobs}" &
 

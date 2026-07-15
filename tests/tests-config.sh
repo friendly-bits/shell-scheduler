@@ -48,7 +48,7 @@ test_config_01() {
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=3 \
 	SCHED_IDLE_TIMEOUT_S=2 \
-		schedule_jobs 'ok' &
+		schedule_jobs 'instant' &
 
 	wait "$!"
 	rv_success=$?
@@ -175,9 +175,10 @@ test_config_03() {
 		return 0
 	}
 
-	# SCHED_MAX_JOBS is required (sch_normalize_uint's 3rd arg); SCHED_TIMEOUT_S
-	# and SCHED_IDLE_TIMEOUT_S are optional, so '' is a *valid* value for
-	# them (means "use default") and must not be included as a bad value.
+	# SCHED_MAX_JOBS is required (sch_normalize_uint's 3rd arg); SCHED_TIMEOUT_S,
+	# SCHED_IDLE_TIMEOUT_S and SCHED_JOB_TIMEOUT_S are optional, so '' is a
+	# *valid* value for them (means "use default" / "unset") and must not be
+	# included as a bad value.
 	config_03_check_bad_value() {
 		# shellcheck disable=SC2034
 		local var="${1}" bad_val="${2}" sched_rv \
@@ -219,13 +220,13 @@ test_config_03() {
 	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Invalid scheduler numeric env var values" \
-		"SCHED_MAX_JOBS('' abc 0 -1), SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S(abc 0 -1)"
+		"SCHED_MAX_JOBS('' abc 0 -1), SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S/SCHED_JOB_TIMEOUT_S(abc 0 -1)"
 
 	for bad_val in '' abc 0 -1; do
 		config_03_check_bad_value SCHED_MAX_JOBS "${bad_val}"
 	done
 
-	for var in SCHED_TIMEOUT_S SCHED_IDLE_TIMEOUT_S; do
+	for var in SCHED_TIMEOUT_S SCHED_IDLE_TIMEOUT_S SCHED_JOB_TIMEOUT_S; do
 		for bad_val in abc 0 -1; do
 			config_03_check_bad_value "${var}" "${bad_val}"
 		done
@@ -255,7 +256,7 @@ test_config_04() {
 	SCHED_FINALIZE_CB=finalize_handler \
 	TEST_ID=config_04 \
 	TEST_NAME='Empty JOB_DONE_CB' \
-	TEST_JOBS='ok_1 ok_2 ok_3' \
+	TEST_JOBS='instant_1 instant_2 instant_3' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=2 \
 		run_generic_test
@@ -268,7 +269,7 @@ test_config_05() {
 	JOB_DONE_CB=done_handler \
 	TEST_ID=config_05 \
 	TEST_NAME='Empty SCHED_FINALIZE_CB' \
-	TEST_JOBS='ok_1 ok_2 ok_3 ok_4 ok_5' \
+	TEST_JOBS='instant_1 instant_2 instant_3 instant_4 instant_5' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
 		run_generic_test
@@ -280,7 +281,7 @@ test_config_06() {
 	local \
 		TEST_ID=config_06 \
 		sched_rv \
-		jobs='ok'
+		jobs='instant'
 
 	print_test_header "${TEST_ID:?}" "Unset SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S fall back to built-in defaults" "${jobs}"
 
@@ -310,7 +311,7 @@ test_config_07() {
 	local \
 		TEST_ID=config_07 \
 		sched_rv \
-		jobs='ok'
+		jobs='instant'
 
 	print_test_header "${TEST_ID:?}" "Explicitly empty SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S accepted" "${jobs}"
 
@@ -488,7 +489,7 @@ test_config_10() {
 	local \
 		TEST_ID=config_10 \
 		sched_rv \
-		jobs='ok_c10a ok_c10b ok_c10c'
+		jobs='instant_c10a instant_c10b instant_c10c'
 
 	print_test_header "${TEST_ID:?}" "Leading-zero numeric env values are treated as decimal" "${jobs}"
 

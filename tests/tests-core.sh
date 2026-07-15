@@ -15,7 +15,7 @@
 test_core_01() {
 	TEST_ID=core_01 \
 	TEST_NAME='Normal completion with failure status propagation' \
-	TEST_JOBS='ok1 ok2 fail' \
+	TEST_JOBS='instant_1 instant_2 fail' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -27,7 +27,7 @@ test_core_01() {
 test_core_02() {
 	TEST_ID=core_02 \
 	TEST_NAME='All jobs succeed' \
-	TEST_JOBS='ok_1 ok_2 ok_3 ok_4 ok_5' \
+	TEST_JOBS='instant_1 instant_2 instant_3 instant_4 instant_5' \
 	TEST_EXPECT_RV=0 \
 	TEST_SCHED_MAX_JOBS=3 \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -35,49 +35,52 @@ test_core_02() {
 		run_generic_test
 }
 
-# Verify a failing JOB_DONE_CB causes the scheduler to terminate with an error.
+# Verify a failing JOB_DONE_CB terminates the scheduler with the callback's
+#   return code; the completed job stays in the ok set, the still-running job
+#   stays unfinished. The timeout-notification counterpart of this contract
+#   is covered by timeout_12.
 test_core_03() {
 	core_03_done_handler() {
 		echo "done idx='$1' rv='$2'"
-
-		if [ "$2" != 0 ]
-		then
-			printf 'fail_seen\n' > "${FAILPROP_FILE:?}"
-			return "${CORE_03_DONE_HANDLER_RV:?}"
-		fi
-
-		return 0
+		return "${CORE_03_DONE_HANDLER_RV:?}"
+	}
+	core_03_finalize() {
+		finalize_handler "$1" "$2"
+		printf '%s\n' "ok=$3" "unfin=$5" > "${FIN_FILE:?}"
 	}
 
-	local sched_rv failprop_msg \
+	local sched_rv checks_ok=1 \
 		TEST_ID=core_03 \
 		CORE_03_DONE_HANDLER_RV=99 \
-		jobs="ok fail"
+		jobs="instant_c03 hang_c03"
 
-	local FAILPROP_FILE="/tmp/sched.failprop.${TEST_ID:?}.$$"
-	rm -f "${FAILPROP_FILE}"
+	local FIN_FILE="/tmp/sched.cbfail.${TEST_ID:?}.$$"
+	rm -f "${FIN_FILE}"
 
-	print_test_header "${TEST_ID:?}" "Failure status propagation to done_handler" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Failing JOB_DONE_CB terminates the scheduler with its return code" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
+	SCHED_FINALIZE_CB=core_03_finalize \
 	JOB_DONE_CB=core_03_done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
-	SCHED_TIMEOUT_S=3 \
-	SCHED_IDLE_TIMEOUT_S=2 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=3 \
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line failprop_msg "${FAILPROP_FILE}"
-	rm -f "${FAILPROP_FILE}"
+	[ "${sched_rv}" = "${CORE_03_DONE_HANDLER_RV}" ] ||
+		{ checks_ok=; echo "sched_rv=${sched_rv}, expected ${CORE_03_DONE_HANDLER_RV}" >&2; }
+	grep -q '^ok=instant_c03$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^unfin=hang_c03$' "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
 
-	if [ "${sched_rv}" = "${CORE_03_DONE_HANDLER_RV}" ] &&
-		[ "${failprop_msg}" = "fail_seen" ]
-	then
-		PASS
+	rm -f "${FIN_FILE}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv}"
@@ -217,7 +220,7 @@ test_core_05() {
 		SCHED_MAX_JOBS=2 \
 		SCHED_TIMEOUT_S=3 \
 		SCHED_IDLE_TIMEOUT_S=2 \
-			schedule_jobs 'ok_1 ok_2 ok_3' &
+			schedule_jobs 'instant_1 instant_2 instant_3' &
 
 		wait "$!"
 		sched_rv=$?

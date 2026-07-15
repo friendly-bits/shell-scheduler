@@ -165,7 +165,7 @@ test_termination_04() {
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=10 \
-	SCHED_IDLE_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=2 \
 		schedule_jobs "${jobs}" &
 
 	wait "$!"
@@ -372,7 +372,9 @@ test_termination_07() {
 test_termination_08() {
 	termination_08_done_handler() {
 		# Delay JOB_DONE_CB to consume part of the idle timeout before the next read -t.
-		sleep 3
+		# 'sleep N & wait' forces a forked sleep: an in-process NOFORK builtin
+		# sleep would be cut short by SIGCHLD from the exiting job
+		sleep 2 & wait "$!"
 		return 0
 	}
 
@@ -388,13 +390,15 @@ test_termination_08() {
 
 	start_time=$(date +%s)
 
+	# MAX_JOBS=2: both jobs dispatch upfront, so no later job start resets
+	# the idle clock (job starts count as progress)
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=termination_08_done_handler \
 	DO_JOB_CB=do_job_default \
-	SCHED_MAX_JOBS=1 \
-	SCHED_TIMEOUT_S=20 \
-	SCHED_IDLE_TIMEOUT_S=5 \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=10 \
+	SCHED_IDLE_TIMEOUT_S=3 \
 		schedule_jobs "${jobs}" &
 	wait "$!"
 	sched_rv=$?
@@ -402,13 +406,13 @@ test_termination_08() {
 	end_time=$(date +%s)
 	elapsed=$((end_time - start_time))
 
-	# instant=0s, callback=3s: 3s elapsed, 2s idle timeout remaining, ~5s total (+1s margin).
-	if [ "${sched_rv}" = 81 ] && [ "${elapsed}" -le 6 ]
+	# instant=0s, callback=2s: 2s elapsed, 1s idle timeout remaining, ~3s total (+1s margin).
+	if [ "${sched_rv}" = 81 ] && [ "${elapsed}" -le 4 ]
 	then
 		PASS "elapsed=${elapsed}s"
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}, elapsed=${elapsed}s, expected <= 6s"
+		FAIL "sched_rv=${sched_rv}, elapsed=${elapsed}s, expected <= 4s"
 		return 1
 	fi
 }

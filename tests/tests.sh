@@ -10,7 +10,7 @@
 # 'run <category>' - run all tests in the given category
 # 'run <category> <space_separated_list_of_numbers>' - e.g. 'run params 1 3 5'
 # 'run <category> <test_num_start>-<test_num_end>' - run tests in a range, e.g. 'run termination 3-6'
-# Categories: dispatch, core, termination, config, params, misc, outcome
+# Categories: dispatch, core, termination, config, params, misc, outcome, timeout
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 
@@ -219,13 +219,14 @@ run_generic_test() {
 . "${script_dir}/tests-params.sh"
 . "${script_dir}/tests-misc.sh"
 . "${script_dir}/tests-outcome.sh"
+. "${script_dir}/tests-timeout.sh"
 
 
 #
 # Category registry
 #
 
-TEST_CATEGORIES="dispatch core termination config params misc outcome"
+TEST_CATEGORIES="dispatch core termination config params misc outcome timeout"
 
 is_valid_cat() {
 	case " ${TEST_CATEGORIES} " in
