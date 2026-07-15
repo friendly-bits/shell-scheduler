@@ -67,7 +67,7 @@ There are three moments where your code can hook in:
 - When a **job completes**, the scheduler calls your optional completion callback (`JOB_DONE_CB`) with the job ID and its return code.
 - When the scheduler **exits** — all jobs done, a timeout, or a signal (`USR1`/`INT`/`TERM`) — it cleans up and calls your optional termination callback (`SCHED_FINALIZE_CB`).
 
-## The essentials
+## Essentials
 
 To get going you only need two variables set before calling `schedule_jobs()`:
 
@@ -90,23 +90,23 @@ wait ${!}
 ( DO_JOB_CB=my_exec SCHED_MAX_JOBS=10 schedule_jobs "1 2 3" )
 ```
 
-You *can* run the scheduler in the same process as your application, but that interferes with any `trap`s your application might have set up and makes your script exit when the scheduler does.
+While technically you *can* run the scheduler in the same process as your application, that would make your script exit when the scheduler does and interfere with any `trap`s your application might have set up. So as a general rule, avoid that.
 
 ## Full reference
 
-Everything above is enough for most use cases. When you need the complete picture, see **[REFERENCE.md](REFERENCE.md)**:
+The above information, along with the below example, should be enough for most basic use cases. For additional options, technical details and examples, see **[REFERENCE.md](REFERENCE.md)**:
 
-- **[How to use (Scheduler API)](REFERENCE.md#how-to-use-scheduler-api)** — full `schedule_jobs()` signature and return value.
-- **[Callbacks](REFERENCE.md#callbacks)** — all four callbacks with complete signatures and behavior.
-- **[Job parameters](REFERENCE.md#job-parameters)** — passing shared and per-job parameters (`job_set_params` / `job_get_params`, `SCHED_AUTO_PARAMS`).
-- **[Environment variables](REFERENCE.md#environment-variables)** — the complete configuration table.
-- **[Return codes](REFERENCE.md#return-codes)** — what each exit code means.
-- **[Timeouts](REFERENCE.md#timeouts)**, **[signal handling](REFERENCE.md#signal-handling)**, and **[terminating running jobs](REFERENCE.md#termination-of-running-jobs)**.
+- **[How to use (Scheduler API)](REFERENCE.md#how-to-use-scheduler-api)**
+- **[Callbacks](REFERENCE.md#callbacks)**
+- **[Job parameters](REFERENCE.md#job-parameters)**
+- **[Environment variables](REFERENCE.md#environment-variables)**
+- **[Return codes](REFERENCE.md#return-codes)**
+- **[Timeouts](REFERENCE.md#timeouts)**
+- **[Signal handling](REFERENCE.md#signal-handling)**
+- **[Terminating running jobs](REFERENCE.md#termination-of-running-jobs)**
 
 Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**.
 
 ## Real-world example
 
 For a complete integration, see [`hagezi-fetch.sh`](hagezi-fetch.sh) — a concurrent downloader for DNS blocklists. It demonstrates per-job parameters, signal forwarding, cleanup of orphaned child processes, and bookkeeping across callbacks. A full walkthrough of these patterns is in the [reference](REFERENCE.md#real-world-example).
-
-*(`wget` and `pgrep` are dependencies of that example, not of the library itself. The example also includes one intentionally invalid URL to showcase error tracking.)*
