@@ -20,8 +20,9 @@
 #                         <cmd> <message...>
 
 # SCHED_FINALIZE_CB     Optional command invoked when the scheduler exits:
-#                         <cmd> <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <unfinished_job_ids> <undispatched_job_ids>
+#                         <cmd> <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <unfinished_job_ids> <undispatched_job_ids> <expired_job_ids>
 #                       <running_pids> is normally empty; non-empty when the scheduler exits before all jobs complete
+#                       <expired_job_ids> are jobs abandoned via per-job timeout (see TIMEKEEPING.md)
 
 # JOB_DONE_CB           Optional command invoked after each completed job:
 #                         <cmd> <job_id> <job_return_code>
@@ -197,13 +198,13 @@ sch_finalize() {
 
 	# Compute sch_unfinished_ids
 	for sch_id in ${SCH_JOB_IDS}; do
-		sch_is_included "${sch_id}" "${SCH_OK_IDS} ${SCH_UNDISPATCHED_IDS} ${SCH_FAIL_IDS}" ||
+		sch_is_included "${sch_id}" "${SCH_OK_IDS} ${SCH_UNDISPATCHED_IDS} ${SCH_FAIL_IDS} ${SCH_EXPIRED_IDS}" ||
 			sch_append sch_unfinished_ids "${sch_id}"
 	done
 	[ -n "${SCH_HAD_F}" ] || set +f
 
 	[ -z "${SCHED_FINALIZE_CB}" ] ||
-		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${SCH_FAIL_IDS}" "${sch_unfinished_ids}" "${SCH_UNDISPATCHED_IDS}" ||
+		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${SCH_FAIL_IDS}" "${sch_unfinished_ids}" "${SCH_UNDISPATCHED_IDS}" "${SCH_EXPIRED_IDS}" ||
 		{
 			sch_cb_rv=${?}
 			[ "${sch_rv}" = 0 ] && sch_rv="${sch_cb_rv}"
@@ -381,7 +382,7 @@ process_done_record() {
 			sch_rm_elem SCH_RUNNING_PIDS "${sch_pid}" "${SCH_RUNNING_PIDS}"
 			SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
 
-			sch_append SCH_FAIL_IDS "${sch_id}" &&
+			sch_append SCH_EXPIRED_IDS "${sch_id}" &&
 			sch_append SCH_EXPIRED "${sch_e}" ||
 				sch_finalize 1
 
@@ -515,6 +516,7 @@ schedule_jobs() {
 		SCH_JOB_TIMEOUT_S \
 		SCH_DEADLINES \
 		SCH_EXPIRED \
+		SCH_EXPIRED_IDS \
 		\
 		SCH_JOB_IDS="${1?}"
 	

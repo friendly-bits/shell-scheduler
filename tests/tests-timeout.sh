@@ -130,7 +130,7 @@ test_timeout_02() {
 	timeout_02_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
 	timeout_02_finalize() {
 		finalize_handler "$1" "$2"
-		printf '%s\n' "pids=$2" "fail=$4" "unfin=$5" > "${FIN_FILE:?}"
+		printf '%s\n' "pids=$2" "fail=$4" "unfin=$5" "expired=$7" > "${FIN_FILE:?}"
 	}
 
 	local \
@@ -171,7 +171,8 @@ test_timeout_02() {
 		{ checks_ok=; echo "expected exactly one timeout record per hung job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
 	[ "$(wc -l < "${DONE_FILE}" 2>/dev/null)" -eq 5 ] 2>/dev/null ||
 		{ checks_ok=; echo "expected exactly 5 callback records: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
-	grep -q '^fail=hang_t02a hang_t02b$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^expired=hang_t02a hang_t02b$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^fail=$' "${FIN_FILE}" 2>/dev/null &&
 	grep -q '^unfin=$' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
 	grep -q "^pids=${pid_a} ${pid_b}$" "${FIN_FILE}" 2>/dev/null ||
@@ -191,12 +192,12 @@ test_timeout_02() {
 # Verify simultaneous multi-expiry through the public interface: three hung
 #   jobs sharing a 1s default budget - with IDs containing ':' and glob
 #   characters - are all classified as timed out: one (id, 124, pid) callback
-#   each, exact fail set, all abandoned pids reported, scheduler exits 0.
+#   each, exact expired set, all abandoned pids reported, scheduler exits 0.
 test_timeout_03() {
 	timeout_03_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
 	timeout_03_finalize() {
 		finalize_handler "$1" "$2"
-		printf '%s\n' "pids=$2" "fail=$4" "unfin=$5" > "${FIN_FILE:?}"
+		printf '%s\n' "pids=$2" "fail=$4" "unfin=$5" "expired=$7" > "${FIN_FILE:?}"
 	}
 
 	local \
@@ -231,7 +232,8 @@ test_timeout_03() {
 	grep -q -F '3|hang_t03:q:r|124|' "${DONE_FILE}" 2>/dev/null &&
 	grep -q -F '3|hang_t03*g|124|' "${DONE_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "expected one timeout record per job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
-	grep -qxF 'fail=hang_t03a hang_t03:q:r hang_t03*g' "${FIN_FILE}" 2>/dev/null &&
+	grep -qxF 'expired=hang_t03a hang_t03:q:r hang_t03*g' "${FIN_FILE}" 2>/dev/null &&
+	grep -qxF 'fail=' "${FIN_FILE}" 2>/dev/null &&
 	grep -qxF 'unfin=' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
 	pid_cnt="$(sed -n 's/^pids=//p' "${FIN_FILE}" 2>/dev/null | wc -w)"
@@ -257,7 +259,7 @@ test_timeout_04() {
 	timeout_04_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
 	timeout_04_finalize() {
 		finalize_handler "$1" "$2"
-		printf '%s\n' "ok=$3" "fail=$4" > "${FIN_FILE:?}"
+		printf '%s\n' "ok=$3" "fail=$4" "expired=$7" > "${FIN_FILE:?}"
 	}
 
 	local \
@@ -295,7 +297,8 @@ test_timeout_04() {
 	grep -q '^3|hang_t04|124|' "${DONE_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "expected exactly one timeout record (hang_t04): $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
 	grep -q '^ok=ok1_t04$' "${FIN_FILE}" 2>/dev/null &&
-	grep -q '^fail=hang_t04$' "${FIN_FILE}" 2>/dev/null ||
+	grep -q '^fail=$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^expired=hang_t04$' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
 
 	rm -f "${DONE_FILE}" "${FIN_FILE}"
@@ -325,7 +328,7 @@ test_timeout_05() {
 	}
 	timeout_05_finalize() {
 		finalize_handler "$1" "$2"
-		printf '%s\n' "pids=$2" "fail=$4" > "${FIN_FILE:?}"
+		printf '%s\n' "pids=$2" "fail=$4" "expired=$7" > "${FIN_FILE:?}"
 	}
 
 	local \
@@ -362,8 +365,9 @@ test_timeout_05() {
 		{ checks_ok=; echo "missing ok record for ok2_t05" >&2; }
 	[ "$(wc -l < "${DONE_FILE}" 2>/dev/null)" -eq 2 ] 2>/dev/null ||
 		{ checks_ok=; echo "unexpected extra callback invocations: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
-	grep -q '^fail=hang_t05x$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "fail set mismatch (job classified twice?)" >&2; }
+	grep -q '^expired=hang_t05x$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^fail=$' "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "expired/fail set mismatch (job classified twice?)" >&2; }
 	grep -q '^pids=$' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "abandoned pid not delisted after record discard" >&2; }
 
@@ -392,7 +396,7 @@ test_timeout_06() {
 	}
 	timeout_06_finalize() {
 		finalize_handler "$1" "$2"
-		printf '%s\n' "pids=$2" "ok=$3" "fail=$4" > "${FIN_FILE:?}"
+		printf '%s\n' "pids=$2" "ok=$3" "fail=$4" "expired=$7" > "${FIN_FILE:?}"
 	}
 
 	local \
@@ -429,8 +433,9 @@ test_timeout_06() {
 	grep -q '^2|instant_t06a|0|$' "${DONE_FILE}" 2>/dev/null &&
 	grep -q '^2|instant_t06b|0|$' "${DONE_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "missing 2-arg ok records in DONE_FILE" >&2; }
-	grep -q "^fail=hang_t06$" "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "finalize fail-set mismatch" >&2; }
+	grep -q "^expired=hang_t06$" "${FIN_FILE}" 2>/dev/null &&
+	grep -q "^fail=$" "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "finalize expired/fail-set mismatch" >&2; }
 	grep -q "^pids=${done_pid}$" "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "finalize running_pids != pid reported to JOB_DONE_CB" >&2; }
 
@@ -453,7 +458,7 @@ test_timeout_06() {
 test_timeout_07() {
 	timeout_07_finalize() {
 		finalize_handler "$1" "$2"
-		printf '%s\n' "ok=$3" "fail=$4" "undisp=$6" > "${FIN_FILE:?}"
+		printf '%s\n' "ok=$3" "expired=$7" "undisp=$6" > "${FIN_FILE:?}"
 	}
 
 	local \
@@ -483,8 +488,8 @@ test_timeout_07() {
 	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
 	grep -q '^ok=instant_t07$' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "queued job did not complete" >&2; }
-	grep -q '^fail=hang_t07$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "hung job not classified as failed" >&2; }
+	grep -q '^expired=hang_t07$' "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "hung job not classified as expired" >&2; }
 	grep -q '^undisp=$' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "undispatched set not empty" >&2; }
 
@@ -650,7 +655,7 @@ test_timeout_10() {
 test_timeout_11() {
 	timeout_11_finalize() {
 		finalize_handler "$1" "$2"
-		printf '%s\n' "fail=$4" "unfin=$5" > "${FIN_FILE:?}"
+		printf '%s\n' "expired=$7" "unfin=$5" > "${FIN_FILE:?}"
 	}
 
 	local \
@@ -683,14 +688,14 @@ test_timeout_11() {
 	rv_abort=$?
 
 	[ "${rv_abort}" = 81 ] || { checks_ok=; echo "rv_abort=${rv_abort}, expected 81" >&2; }
-	grep -q '^fail=hang_t11a$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^expired=hang_t11a$' "${FIN_FILE}" 2>/dev/null &&
 	grep -q '^unfin=hang_t11b$' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "half-drained sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
 
 	rm -f "${FIN_FILE}"
 
 	# Sub-check 2: idle (5s) > max budget (3s): every deadline fires before
-	# the idle timeout can, the run drains and exits 0 with both jobs failed
+	# the idle timeout can, the run drains and exits 0 with both jobs expired
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=timeout_11_finalize \
 	JOB_DONE_CB=done_handler \
@@ -704,7 +709,7 @@ test_timeout_11() {
 	rv_drain=$?
 
 	[ "${rv_drain}" = 0 ] || { checks_ok=; echo "rv_drain=${rv_drain}, expected 0" >&2; }
-	grep -q '^fail=hang_t11a hang_t11b$' "${FIN_FILE}" 2>/dev/null &&
+	grep -q '^expired=hang_t11a hang_t11b$' "${FIN_FILE}" 2>/dev/null &&
 	grep -q '^unfin=$' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "full-drain sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
 
@@ -721,7 +726,7 @@ test_timeout_11() {
 
 # Verify a non-zero JOB_DONE_CB return on a synthesized timeout notification
 #   (rv 124 + pid, invoked from the deadline sweep) aborts the scheduler with
-#   the callback's code; the timed-out job is already in the fail set and its
+#   the callback's code; the timed-out job is already in the expired set and its
 #   abandoned pid is in <running_pids>. The normal-completion counterpart of
 #   this contract is covered by core_03.
 test_timeout_12() {
@@ -734,7 +739,7 @@ test_timeout_12() {
 	}
 	timeout_12_finalize() {
 		finalize_handler "$1" "$2"
-		printf '%s\n' "pids=$2" "fail=$4" > "${FIN_FILE:?}"
+		printf '%s\n' "pids=$2" "expired=$7" > "${FIN_FILE:?}"
 	}
 
 	local \
@@ -767,8 +772,8 @@ test_timeout_12() {
 	read_first_line cb_pid "${PID_FILE}"
 
 	[ "${sched_rv}" = 98 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 98" >&2; }
-	grep -q '^fail=hang_t12$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "fail set mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
+	grep -q '^expired=hang_t12$' "${FIN_FILE}" 2>/dev/null ||
+		{ checks_ok=; echo "expired set mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
 	is_uint "${cb_pid}" && grep -q "^pids=${cb_pid}$" "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "abandoned pid mismatch: cb saw '${cb_pid}'" >&2; }
 

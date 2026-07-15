@@ -84,7 +84,8 @@ finalize_dl()
 		ok_ids="${3}" \
 		fail_ids="${4}" \
 		unfinished_ids="${5}" \
-		undispatched_ids="${6}"
+		undispatched_ids="${6}" \
+		expired_ids="${7}"
 
 	if [ -n "${running_pids}" ]
 	then
@@ -101,7 +102,7 @@ finalize_dl()
 
 	printf '\n'
 	printf '%s\n' "OK count: ${SUCCESS_CNT}"
-	printf '%s\n' "Failed count (including unfinished and undispatched): $((JOBS_CNT - SUCCESS_CNT))"
+	printf '%s\n' "Failed count (including timed-out, unfinished and undispatched): $((JOBS_CNT - SUCCESS_CNT))"
 
 	printf '\n'
 	printf '%s\n' "Successful jobs:  ${ok_ids:-<none>}"
@@ -110,6 +111,7 @@ finalize_dl()
 	printf '%s\n' "Returned non-zero code:  ${fail_ids:-<none>}"
 	printf '%s\n' "Unfinished jobs:         ${unfinished_ids:-<none>}"
 	printf '%s\n' "Undispatched jobs:       ${undispatched_ids:-<none>}"
+	printf '%s\n' "Timed out jobs:          ${expired_ids:-<none>}"
 
 	return 0
 }

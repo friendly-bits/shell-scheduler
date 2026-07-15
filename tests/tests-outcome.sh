@@ -4,7 +4,7 @@
 
 # tests-outcome.sh
 
-# Category: Job Outcome Classification (ok/fail/unfinished/undispatched)
+# Category: Job Outcome Classification (ok/fail/unfinished/undispatched/expired)
 # This file is sourced by tests.sh; it defines test_N functions only.
 
 #
@@ -35,6 +35,7 @@ write_id_sets() {
 	printf '%s\n' "${3}" > "${wis_prefix}.fail"
 	printf '%s\n' "${4}" > "${wis_prefix}.unfinished"
 	printf '%s\n' "${5}" > "${wis_prefix}.undispatched"
+	printf '%s\n' "${6}" > "${wis_prefix}.expired"
 }
 
 
@@ -47,13 +48,13 @@ write_id_sets() {
 test_outcome_01() {
 	outcome_01_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
 		TEST_ID=outcome_01 \
 		sched_rv \
-		ok_raw fail_raw unfinished_raw undispatched_raw \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw \
 		exp_ok act_ok exp_fail act_fail \
 		jobs='instant_1 instant_2 fail'
 
@@ -78,23 +79,26 @@ test_outcome_01() {
 	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
 	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
 	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	read_first_line expired_raw "${FINALIZE_SETS_PREFIX}.expired"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
 	if [ "${sched_rv}" = 0 ] &&
 		verify_id_set exp_ok act_ok "instant_1 instant_2" "${ok_raw}" &&
 		verify_id_set exp_fail act_fail "fail" "${fail_raw}" &&
 		[ -z "${unfinished_raw}" ] &&
-		[ -z "${undispatched_raw}" ]
+		[ -z "${undispatched_raw}" ] &&
+		[ -z "${expired_raw}" ]
 	then
 		PASS "ok='${ok_raw}', fail='${fail_raw}'"
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv}"
-		printf '%s\n%s\n%s\n%s\n' \
+		printf '%s\n%s\n%s\n%s\n%s\n' \
 			"ok: expected='${exp_ok}' actual='${act_ok}'" \
 			"fail: expected='${exp_fail}' actual='${act_fail}'" \
 			"unfinished_raw='${unfinished_raw}'" \
-			"undispatched_raw='${undispatched_raw}'"
+			"undispatched_raw='${undispatched_raw}'" \
+			"expired_raw='${expired_raw}'"
 		return 1
 	fi
 }
@@ -104,7 +108,7 @@ test_outcome_01() {
 test_outcome_02() {
 	outcome_02_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
@@ -173,7 +177,7 @@ test_outcome_03() {
 
 	outcome_03_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
@@ -231,7 +235,7 @@ test_outcome_03() {
 test_outcome_04() {
 	outcome_04_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
@@ -290,7 +294,7 @@ test_outcome_04() {
 test_outcome_05() {
 	outcome_05_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
@@ -343,8 +347,9 @@ test_outcome_05() {
 	fi
 }
 
-# Verify ok/fail/unfinished/undispatched are pairwise disjoint and jointly
-#   exhaustive over the full job set, in one run where all four are populated.
+# Verify ok/fail/unfinished/undispatched/expired are pairwise disjoint and
+#   jointly exhaustive over the full job set, in one run where all five are
+#   populated.
 test_outcome_06() {
 	outcome_06_do_job() {
 		case "${1}" in
@@ -355,25 +360,28 @@ test_outcome_06() {
 
 	outcome_06_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
 		TEST_ID=outcome_06 \
 		sched_rv \
-		ok_raw fail_raw unfinished_raw undispatched_raw \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw \
 		exp_ok act_ok exp_fail act_fail exp_unfinished act_unfinished \
-		exp_undispatched act_undispatched \
+		exp_undispatched act_undispatched exp_expired act_expired \
 		member_cnt \
-		jobs='ok1 fail hang2 hang1'
+		jobs='ok1 fail hang_o06x hang2 hang1'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header "${TEST_ID:?}" "ok/fail/unfinished/undispatched partition the full job set" "${jobs}"
+	print_test_header "${TEST_ID:?}" "ok/fail/unfinished/undispatched/expired partition the full job set" "${jobs}"
+
+	job_set_timeout hang_o06x 1 || { FAIL "job_set_timeout failed"; return 1; }
 
 	# SCHED_MAX_JOBS=1 forces strictly sequential dispatch:
-	#   ok1 and fail are each fully drained/classified before hang2 starts.
+	#   ok1 and fail are each fully drained/classified before hang_o06x starts;
+	#   hang_o06x expires on its 1s budget, freeing the slot for hang2.
 	#   hang2 is still sleeping when SCHED_TIMEOUT_S hits, so it lands in unfinished;
 	#   hang1 never gets dispatched.
 	SCHED_FAIL_MSG_CB=echo \
@@ -381,7 +389,7 @@ test_outcome_06() {
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=outcome_06_do_job \
 	SCHED_MAX_JOBS=1 \
-	SCHED_TIMEOUT_S=4 \
+	SCHED_TIMEOUT_S=6 \
 	SCHED_IDLE_TIMEOUT_S=30 \
 		schedule_jobs "${jobs}" &
 
@@ -392,10 +400,11 @@ test_outcome_06() {
 	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
 	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
 	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	read_first_line expired_raw "${FINALIZE_SETS_PREFIX}.expired"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
 	# shellcheck disable=SC2086
-	set -- ${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw}
+	set -- ${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw} ${expired_raw}
 	member_cnt="${#}"
 
 	if [ "${sched_rv}" = 82 ] &&
@@ -403,38 +412,40 @@ test_outcome_06() {
 		verify_id_set exp_fail act_fail "fail" "${fail_raw}" &&
 		verify_id_set exp_unfinished act_unfinished "hang2" "${unfinished_raw}" &&
 		verify_id_set exp_undispatched act_undispatched "hang1" "${undispatched_raw}" &&
-		[ "${member_cnt}" = 4 ]
+		verify_id_set exp_expired act_expired "hang_o06x" "${expired_raw}" &&
+		[ "${member_cnt}" = 5 ]
 	then
-		PASS "ok='${ok_raw}', fail='${fail_raw}', unfinished='${unfinished_raw}', undispatched='${undispatched_raw}'"
+		PASS "ok='${ok_raw}', fail='${fail_raw}', unfinished='${unfinished_raw}', undispatched='${undispatched_raw}', expired='${expired_raw}'"
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}, expected 82, member_cnt=${member_cnt}, expected 4 (no overlap/dup)"
-		printf '%s\n%s\n%s\n%s\n' \
+		FAIL "sched_rv=${sched_rv}, expected 82, member_cnt=${member_cnt}, expected 5 (no overlap/dup)"
+		printf '%s\n%s\n%s\n%s\n%s\n' \
 			"ok: expected='${exp_ok}' actual='${act_ok}'" \
 			"fail: expected='${exp_fail}' actual='${act_fail}'" \
 			"unfinished: expected='${exp_unfinished}' actual='${act_unfinished}'" \
-			"undispatched: expected='${exp_undispatched}' actual='${act_undispatched}'"
+			"undispatched: expected='${exp_undispatched}' actual='${act_undispatched}'" \
+			"expired: expected='${exp_expired}' actual='${act_expired}'"
 		return 1
 	fi
 }
 
-# Verify an empty job list yields all four sets empty.
+# Verify an empty job list yields all five sets empty.
 test_outcome_07() {
 	outcome_07_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
 		TEST_ID=outcome_07 \
 		sched_rv \
-		ok_raw fail_raw unfinished_raw undispatched_raw \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw \
 		jobs='<none>'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header "${TEST_ID:?}" "Empty job list yields all-empty ok/fail/unfinished/undispatched sets" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Empty job list yields all-empty ok/fail/unfinished/undispatched/expired sets" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=outcome_07_finalize_handler \
@@ -452,18 +463,20 @@ test_outcome_07() {
 	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
 	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
 	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	read_first_line expired_raw "${FINALIZE_SETS_PREFIX}.expired"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ -z "${ok_raw}" ] &&
 		[ -z "${fail_raw}" ] &&
 		[ -z "${unfinished_raw}" ] &&
-		[ -z "${undispatched_raw}" ]
+		[ -z "${undispatched_raw}" ] &&
+		[ -z "${expired_raw}" ]
 	then
 		PASS
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}, ok='${ok_raw}', fail='${fail_raw}', unfinished='${unfinished_raw}', undispatched='${undispatched_raw}'"
+		FAIL "sched_rv=${sched_rv}, ok='${ok_raw}', fail='${fail_raw}', unfinished='${unfinished_raw}', undispatched='${undispatched_raw}', expired='${expired_raw}'"
 		return 1
 	fi
 }
@@ -482,7 +495,7 @@ test_outcome_08() {
 
 	outcome_08_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
@@ -539,43 +552,46 @@ test_outcome_08() {
 	fi
 }
 
-# Verify the union of ok/fail/unfinished/undispatched delivered to SCHED_FINALIZE_CB
-#   equals the full job-ID list passed to schedule_jobs(),
+# Verify the union of ok/fail/unfinished/undispatched/expired delivered to
+#   SCHED_FINALIZE_CB equals the full job-ID list passed to schedule_jobs(),
 #   and every job ID appears in exactly one bucket.
 #   Bucket-agnostic: asserts the partition invariant, not which bucket each ID lands in
 #   (test_outcome_06 checks specific membership).
 test_outcome_09() {
 	outcome_09_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}"
+		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
 	}
 
 	local \
 		TEST_ID=outcome_09 \
 		sched_rv \
-		ok_raw fail_raw unfinished_raw undispatched_raw \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw \
 		exp_union act_union \
 		jobs_cnt \
 		member_cnt \
-		jobs='ok_1 fail_1 hang_1 ok_2 ok_3'
+		jobs='ok_1 fail_1 hang_o09x hang_1 ok_2 ok_3'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	print_test_header "${TEST_ID:?}" "Full job-ID list partitions across the four outcome buckets" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Full job-ID list partitions across the five outcome buckets" "${jobs}"
+
+	job_set_timeout hang_o09x 1 || { FAIL "job_set_timeout failed"; return 1; }
 
 	# shellcheck disable=SC2086
 	set -- ${jobs}
 	jobs_cnt="${#}"
 
-	# SCHED_MAX_JOBS=1: ok_1 and fail_1 complete first; hang_1 is still running
-	# when SCHED_TIMEOUT_S fires (unfinished); ok_2, ok_3 are never dispatched.
+	# SCHED_MAX_JOBS=1: ok_1 and fail_1 complete first; hang_o09x expires on its
+	# 1s budget; hang_1 is still running when SCHED_TIMEOUT_S fires (unfinished);
+	# ok_2, ok_3 are never dispatched.
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=outcome_09_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \
-	SCHED_TIMEOUT_S=4 \
+	SCHED_TIMEOUT_S=6 \
 	SCHED_IDLE_TIMEOUT_S=30 \
 		schedule_jobs "${jobs}" &
 
@@ -586,15 +602,16 @@ test_outcome_09() {
 	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
 	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
 	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	read_first_line expired_raw "${FINALIZE_SETS_PREFIX}.expired"
 	rm -f "${FINALIZE_SETS_PREFIX}".*
 
-	# Total tokens across all four buckets; exactly-once => equals the job count.
+	# Total tokens across all five buckets; exactly-once => equals the job count.
 	# shellcheck disable=SC2086
-	set -- ${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw}
+	set -- ${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw} ${expired_raw}
 	member_cnt="${#}"
 
 	if [ "${sched_rv}" = 82 ] &&
-		verify_id_set exp_union act_union "${jobs}" "${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw}" &&
+		verify_id_set exp_union act_union "${jobs}" "${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw} ${expired_raw}" &&
 		[ "${member_cnt}" = "${jobs_cnt}" ]
 	then
 		PASS "union='${act_union//$'\n'/ }', member_cnt=${member_cnt}/${jobs_cnt}"
@@ -604,7 +621,7 @@ test_outcome_09() {
 		printf '%s\n%s\n%s\n' \
 			"input union expected='${exp_union}'" \
 			"bucket union actual  ='${act_union}'" \
-			"ok='${ok_raw}' fail='${fail_raw}' unfinished='${unfinished_raw}' undispatched='${undispatched_raw}'"
+			"ok='${ok_raw}' fail='${fail_raw}' unfinished='${unfinished_raw}' undispatched='${undispatched_raw}' expired='${expired_raw}'"
 		return 1
 	fi
 }

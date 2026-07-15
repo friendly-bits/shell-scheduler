@@ -98,7 +98,7 @@ verify_recorded_set() {
 
 # Write each whitespace-separated ID-set arg to its own file at "${1}.<suffix>".
 # 1: file prefix
-# 2: ok_ids  3: fail_ids  4: unfinished_ids  5: undispatched_ids
+# 2: ok_ids  3: fail_ids  4: unfinished_ids  5: undispatched_ids  6: expired_ids
 
 done_handler() {
 	echo "done idx='$1' rv='$2'"
