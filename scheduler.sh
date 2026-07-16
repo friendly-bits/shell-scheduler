@@ -36,9 +36,8 @@
 ### Helpers
 
 sch_is_included() {
-	local delim="${3:-" "}"
-	case "${delim}${2}${delim}" in
-		*"${delim}${1}${delim}"*)
+	case " ${2} " in
+		*" ${1} "*)
 			return 0 ;;
 		*)
 			return 1
@@ -48,7 +47,7 @@ sch_is_included() {
 sch_append()
 {
 	sch_check_name "var" "${1}" || return 1
-	eval "${1}=\"\${${1}}\${${1}:+\"\${3:-" "}\"}\${2}\""
+	eval "${1}=\"\${${1}}\${${1}:+\" \"}\${2}\""
 }
 
 sch_had_f() {
@@ -58,20 +57,19 @@ sch_had_f() {
 	esac
 }
 
-# Remove 1 element
+# Remove first matching element
 # 1: out var
 # 2: element
 # 3: cur list
-# 4 (optional): delim
 sch_rm_elem() {
-	local sre_out_var="${1}" sre_e="${2}" sre_l="${3}" sre_d="${4:- }"
+	local sre_out_var="${1}" sre_e="${2}" sre_l="${3}"
 
-	sch_is_included "${sre_e}" "${sre_l}" "${sre_d}" && {
-		sre_l="${sre_d}${sre_l}${sre_d}"
-		local sre_s="${sre_d}${sre_e}${sre_d}"
-		sre_l="${sre_l%%"${sre_s}"*}${sre_d}${sre_l#*"${sre_s}"}"
-		sre_l="${sre_l%"${sre_l##*[!"${sre_d}"]}"}"
-		sre_l="${sre_l#"${sre_l%%[!"${sre_d}"]*}"}"
+	sch_is_included "${sre_e}" "${sre_l}" && {
+		sre_l=" ${sre_l} "
+		local sre_s=" ${sre_e} "
+		sre_l="${sre_l%%"${sre_s}"*} ${sre_l#*"${sre_s}"}"
+		sre_l="${sre_l%"${sre_l##*[!" "]}"}"
+		sre_l="${sre_l#"${sre_l%%[!" "]*}"}"
 	}
 
 	export -n "${sre_out_var}=${sre_l}"
@@ -92,22 +90,11 @@ sch_is_cmd() {
 }
 
 sch_fail_msg() {
-	if [ -n "${SCHED_FAIL_MSG_CB}" ] && sch_is_cmd "${SCHED_FAIL_MSG_CB}"
-	then
+	if [ -n "${SCHED_FAIL_MSG_CB}" ] && sch_is_cmd "${SCHED_FAIL_MSG_CB}"; then
 		"${SCHED_FAIL_MSG_CB}" "${@}"
 	else
 		printf '%s\n' "${@}" >&2
 	fi
-}
-
-# 1: var name
-# 2: required(1/empty)
-sch_check_cb() {
-	local val
-	eval "val=\"\${${1}}\""
-	[ -z "${val}" ] && [ -z "${2}" ] && return 0
-	[ -z "${val}" ] && { sch_fail_msg "Required callback is missing (set via \${${1}})."; return 1; }
-	sch_is_cmd "${val}" || { sch_fail_msg "Invalid value of ${1} '${val}'."; return 1; }
 }
 
 # 1 - var name for centiseconds output
@@ -340,16 +327,10 @@ process_done_record() {
 		fi
 	}
 
-	# Every wake ends the same way: sweep expired deadlines, then recompute
-	# the remaining time from a fresh clock reading (the callbacks may have
-	# consumed a substantial part of it); a due scheduler timeout finalizes
-	# inside refresh_remain_time().
-	# The sweep classifies jobs whose deadline has expired as timed out
-	# (job rv 124) and reclaims their concurrency slots. Expiries do NOT
-	# reset the idle timeout: only job starts and genuine completions count
-	# as progress. Abandoned jobs are recorded in ${SCH_EXPIRED} so that
-	# their completion records can be recognized (and discarded) if they
-	# arrive later (see TIMEKEEPING.md).
+	# Sweep expired deadlines:
+	#   classifies jobs whose deadline has expired as timed out (rv 124) and reclaims their concurrency slots.
+	# Abandoned jobs are recorded in ${SCH_EXPIRED}, so that
+	#   their completion records can be recognized and discarded if they arrive later.
 	[ -n "${SCH_DEADLINES}" ] && {
 		sch_get_uptime_cs sch_now_cs || sch_finalize 1
 
@@ -368,9 +349,8 @@ process_done_record() {
 		done
 		[ -n "${sch_had_f}" ] || set +f
 
-		# Chomp expired entries one by one (no word-splitting: job IDs may
-		# contain glob characters, and the callback below must run with
-		# unmodified glob state)
+		# Chomp expired entries one by one (no word-splitting: job IDs may contain glob characters,
+		#   and the callback below must run with unmodified glob state)
 		while [ -n "${sch_expired}" ]; do
 			sch_e="${sch_expired%% *}"
 			sch_expired="${sch_expired#"${sch_e}"}"
@@ -392,6 +372,8 @@ process_done_record() {
 		done
 	}
 
+	# Recompute remaining time from a fresh clock reading.
+	# If scheduler timeout is due, refresh_remain_time() calls sch_finalize().
 	refresh_remain_time
 
 	return 0
@@ -402,9 +384,9 @@ process_done_record() {
 # Time keeping
 #
 
-# Sets ${SCH_REMAIN_TIME_CS} to the remaining time to ${SCH_TIMEOUT_S} or to
-# ${SCH_IDLE_TIMEOUT_S}, whichever is lower; finalizes the scheduler when
-# either timeout has been hit
+# Sets ${SCH_REMAIN_TIME_CS} to the remaining time until ${SCH_TIMEOUT_S},
+#   or to ${SCH_IDLE_TIMEOUT_S}, whichever is lower;
+# Finalizes the scheduler when either timeout has been hit
 refresh_remain_time() {
 	local gt_cur_time_cs gt_idle_remain_time_cs
 
@@ -413,14 +395,10 @@ refresh_remain_time() {
 	SCH_REMAIN_TIME_CS=$(( SCH_TIMEOUT_S*100 - (gt_cur_time_cs-SCH_INIT_UPTIME_CS) ))
 	gt_idle_remain_time_cs=$(( SCH_IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-SCH_LAST_PROGRESS_TIME_CS) ))
 
-	if [ ! "${SCH_REMAIN_TIME_CS}" -gt 0 ]
-	then
-		sch_fail_msg "Processing timeout (${SCH_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
-		sch_finalize "${SCH_RV_GLOBAL_TIMEOUT}"
-	elif [ ! "${gt_idle_remain_time_cs}" -gt 0 ]
-	then
-		sch_fail_msg "Idle timeout (${SCH_IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
-		sch_finalize "${SCH_RV_IDLE_TIMEOUT}"
+	if [ ! "${SCH_REMAIN_TIME_CS}" -gt 0 ]; then
+		sch_finalize "${SCH_RV_GLOBAL_TIMEOUT}" "Processing timeout (${SCH_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
+	elif [ ! "${gt_idle_remain_time_cs}" -gt 0 ]; then
+		sch_finalize "${SCH_RV_IDLE_TIMEOUT}" "Idle timeout (${SCH_IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
 	fi
 
 	if [ "${gt_idle_remain_time_cs}" -lt "${SCH_REMAIN_TIME_CS}" ]; then
@@ -428,13 +406,12 @@ refresh_remain_time() {
 	fi
 }
 
-### Per-job deadline tracking helpers (see TIMEKEEPING.md)
-# A deadline list is a space-separated list of <pid>:<deadline_cs>:<job_id>
-# entries. pid and deadline_cs are unsigned integers, so the job ID parses as
-# the trailing remainder and may contain any non-whitespace character.
-
 # Remove the entry matching <pid> from a deadline list
-# Sets var named $1 to the updated list; returns 1 if no entry matched
+#
+# A deadline list is a space-separated list of <pid>:<deadline_cs>:<job_id> entries.
+# <pid> and <deadline_cs> are uints,
+#   so the job ID parses as the trailing remainder and may contain any non-whitespace character.
+#
 # 1: out var name
 # 2: pid
 # 3: deadline list
@@ -456,6 +433,16 @@ sch_deadline_rm_pid() {
 #
 
 schedule_jobs() {
+	# 1: var name
+	# 2: required(1/empty)
+	sch_check_cb() {
+		local val
+		eval "val=\"\${${1}}\""
+		[ -z "${val}" ] && [ -z "${2}" ] && return 0
+		[ -z "${val}" ] && { sch_fail_msg "Required callback is missing (set via \${${1}})."; return 1; }
+		sch_is_cmd "${val}" || { sch_fail_msg "Invalid value of ${1} '${val}'."; return 1; }
+	}
+
 	# Convert any mix of spaces/tabs/newlines to single-space separators
 	sch_normalize_ids() {
 		local \
@@ -742,9 +729,8 @@ job_get_params() {
 }
 
 # Set a per-job timeout, overriding ${SCHED_JOB_TIMEOUT_S} for this job
-# (see TIMEKEEPING.md)
 # 1: job ID
-# 2: timeout in seconds (non-zero unsigned decimal integer)
+# 2: timeout in seconds (uint >= 1)
 job_set_timeout() {
 	local sch_me=job_set_timeout \
 		sch_val="${2}" \
