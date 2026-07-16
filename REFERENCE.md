@@ -137,15 +137,17 @@ ${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_j
 If this callback returns a non-zero code while `<scheduler_return_code>` is `0`, the scheduler exits with the callback's return code instead. Otherwise, the scheduler's return code is unchanged.
 
 **Note**: every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of `<ok_job_ids>`, `<fail_job_ids>`, `<unfinished_job_ids>`, `<undispatched_job_ids>`, `<expired_job_ids>`. This makes them a convenient basis for final bookkeeping, logging, or cleanup in the **scheduler termination callback**, without having to separately track job status yourself.
-**Note**: If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" job IDs, e.g.:
+**Note**: If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" job IDs.
 <details>
 <summary><strong>Example: concatenate unsuccessful job IDs</strong></summary>
+
 ```
 all_failed_ids=
 for fail_list in "${fail_job_ids}" "${unfinished_job_ids}" "${undispatched_job_ids}" "${expired_job_ids}"; do
     [ -n "${fail_list}" ] && all_failed_lists="${all_failed_lists}${all_failed_lists: }${fail_list}"
 done
 ```
+
 </details>
 
 <details>
