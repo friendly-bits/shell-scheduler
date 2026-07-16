@@ -4,6 +4,13 @@ The goal of this project is to implement a reliable, reusable, flexible and reas
 
 > If you find this niche little project useful, please take a second to give it a star on GitHub — this helps people to find it.
 
+## Motivation
+This library is designed to solve 4 problems:
+1. Implement jobs as shell functions.
+2. Provide application-specific context to jobs.
+3. Easily track job completions (and timeouts) and act on them in real time.
+4. Minimum dependencies: Linux kernel, compatible shell, `mkfifo`, `mkdir` and `rm` - that's it.
+
 ## Features
 
 - **Parallel job scheduling**: execute independent jobs concurrently, up to a configurable maximum number of running jobs.
