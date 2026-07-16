@@ -5,11 +5,12 @@ The goal of this project is to implement a reliable, reusable, flexible and reas
 > If you find this niche little project useful, please take a second to give it a star on GitHub — this helps people to find it.
 
 ## Motivation
-This library is designed to solve 4 problems:
-1. Implement jobs as shell functions.
-2. Provide application-specific context to jobs.
-3. Easily track job completions (and timeouts) and act on them in real time.
-4. Minimum dependencies: Linux kernel, compatible shell, `mkfifo`, `mkdir` and `rm` - that's it.
+This library is designed to solve the following problems:
+1. Separate parallelization orchestration code from application-specific code.
+2. Allow implementing jobs as shell functions.
+3. Provide application-specific context to jobs.
+4. Easily track job completions (and timeouts) and act on them in real time.
+5. Minimum dependencies: Linux kernel, compatible shell, `mkfifo`, `mkdir` and `rm` - that's it.
 
 ## Features
 
