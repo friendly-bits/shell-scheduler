@@ -10,7 +10,7 @@
 # 'run <category>' - run all tests in the given category
 # 'run <category> <space_separated_list_of_numbers>' - e.g. 'run params 1 3 5'
 # 'run <category> <test_num_start>-<test_num_end>' - run tests in a range, e.g. 'run scheduler_termination 3-6'
-# Categories: dispatch, core, scheduler_termination, config, params, misc, outcome, timeout, job_termination
+# Categories: dispatch, core, scheduler_termination, config, params, misc, outcome, timeout, job_termination, security
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 
@@ -106,6 +106,15 @@ verify_recorded_set() {
 # Write each whitespace-separated ID-set arg to its own file at "${1}.<suffix>".
 # 1: file prefix
 # 2: ok_ids  3: fail_ids  4: unfinished_ids  5: undispatched_ids  6: expired_ids
+write_id_sets() {
+	local wis_prefix="${1:?}"
+
+	printf '%s\n' "${2}" > "${wis_prefix}.ok"
+	printf '%s\n' "${3}" > "${wis_prefix}.fail"
+	printf '%s\n' "${4}" > "${wis_prefix}.unfinished"
+	printf '%s\n' "${5}" > "${wis_prefix}.undispatched"
+	printf '%s\n' "${6}" > "${wis_prefix}.expired"
+}
 
 done_handler() {
 	echo "done idx='$1' rv='$2'"
@@ -228,13 +237,14 @@ run_generic_test() {
 . "${script_dir}/tests-outcome.sh"
 . "${script_dir}/tests-timeout.sh"
 . "${script_dir}/tests-job_termination.sh"
+. "${script_dir}/tests-security.sh"
 
 
 #
 # Category registry
 #
 
-TEST_CATEGORIES="dispatch core scheduler_termination config params misc outcome timeout job_termination"
+TEST_CATEGORIES="dispatch core scheduler_termination config params misc outcome timeout job_termination security"
 
 is_valid_cat() {
 	case " ${TEST_CATEGORIES} " in

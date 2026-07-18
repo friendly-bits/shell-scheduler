@@ -28,16 +28,6 @@ verify_id_set() {
 	[ "${vis_expected}" = "${vis_actual}" ]
 }
 
-write_id_sets() {
-	local wis_prefix="${1:?}"
-
-	printf '%s\n' "${2}" > "${wis_prefix}.ok"
-	printf '%s\n' "${3}" > "${wis_prefix}.fail"
-	printf '%s\n' "${4}" > "${wis_prefix}.unfinished"
-	printf '%s\n' "${5}" > "${wis_prefix}.undispatched"
-	printf '%s\n' "${6}" > "${wis_prefix}.expired"
-}
-
 
 #
 # Tests
@@ -481,21 +471,12 @@ test_outcome_07() {
 	fi
 }
 
-# Verify a job-ID list containing glob/injection-shaped IDs is rejected upfront:
-#   schedule_jobs() fails (rv=1), nothing is dispatched, the embedded command
-#   substitution is never evaluated, and SCHED_FINALIZE_CB's ok/fail sets are
-#   never written. Job IDs are restricted to [a-zA-Z0-9_] (REFERENCE.md).
+# Verify the union of ok/fail/unfinished/undispatched/expired delivered to
+#   SCHED_FINALIZE_CB equals the full job-ID list passed to schedule_jobs(),
+#   and every job ID appears in exactly one bucket.
+#   Bucket-agnostic: asserts the partition invariant, not which bucket each ID lands in
+#   (test_outcome_06 checks specific membership).
 test_outcome_08() {
-	outcome_08_touch_inject() { touch "${INJECT_FILE:?}"; }
-
-	outcome_08_do_job() {
-		touch "${DISPATCH_FILE:?}"
-		case "${1}" in
-			*ok_marker*) return 0 ;;
-			*) return 1 ;;
-		esac
-	}
-
 	outcome_08_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
@@ -503,73 +484,6 @@ test_outcome_08() {
 
 	local \
 		TEST_ID=outcome_08 \
-		sched_rv \
-		ok_raw fail_raw \
-		inject_exists dispatch_exists \
-		bad_ok_id bad_fail_id \
-		jobs
-
-	bad_ok_id='ok_marker_$(outcome_08_touch_inject)'
-	bad_fail_id='fail_marker_`outcome_08_touch_inject`'
-	jobs="${bad_ok_id} ${bad_fail_id}"
-
-	local \
-		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
-		INJECT_FILE="/tmp/sched.inject8.${TEST_ID:?}.$$" \
-		DISPATCH_FILE="/tmp/sched.dispatch8.${TEST_ID:?}.$$"
-
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${INJECT_FILE}" "${DISPATCH_FILE}"
-
-	print_test_header "${TEST_ID:?}" "Injection-shaped job IDs are rejected upfront, never classified" "${jobs}"
-
-	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_08_finalize_handler \
-	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=outcome_08_do_job \
-	SCHED_MAX_JOBS=2 \
-	SCHED_TIMEOUT_S=5 \
-	SCHED_IDLE_TIMEOUT_S=5 \
-		schedule_jobs "${jobs}" &
-
-	wait "$!"
-	sched_rv=$?
-
-	# Capture marker existence before cleanup, for both the check and diagnostics
-	[ -e "${INJECT_FILE}" ] && inject_exists=yes || inject_exists=no
-	[ -e "${DISPATCH_FILE}" ] && dispatch_exists=yes || dispatch_exists=no
-
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${INJECT_FILE}" "${DISPATCH_FILE}"
-
-	# Rejected upfront: rv=1, no injection, no dispatch, finalize sets unwritten
-	if [ "${sched_rv}" = 1 ] &&
-		[ "${inject_exists}" = no ] &&
-		[ "${dispatch_exists}" = no ] &&
-		[ -z "${ok_raw}" ] &&
-		[ -z "${fail_raw}" ]
-	then
-		PASS "list rejected (rv=1), no dispatch, no injection, sets unwritten"
-		return 0
-	else
-		FAIL "sched_rv=${sched_rv} (want 1), inject_exists=${inject_exists}, dispatch_exists=${dispatch_exists}, ok_raw='${ok_raw}', fail_raw='${fail_raw}'"
-		return 1
-	fi
-}
-
-# Verify the union of ok/fail/unfinished/undispatched/expired delivered to
-#   SCHED_FINALIZE_CB equals the full job-ID list passed to schedule_jobs(),
-#   and every job ID appears in exactly one bucket.
-#   Bucket-agnostic: asserts the partition invariant, not which bucket each ID lands in
-#   (test_outcome_06 checks specific membership).
-test_outcome_09() {
-	outcome_09_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-	}
-
-	local \
-		TEST_ID=outcome_09 \
 		sched_rv \
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw \
 		exp_union act_union \
@@ -592,7 +506,7 @@ test_outcome_09() {
 	# 1s budget; hang_1 is still running when SCHED_TIMEOUT_S fires (unfinished);
 	# ok_2, ok_3 are never dispatched.
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_09_finalize_handler \
+	SCHED_FINALIZE_CB=outcome_08_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \

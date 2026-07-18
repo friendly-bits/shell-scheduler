@@ -262,3 +262,54 @@ test_core_05() {
 	fi
 }
 
+# Verify the standalone param/timeout helpers do not leak the caller's noglob
+#   (set -f) state: they save and restore it around internal set -f sections
+#   (e.g. job_get_params 'sch_all'). Checked in both glob-enabled and
+#   glob-disabled callers via ${-}. Direct calls, no scheduler run.
+test_core_06() {
+	local \
+		TEST_ID=core_06 \
+		mode now \
+		pass_cnt=0 \
+		P Q \
+		job_id=core_06_job
+
+	print_test_header "${TEST_ID:?}" "Standalone helpers preserve caller noglob state" \
+		"(direct calls, no scheduler run)"
+
+	job_set_params "${job_id}" "P=v"
+
+	for mode in glob noglob; do
+		case "${mode}" in
+			glob) set +f ;;
+			noglob) set -f ;;
+		esac
+
+		# Exercise each helper, including the set -f 'sch_all' path in job_get_params
+		job_set_params  "${job_id}" "Q=w"
+		job_get_params  "${job_id}" P
+		job_get_params  "${job_id}" sch_all
+		job_set_timeout "${job_id}" 5
+
+		now=glob
+		case "${-}" in *f*) now=noglob ;; esac
+
+		# Restore glob for the harness before evaluating/looping
+		set +f
+
+		if [ "${now}" = "${mode}" ]; then
+			pass_cnt=$((pass_cnt + 1))
+		else
+			printf 'helper leaked -f: caller was %s, became %s\n' "${mode}" "${now}" >&2
+		fi
+	done
+
+	if [ "${pass_cnt}" = 2 ]; then
+		PASS
+		return 0
+	else
+		FAIL "passed=${pass_cnt}/2"
+		return 1
+	fi
+}
+
