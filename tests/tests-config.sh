@@ -402,8 +402,8 @@ test_config_08() {
 		PASS "fifo_in_dir=${fifo_in_dir}, sched_rv=${sched_rv}, bad_rv=${bad_rv}"
 		return 0
 	else
-		rm -rf "${custom_dir}"
 		FAIL "sched_rv=${sched_rv}, fifo_in_dir=${fifo_in_dir}, fifo_left=$([ -e "${sched_fifo}" ] && echo yes || echo no), bad_rv=${bad_rv}"
+		rm -rf "${custom_dir}"
 		return 1
 	fi
 }

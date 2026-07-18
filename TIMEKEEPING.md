@@ -55,13 +55,13 @@ An individual job's timeout can be set (overriding `${SCHED_JOB_TIMEOUT_S}` for 
 job_set_timeout <job_id> <seconds>
 ```
 
-Value must be non-zero unsigned decimal integer. A per-job timeout may exceed `${SCHED_TIMEOUT_S}` but such deadline simply never fires (the global scheduler timeout fires first). When neither `${SCHED_JOB_TIMEOUT_S}` nor an individual timeout is set, the job will be allowed to run indefinitely.
+Timeout value must be integer >= 1. A per-job timeout may exceed `${SCHED_TIMEOUT_S}` but such deadline simply never fires (the global scheduler timeout fires first). When neither `${SCHED_JOB_TIMEOUT_S}` nor an individual timeout is set, the job will be allowed to run indefinitely.
 
-### Semantics
+### Notes
 
-1. **Deadline definition.** A job's deadline is its dispatch time plus its timeout. Per the [enforcement granularity rules](#how-the-scheduler-measures-time), expiry is never declared early and may be declared up to about one second late - later still if a synchronous callback blocks the scheduler at that moment.
-2. **Expiry means abandon, not kill.** The scheduler stops waiting for the job, frees its concurrency slot, classifies it as timed out and calls the **job completion callback** (`JOB_DONE_CB`) - but does **not** signal the job's process, consistent with the [termination policy](REFERENCE.md#termination-of-running-jobs). The process may continue running; terminating it (and any children it spawned, e.g. via `pgrep -P`) is the application's responsibility.
-3. **Notification.** A timed-out job is reported through the normal completion channel with job return code `124` and one extra argument:
+1. **Expiry timing**: Per the [enforcement granularity rules](#how-the-scheduler-measures-time), expiry is never declared early and may be declared up to about one second late - later still if a synchronous callback blocks the scheduler at that moment.
+2. **Expiry handling**: when a job-specific timeout occurs, the scheduler stops waiting for the expired job, frees its concurrency slot and classifies it as timed out. When  the **job termination callback** (`JOB_TERM_CB`) is configured, the scheduler then calls it, passing the PID of the job's process. Otherwise no action is taken to kill the lingering job processes. Next, the **job completion callback** (`JOB_DONE_CB`) is called.
+3. **Expiry notification**: a timed-out job is reported via a call to `${JOB_DONE_CB}` with job return code `124` and one extra argument:
 
    ```sh
    ${JOB_DONE_CB} <job_id> 124 <pid>
@@ -70,13 +70,13 @@ Value must be non-zero unsigned decimal integer. A per-job timeout may exceed `$
    The **presence of the third argument** marks a scheduler-synthesized timeout (vs similar return code received directly from the job). If a job itself genuinely exits with code `124`, this third argument will not be present. The `<pid>` enables application-side cleanup at the moment of expiry.
 4. **Completion record arrival wins over expiry.** On each scheduler wake-up, a received completion record is processed before deadlines are checked.
 5. **Job expiries do not count as progress.** The idle timeout is reset when the scheduler starts a job or processes a genuine completion record - never when it processes an expiry.
-6. **Late completion records are discarded.** If an abandoned job's completion record arrives after its expiry was processed, the record is silently dropped; the job's classification (timed out, code `124`) stands.
-7. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler termination callback** - not in `<fail_job_ids>`, which is reserved for jobs that exited with a non-zero code. Abandoned jobs whose process never reported back before scheduler exit have their PIDs included in `<running_pids>`; abandoned jobs whose late record was discarded do not.
+6. **Late completion records are discarded.** If an abandoned job's completion record arrives after its expiry was processed, the record is silently dropped; the job's classification (timed out, code `124`) stands. The job's PID is removed from the list of `<running_pids>`.
+7. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler termination callback** - not in `<fail_job_ids>`, which is reserved for jobs that exited with a non-zero code. Abandoned jobs whose process never reported back before scheduler exit have their PIDs included in `<running_pids>`; abandoned jobs whose late record was discarded do not, and neither do jobs whose kill was verified by the [job termination callback](REFERENCE.md#job-termination-callback-details).
 
 ### Implementation notes (internal)
 
 - Deadlines are tracked in the scheduler process only.
-- Deadline entries are encoded as `<pid>:<deadline_cs>:<job_id>`. The first two fields are unsigned integers, so the job ID is parsed as the trailing remainder and may safely contain any non-whitespace character, including `:`.
+- Deadline entries are encoded as `<pid>:<deadline_cs>:<job_id>`. The first two fields are unsigned integers and job IDs contain neither `:` nor whitespace, so the job ID is parsed unambiguously as the trailing remainder.
 - All integration lives in the completion-wait path (`process_done_record()`): the `read -t` wait is capped by min(global remaining, idle remaining, nearest deadline remaining); expired deadlines are swept unconditionally at the end of every wake, after any received completion record has been fully processed (rule 4).
 - Late-record handling (rule 7): a record whose PID is in the running list is processed normally; otherwise, if its PID **and** job ID match a recorded expiry, it is discarded and the expiry entry is delisted; otherwise it is malformed (fatal). Checking the running list first is what makes PID reuse safe: a reused PID always belongs to a currently-running job.
 - Deadline bookkeeping (splitting off expired entries, slot reclamation, completion synthesis) and the record-classification decision (normal / discard / malformed) are inlined in `process_done_record()`. By test-suite policy, all of it is covered by behavior tests through the public interface only (`schedule_jobs()`, the documented helpers, environment variables and callbacks), so internal restructuring requires no test changes. The discard arm is tested deterministically by having a test `JOB_DONE_CB` forge the timed-out job's late completion record into the FIFO at the moment of the timeout notification.

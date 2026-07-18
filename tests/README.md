@@ -1,8 +1,10 @@
 ## Test suite
 
-Consists of tests.sh and (currently) 8 category-specific test files. tests.sh is the launcher/entry point, the other files are categorized libraries of tests.
+Consists of tests.sh and (currently) 9 category-specific test files. tests.sh is the launcher/entry point, the other files are categorized libraries of tests.
 
-Categories: `dispatch`, `core`, `termination`, `config`, `params`, `misc`, `outcome`, `timeout`
+Categories: `dispatch`, `core`, `scheduler_termination`, `config`, `params`, `misc`, `outcome`, `timeout`, `job_termination`
+
+Note: the `job_termination` category covers the modular job termination feature (`JOB_TERM_CB`) and its two bundled libraries. Tests of the cgroup library require an environment where it is supported: root, or a delegated cgroup v2 subtree - e.g. run the suite via `systemd-run --user --scope sh ./tests.sh run job_termination`. In an unsupported environment those tests report SKIP (counted separately in the summary), while the core-contract and proc-library tests still run.
 
 ### Testing suite command line options
 
@@ -23,4 +25,4 @@ Options:
 - `run` - run all tests, across all categories
 - `run <category>` - run all tests in the given category
 - `run <category> <space_separated_list_of_numbers>` - e.g. 'run params 1 3 5'
-- `run <category> <test_num_start>-<test_num_end>` - run tests in a range, e.g. 'run termination 3-6'
+- `run <category> <test_num_start>-<test_num_end>` - run tests in a range, e.g. 'run scheduler_termination 3-6'

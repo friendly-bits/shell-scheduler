@@ -118,4 +118,4 @@ Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md]
 
 ## Real-world example
 
-For a complete integration example, see [`hagezi-fetch.sh`](hagezi-fetch.sh) - a concurrent downloader for DNS blocklists. It demonstrates per-job parameters, signal forwarding, cleanup of orphaned child processes, and bookkeeping across callbacks. A full walkthrough of these patterns is in the [reference](REFERENCE.md#real-world-example).
+For an integration example, see [`EXAMPLE-HAGEZI-FETCH.md`](EXAMPLE-HAGEZI-FETCH.md) - a concurrent downloader for DNS blocklists. It demonstrates per-job parameters, signal forwarding, cleanup of orphaned child processes, and bookkeeping across callbacks.

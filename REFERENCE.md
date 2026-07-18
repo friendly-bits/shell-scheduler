@@ -12,7 +12,7 @@ Complete technical reference for the `shell-scheduler` library. If you're just g
 - [Timeouts](#timeouts)
 - [Signal handling](#signal-handling)
 - [Termination of running jobs](#termination-of-running-jobs)
-- [Real-world example](#real-world-example)
+- [Job termination callback (details)](#job-termination-callback-details)
 
 ## How to use (Scheduler API)
 
@@ -22,7 +22,7 @@ To start the scheduler:
 schedule_jobs "<job_id_list>" [arg1 [arg2 ...]] &
 ```
 
-- `<job_id_list>` : a string containing one or more job IDs separated by any combination of spaces, tabs and newlines (prefer spaces for simplicity). Job IDs themselves must not contain any of the above delimiters. Any other character is allowed.
+- `<job_id_list>` : a string containing one or more job IDs separated by any combination of spaces, tabs and newlines (prefer spaces for simplicity). Job IDs must be non-empty and may only contain the characters `a-z`, `A-Z`, `0-9`, `_` (a leading digit is allowed). `schedule_jobs()` validates the list upfront and fails (return code `1`, nothing dispatched) on any invalid or duplicate ID.
 - `arg1 [arg2 ...]` : optional additional arguments. Passed as-is to every invocation of the **job execution callback** (`DO_JOB_CB`) after the job ID.
 
 As a general rule, run the scheduler in a background process: `schedule_jobs <job_ids> & ... wait ${!}`. Alternatively, for certain use cases, running it in a foreground subshell may be preferable. Below spoiler provides more information.
@@ -49,10 +49,10 @@ rv=$?
 rv=$?
 ```
 
-- **Background (`& ... wait`)** - use when the application must stay in control while jobs run: doing concurrent work, supervising progress, or cancelling the batch on demand. Because your script keeps running (and `wait` is interruptible by its traps), it can react to terminal or service signals and translate them into a graceful scheduler cancellation with `kill -USR1 "${sched_pid}"` - see [Signal handling](#signal-handling) and the [real-world example](#real-world-example). Note that a backgrounded scheduler may not see `Ctrl-C` itself, so this signal-forwarding pattern is also what connects `Ctrl-C` to the scheduler's cleanup path. This is the pattern used throughout this documentation and the bundled examples.
+- **Background (`& ... wait`)** - use when the application must stay in control while jobs run: doing concurrent work, supervising progress, or cancelling the batch on demand. Because your script keeps running (and `wait` is interruptible by its traps), it can react to terminal or service signals and translate them into a graceful scheduler cancellation with `kill -USR1 "${sched_pid}"` - see [Signal handling](#signal-handling). Note that a backgrounded scheduler may not see `Ctrl-C` itself, so this signal-forwarding pattern is also what connects `Ctrl-C` to the scheduler's cleanup path. This is the pattern used throughout this documentation and the bundled examples.
 - **Foreground subshell (`( ... )`)** - use for the simple synchronous case: run the batch, then continue with its return code. `Ctrl-C` handling gets simpler: the subshell runs in the terminal's foreground process group, so `SIGINT` reaches the scheduler directly and triggers its normal cleanup path (return code `84`, termination callback invoked). The trade-offs: your script is blocked until the scheduler exits - it cannot do concurrent work, and its own traps will not run until then - and there is no scheduler PID at hand, so the batch cannot be cancelled from the application side.
 
-In both modes, a signal delivered only to your application's PID (e.g. `kill -TERM <app_pid>`, as opposed to `Ctrl-C`, which signals the whole process group) leaves the scheduler and its jobs running as orphans. Only the background form lets you close that gap, by forwarding the signal as shown in the [real-world example](#real-world-example).
+In both modes, a signal delivered only to your application's PID (e.g. `kill -TERM <app_pid>`, as opposed to `Ctrl-C`, which signals the whole process group) leaves the scheduler and its jobs running as orphans. Only the background form lets you close that gap, by forwarding the signal as shown in the [EXAMPLE-HAGEZI-FETCH.md](EXAMPLE-HAGEZI-FETCH.md).
 
 </details>
 
@@ -83,9 +83,13 @@ If configuration validation fails, callback execution fails, a timeout is reache
 
 ## Callbacks
 
-All callbacks are specified by assigning the callback name to the corresponding environment variable before calling `schedule_jobs()`. Callback values must be command names only - arguments are not allowed. A callback will normally be the name of a shell function implemented by your script (alternatively, for a very simple callback which only needs to call a binary without any arguments, you can assign the binary path to the callback variable). The section [Job parameters](#job-parameters) explains how to pass parameters to each individual job.
+All callbacks are specified by assigning the callback name to the corresponding environment variable before calling `schedule_jobs()`. Callback values must be command names only - arguments are not allowed.
 
-> **Note**: All callbacks, except the **job execution callback**, are invoked synchronously (in the foreground, from the scheduler's perspective). Synchronous callbacks block scheduler execution, bookkeeping and time-keeping. Previously started jobs do continue to run, but the scheduler will not launch new jobs or register job completions until the callback returns control to the scheduler. For this reason, avoid including commands which may stall for a prolonged time in such callbacks.
+shell-scheduler expects each callback to be implemented in your script as a shell function. If you want to use external commands for your callbacks, wrap them in a shell function.
+
+> **Note**: All callbacks, except the **job execution callback**, are invoked synchronously (in the foreground, from the scheduler's perspective). Synchronous callbacks block scheduler execution, bookkeeping and time-keeping. Previously started jobs do continue to run, but the scheduler will not launch new jobs or register job completions until the callback returns control to the scheduler. Avoid including commands which may stall for a prolonged time in such callbacks.
+>
+> Because synchronous callbacks run in the scheduler's own shell process, they are able to change the values of scheduler's internal variables. Hence the API reserves variables whose names start with `sch_`, `_sch_`, `SCH_` or `SCHED_` for internal use: callbacks must not assign values to them. Best practice for callbacks is to declare their own working variables `local` in order to avoid any namespacing issues altogether. If your code ignores this advice and changes values of the scheduler's internal variables, strange things may happen.
 
 ### Job execution callback (required)
 
@@ -128,16 +132,19 @@ ${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_j
 - `<running_pids>`: PIDs corresponding to jobs that the scheduler started but did not receive completion records for. Under normal operation this is an empty string.
 - `<ok_job_ids>`: job IDs whose **job execution callback** (`DO_JOB_CB`) returned code `0`.
 - `<fail_job_ids>`: job IDs whose **job execution callback** returned a non-zero code.
-- `<unfinished_job_ids>`: job IDs that were dispatched (i.e. a process was started for them) but for which no completion record was received before the scheduler exited. Under normal operation this is an empty string; it becomes non-empty when the scheduler exits before all dispatched jobs report back, e.g. due to a timeout, a signal, a fatal error, or a non-zero return code from `JOB_DONE_CB`.
 - `<undispatched_job_ids>`: job IDs that were never started at all. Under normal operation this is an empty string; it becomes non-empty when the scheduler exits before it has dispatched every job ID from the original list.
-- `<expired_job_ids>`: job IDs abandoned via a [per-job timeout](TIMEKEEPING.md#per-job-timeouts). Empty unless per-job timeouts are in use. Unlike a failed job, an expired job's process may still be running at this point - and unless your code kills it, may even complete later. The PIDs of expired jobs which the scheduler never got a completion record from (including after expiration time) will be included in the list of `<running_pids>`.
+- `<expired_job_ids>`: job IDs abandoned via a [per-job timeout](TIMEKEEPING.md#per-job-timeouts). Empty unless per-job timeouts are in use. Unlike a failed job, an expired job's process may still be running at this point - and unless your code kills it, may even complete later (with a [job termination callback](#job-termination-callback-job_term_cb) configured, the scheduler kills it at expiry time instead). The PIDs of expired jobs which the scheduler never got a completion record from (including after expiration time) will be included in the list of `<running_pids>` - except those whose kill was verified by the termination callback.
+- `<unfinished_job_ids>`: dispatched jobs whose [per-job timeout](TIMEKEEPING.md#per-job-timeouts) did not expire, but which had not yet completed when the scheduler exited early - because of a signal, a fatal error, a timeout (global or idle), or a non-zero return code from `JOB_DONE_CB`. Under normal operation this is an empty string. Note that the scheduler exiting does not by itself terminate these jobs' processes - see [Termination of running jobs](#termination-of-running-jobs).
 
 (all above lists are space-separated)
 
 If this callback returns a non-zero code while `<scheduler_return_code>` is `0`, the scheduler exits with the callback's return code instead. Otherwise, the scheduler's return code is unchanged.
 
-**Note**: every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of `<ok_job_ids>`, `<fail_job_ids>`, `<unfinished_job_ids>`, `<undispatched_job_ids>`, `<expired_job_ids>`. This makes them a convenient basis for final bookkeeping, logging, or cleanup in the **scheduler termination callback**, without having to separately track job status yourself.
-**Note**: If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" job IDs.
+**Notes**:
+- every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of `<ok_job_ids>`, `<fail_job_ids>`, `<unfinished_job_ids>`, `<undispatched_job_ids>`, `<expired_job_ids>`. This makes them a convenient basis for final bookkeeping, logging, or cleanup in the **scheduler termination callback**, without having to separately track job status yourself.
+- The scheduler does not terminate expired and unfinished jobs on its own. See [Termination of running jobs](#termination-of-running-jobs).
+- If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" job IDs.
+
 <details>
 <summary><strong>Example: concatenate unsuccessful job IDs</strong></summary>
 
@@ -201,6 +208,10 @@ Timed out:    <none>
 Since all five jobs run to completion in this example, `<unfinished_job_ids>`, `<undispatched_job_ids>` and `<expired_job_ids>` are all empty - see the [Timeouts](#timeouts) and [Signal handling](#signal-handling) sections below for cases where the first two are populated, and [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) for the third.
 
 </details>
+
+### Job termination callback (`JOB_TERM_CB`)
+
+This callback exists to support implementing scheduler-assisted termination of **expired** and **unfinished** jobs. Details in [Job termination callback (details)](#job-termination-callback-details).
 
 ### Scheduler error reporting callback (optional)
 
@@ -277,7 +288,7 @@ job_get_params -export "job1" filename url
 
 ### Automatic parameters (`SCHED_AUTO_PARAMS`)
 
-If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job, including if the job is implemented as an external command (rather than as a shell function). Note that in that case, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
+If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job and any external commands it calls. Note that when using automatic parameters, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
 
 <details>
 <summary><strong>Example with `SCHED_AUTO_PARAMS=1`</strong></summary>
@@ -358,12 +369,14 @@ The scheduler is configured entirely through environment variables. Required var
 | JOB_DONE_CB               |          |  unset  | Command implementing the job completion callback.                                                                                |
 | SCHED_FINALIZE_CB         |          |  unset  | Command implementing the scheduler termination callback.                                                                         |
 | SCHED_FAIL_MSG_CB         |          |  unset  | Command implementing the scheduler error reporting callback.                                                                     |
+| JOB_TERM_CB               |          |  unset  | Command implementing the job termination callback. See [Job termination callback](#job-termination-callback-job_term_cb).    |
 | SCHED_MAX_JOBS            |     *    |    -    | Concurrency limit ( integer >= 1 ).                                                                                              |
 | SCHED_TIMEOUT_S           |          |  `900`  | Global scheduler timeout in seconds ( integer >= 1 ).                                                                            |
-| SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job starts or completions ( integer >= 1 ).                                       |
+| SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job starts or completions ( integer >= 1 ).                                        |
 | SCHED_JOB_TIMEOUT_S       |          |  unset  | Default per-job timeout in seconds ( integer >= 1 ); override per job via `job_set_timeout()`. See [TIMEKEEPING.md](TIMEKEEPING.md#per-job-timeouts). |
 | SCHED_DIR                 |          |  `/tmp` | Directory in which the scheduler creates its FIFO used for communication with running jobs. Trailing `/` characters are ignored. |
 | SCHED_AUTO_PARAMS         |          |  unset  | Whether to export job-specific params when initializing each job ( 1 to enable, any other value to disable ).                    |
+| SCHED_CGROUP_BASE         |          |  unset  | Read by the `scheduler-job-term-cgroup.sh` library, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
 
 Notes:
 
@@ -405,80 +418,89 @@ The scheduler installs handlers for signals `USR1`, `INT`, `TERM`. When any of t
 
 ## Termination of running jobs
 
-The scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received. If your application needs to stop unfinished jobs, implement this in the **scheduler termination callback** using the list of unfinished job PIDs (`<running_pids>`) passed to it. The corresponding job IDs are also available - in `<unfinished_job_ids>` and, for jobs abandoned via [per-job timeout](TIMEKEEPING.md#per-job-timeouts), in `<expired_job_ids>` - if your cleanup or logging is keyed by job ID rather than by PID.
+By default, the scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received.
 
-## Real-world example
+If your application needs to stop expired and unfinished jobs, you can either set up the **job termination callback** (see next section) or implement custom job termination in the **scheduler termination callback** using the list of unfinished job PIDs (`<running_pids>`) passed to it. The corresponding job IDs are also available - in `<unfinished_job_ids>` and, for jobs abandoned via [per-job timeout](TIMEKEEPING.md#per-job-timeouts), in `<expired_job_ids>` - if your cleanup or logging is keyed by job ID rather than by PID.
 
-For a real-world integration example, check out [`hagezi-fetch.sh`](hagezi-fetch.sh). It implements a concurrent downloader for DNS blocklists.
+## Job termination callback (details)
 
-*Note 1: `wget` and `pgrep` are dependencies of this specific example, not the `shell-scheduler` library.*
+The scheduler can facilitate termination of unfinished and expired jobs via the **job termination callback** interface. This allows termination of any descendants (children, grandchildren etc) of processes spawned by the jobs.
 
-*Note 2: this example script intentionally includes an invalid download URL to showcase scheduler error tracking and propagation.*
+This callback, as all shell-scheduler callbacks, must be implemented as a shell function.
 
-Implementation highlights you will likely need in your own projects utilizing this library:
+The scheduler invokes the **job termination callback** - `${JOB_TERM_CB}` - like so:
 
-### 1. Passing parameters to jobs
-
-As explained in the [Job parameters](#job-parameters) section above, this example sets job-specific parameters via `job_set_params`. Setting `SCHED_AUTO_PARAMS=1` makes it so these parameters are immediately available to each job as variables inside the **job execution callback** (`DO_JOB_CB`).
-
-```sh
-# Job-specific parameters are assigned in the main script
-job_set_params pro "url=https://..."
-
-# Job execution callback (showing only param-related details)
-download_list() {
-	local name="${1:?}"
-
-    # *With* SCHED_AUTO_PARAMS=1, the ${url} variable is set by the scheduler before callback invocation,
-    #   so ${url} *must not be declared local or reset* inside the callback
-
-    # *Without* SCHED_AUTO_PARAMS=1, declare the variable local and get its value from job_get_params:
-    # local url
-    # job_get_params "${name}" url || exit 1
-
-    wget -q -O "${OUT_DIR}/${name}.txt" "${url:?}"
-}
-
-# Setting SCHED_AUTO_PARAMS=1 tells the scheduler to fetch and export job-specific params when initializing each job
-# <...>
-SCHED_AUTO_PARAMS=1 \
-    schedule_jobs "${IDS}" &
+```
+${JOB_TERM_CB} <subcommand> [arguments]
 ```
 
-### 2. Signal forwarding
+A specific **subcommand** is used at each invocation point:
 
-Because the scheduler is designed to run asynchronously (in the background), terminating the application script with a signal does not automatically terminate the scheduler or its jobs, so if such termination happens, job subshells - as well as any commands started by those subshells - may continue execution.
+| When (invocation point)                                                | Purpose                                 | Subcommand | Arguments            | On non-zero return                                          |
+| -----------------------------------------------------------------------| --------------------------------------- | ---------- | -------------------- | ----------------------------------------------------------- |
+| **Scheduler startup**, before any job is dispatched                    | Initialize termination mechanism        | `init`     | None                 | `schedule_jobs()` fails with return code `1`                |
+| **Inside each job's process**, before invoking job execution callback  | Make job-specific arrangements          | `setup`    | `<job_id> <pid>`     | The job fails (job return code `1`, normal completion path) |
+| [per-job timeout](TIMEKEEPING.md#per-job-timeouts) expiry              | Kill process tree                       | `term`     | `<out_var> <pid>...` | Error reported; run continues                               |
+| **Scheduler exit - 1**, before invoking scheduler termination callback | Kill any still-running jobs + processes | `term`     | `<out_var> <pid>...` | Error reported                                              |
+| **Scheduler exit - 2**, before invoking scheduler termination callback | Tear down the job termination mechanism | `cleanup`  | `<out_var>`          | Error reported                                              |
 
-To handle this reliably, the example script traps signals `INT` and `TERM` and translates these signals into `USR1` sent to the scheduler's PID. This ensures the scheduler's native cleanup path is triggered and the **scheduler termination callback** (`SCHED_FINALIZE_CB`) is invoked and gets the chance to perform application-specific cleanup and/or to kill orphaned child processes, regardless of whether the interruption came from `Ctrl-C` or a direct `kill` command. The scheduler behaves identically when receiving signals `USR1`, `INT`, or `TERM`, except it exits with code `83` for `USR1` and with code `84` for `INT` or `TERM`.
+The below table shows the **action** taken by the two bundled libraries in response to each subcommand.
+
+| Subcommand | cgroup library action                                | /proc library action           |
+| ---------- | ---------------------------------------------------- | ------------------------------ |
+| `init`     | Create base cgroup                                   | None                           |
+| `setup`    | Join per-job cgroup                                  | None                           |
+| `term`     | Kill specified job's process tree                    | Discover, kill job's processes |
+| `cleanup`  | Kill all remaining job process trees; remove cgroups | None                           |
+
+
+The PIDs passed to `term` are job wrapper PIDs (the same PIDs reported in `<running_pids>`); the callback is responsible for terminating each job's whole process tree.
+
+**Notes**:
+- **`term` and `cleanup` may report verified kills via the output variable**: `<out_var>` is the name of a variable the callback may assign a whitespace-separated job PID list to - `export -n "${out_var}=<pids>"` - following the same indirection convention as the library's own helpers. A reported job PID asserts that the job's entire process tree has been killed; the scheduler then excludes it from the `<running_pids>` passed to the **scheduler termination callback**.
+- When terminating jobs and their descendants, both bundled libraries (discussed below) employ `SIGKILL`: jobs get no chance to trap it.
+
+### Bundled library: `scheduler-job-term-cgroup.sh`
+
+Kills each job's whole process tree via the kernel's **cgroup v2** `cgroup.kill` - including orphaned grandchildren whose parent already exited, which no PID-based mechanism can discover. Kills are kernel-verified: a job's cgroup can only be removed once every process in it is gone, and removal is what the library reports as verification - under normal operation `<running_pids>` is therefore empty even when jobs timed out or the scheduler exited early. The only processes that can escape are those that deliberately migrate themselves to another cgroup, which requires privileges job processes normally do not have.
+
+Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_cgroup`.
+
+Requirements (validated end-to-end by `init`, which fails the run upfront when unmet):
+
+- cgroup v2 mounted (checked via `/proc/mounts`), with `cgroup.kill` support (kernel >= 5.14).
+- The scheduler process must be able to create cgroups and move processes into them. Two supported setups, both requiring no pre-configuration:
+  - **Root**: works anywhere, e.g. on OpenWrt (24.10 and later has the required kernel; the kernel cgroup support is enabled in default builds except `SMALL_FLASH` targets).
+  - **Unprivileged with systemd**: works when the scheduler process runs inside a cgroup subtree delegated to the user, which is the case for anything started by the systemd **user** manager: a systemd user service, or any command launched via `systemd-run --user --scope <cmd>`. Processes of a plain login session (e.g. an SSH shell, which lives in a root-owned `session-N.scope`) are **not** inside the delegated subtree - wrap the invocation in `systemd-run --user --scope` in that case. For a **system** service running with `User=`, set `Delegate=yes` on the unit.
+
+Operation: `init` creates a per-run base cgroup (`sched_<pid>`) under the first writable location of: the scheduler's own cgroup, the cgroup2 mount root. Setting `${SCHED_CGROUP_BASE}` replaces the autodetection entirely - an advanced option, intended mainly for testing, or for unusual setups such as a pre-configured subtree with resource limits or an exotic container mount. Each job process then joins a fresh child cgroup (`job_<pid>`) via `setup`; every process the job spawns inherits the membership. Job cgroups are removed as jobs are terminated; at `cleanup`, all remaining job cgroups are killed and removed - including those of jobs that completed leaving background processes behind. The net guarantee: expired jobs die at expiry, and **nothing a job spawned survives the run** - even a double-forked daemon stays in its job's cgroup (the same containment property systemd services have). Removals the kernel has not yet confirmed are retried with a bounded wait, and a final failure is reported via the **scheduler error reporting callback**.
+
+To find out upfront whether this mechanism works - and fall back to another if not - call `cgroup_cleanup_supported` (defined by this library): it runs the same validation as `init`, cleans up after itself, emits no messages, honors `${SCHED_CGROUP_BASE}`, and returns `0` (supported) or `1` (not supported).
+
+### Bundled library: `scheduler-job-term-proc.sh`
+
+Kills each job's process tree by walking parent-PID links from `/proc/[0-9]*/stat` (a single pass, transitive closure computed in `awk`), then freezing the tree with `SIGSTOP` (re-scanning to a fixpoint, so nothing can fork its way out) and delivering `SIGKILL`. Works wherever `/proc` and `awk` are available - no cgroups, no root requirement - making it the fallback for hosts where the cgroup library is unsupported (e.g. OpenWrt `SMALL_FLASH` builds).
+
+Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_proc`.
+
+Limitations versus the cgroup library:
+
+- Only trees rooted at a **live** job process can be found: processes whose parent already exited are reparented to init and escape the walk. In particular, stragglers of a job that already **completed** are not reaped - the mechanism is effective at per-job expiry and scheduler exit, where the job process is still alive.
+- Kills are not verified (no PIDs are reported to the core), so `<running_pids>` keeps its default semantics.
+- The freeze phase briefly delivers `SIGSTOP` to the tree before the kill.
+
+### Programmatically choosing job termination mechanism
+Your appliation can implement automatic selection of job termination mechanism (depending on what the environment which the application is running on supports) as shown below.
 
 ```sh
+. ./scheduler.sh
+. ./scheduler-job-term-cgroup.sh # provides the helper 'cgroup_cleanup_supported'
+. ./scheduler-job-term-proc.sh
+
+if cgroup_cleanup_supported; then
+    JOB_TERM_CB=sched_job_term_cgroup
+else
+    JOB_TERM_CB=sched_job_term_proc
+fi
 schedule_jobs "${IDS}" &
-sched_pid=$!
-
-trap '
-    trap - INT TERM
-    kill -USR1 "${sched_pid}" 2>/dev/null
-    wait "${sched_pid}"
-    exit "$?"
-' INT TERM
 ```
-
-### 3. Cleaning up orphaned child processes
-
-The scheduler tracks the PIDs of the jobs (i.e. instances of the shell function `download_list()`, each running in a separate subshell). If your **job execution callback** invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler terminates before all jobs have completed, the subshell in which the callback lives, as well as any external binaries it called, will keep running as orphaned processes. The example script uses `pgrep -P` inside the **scheduler termination callback** (`SCHED_FINALIZE_CB`) to find and terminate the actual child processes along with the job subshell processes:
-
-```sh
-# Inside SCHED_FINALIZE_CB
-# (only the running_pids argument is used here; the job-ID arguments described
-#  in the Scheduler termination callback section are ignored by this snippet)
-for running_pid in ${running_pids}; do
-    child_pids="${child_pids}${child_pids:+ }$(pgrep -P "${running_pid}" 2>/dev/null)"
-done
-kill -TERM ${child_pids} ${running_pids} 2>/dev/null
-```
-
-### 4. Tracking state across callbacks
-
-This example implements a rudimentary application-specific bookkeeping (incrementing `SUCCESS_CNT` for each successful job) and combines that with scheduler-backed bookkeeping (fetching and reporting the list of jobs by status, i.e. `ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`, `expired_ids`).
-
-Because, from the application point of view, `schedule_jobs` runs in a background child process, any callbacks invoked by the scheduler are isolated from the application process. Hence variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks will not be visible in the scope of the application script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. Rudimentary in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`), while final processing of the collected information is in the **scheduler termination callback** (`SCHED_FINALIZE_CB`) and utilizes both information collected by the application (`SUCCESS_CNT`) and information collected by the scheduler (`ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`, `expired_ids`).

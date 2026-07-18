@@ -190,9 +190,9 @@ test_timeout_02() {
 }
 
 # Verify simultaneous multi-expiry through the public interface: three hung
-#   jobs sharing a 1s default budget - with IDs containing ':' and glob
-#   characters - are all classified as timed out: one (id, 124, pid) callback
-#   each, exact expired set, all abandoned pids reported, scheduler exits 0.
+#   jobs sharing a 1s default budget are all classified as timed out: one
+#   (id, 124, pid) callback each, exact expired set, all abandoned pids
+#   reported, scheduler exits 0.
 test_timeout_03() {
 	timeout_03_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
 	timeout_03_finalize() {
@@ -204,14 +204,14 @@ test_timeout_03() {
 		TEST_ID=timeout_03 \
 		sched_rv pid_cnt \
 		checks_ok=1 \
-		jobs='hang_t03a hang_t03:q:r hang_t03*g'
+		jobs='hang_t03a hang_t03b hang_t03c'
 
 	local \
 		DONE_FILE="/tmp/sched.t03.done.$$" \
 		FIN_FILE="/tmp/sched.t03.fin.$$"
 	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	print_test_header "${TEST_ID:?}" "Simultaneous expiries with adversarial job IDs (SCHED_JOB_TIMEOUT_S)" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Simultaneous expiries of three hung jobs (SCHED_JOB_TIMEOUT_S)" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=timeout_03_finalize \
@@ -229,10 +229,10 @@ test_timeout_03() {
 	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
 	[ "$(grep -c -F '|124|' "${DONE_FILE}" 2>/dev/null)" = 3 ] &&
 	grep -q -F '3|hang_t03a|124|' "${DONE_FILE}" 2>/dev/null &&
-	grep -q -F '3|hang_t03:q:r|124|' "${DONE_FILE}" 2>/dev/null &&
-	grep -q -F '3|hang_t03*g|124|' "${DONE_FILE}" 2>/dev/null ||
+	grep -q -F '3|hang_t03b|124|' "${DONE_FILE}" 2>/dev/null &&
+	grep -q -F '3|hang_t03c|124|' "${DONE_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "expected one timeout record per job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
-	grep -qxF 'expired=hang_t03a hang_t03:q:r hang_t03*g' "${FIN_FILE}" 2>/dev/null &&
+	grep -qxF 'expired=hang_t03a hang_t03b hang_t03c' "${FIN_FILE}" 2>/dev/null &&
 	grep -qxF 'fail=' "${FIN_FILE}" 2>/dev/null &&
 	grep -qxF 'unfin=' "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }

@@ -1,46 +1,29 @@
 #!/bin/sh
 # shellcheck disable=SC3043,SC3045,SC3003
 
+# Env vars specifying parameters (see REFERENCE.md):
+# SCHED_MAX_JOBS
+# SCHED_TIMEOUT_S
+# SCHED_IDLE_TIMEOUT_S
+# SCHED_JOB_TIMEOUT_S
+# SCHED_DIR
+# SCHED_AUTO_PARAMS
 
-# Environment variables specifying parameters:
-# SCHED_MAX_JOBS        Maximum number of concurrent jobs (integer >= 1)
-# SCHED_TIMEOUT_S       Global scheduler timeout (seconds)
-# SCHED_IDLE_TIMEOUT_S  Maximum allowed time without job starts or completions (seconds)
-# SCHED_JOB_TIMEOUT_S   Optional default per-job timeout (seconds); per-job override via job_set_timeout(). See TIMEKEEPING.md.
-# SCHED_DIR             Directory used to store scheduler FIFO. Defaults to /tmp if unset.
-# SCHED_AUTO_PARAMS     Automatically assign and export job-specific param variables before starting each job (1 = on, unset or another value = off)
-
-# Environment variables specifying callbacks:
-#  (command name only - no arguments)
-
-# DO_JOB_CB             Command implementing a job:
-#                         <cmd> <job_id> [extra_args_passed_to_scheduler...]
-
-# SCHED_FAIL_MSG_CB     Optional command reporting scheduler errors (default: STDERR):
-#                         <cmd> <message...>
-
-# SCHED_FINALIZE_CB     Optional command invoked when the scheduler exits:
-#                         <cmd> <scheduler_return_code> <running_pids> <ok_job_ids> <fail_job_ids> <unfinished_job_ids> <undispatched_job_ids> <expired_job_ids>
-#                       <running_pids> is normally empty; non-empty when the scheduler exits before all jobs complete
-#                       <expired_job_ids> are jobs abandoned via per-job timeout (see TIMEKEEPING.md)
-
-# JOB_DONE_CB           Optional command invoked after each completed job:
-#                         <cmd> <job_id> <job_return_code>
-#                       For a job abandoned via per-job timeout (see TIMEKEEPING.md):
-#                         <cmd> <job_id> 124 <job_pid>
-
-# SCHED_DISPATCH_TICK_CB  Optional, for testing only: called with <job_id> right after each job is dispatched in the initial scheduling loop.
-
+# Env vars specifying callbacks (see REFERENCE.md):
+# DO_JOB_CB
+# SCHED_FAIL_MSG_CB
+# SCHED_FINALIZE_CB
+# JOB_DONE_CB
+# JOB_TERM_CB
+# SCHED_DISPATCH_TICK_CB
 
 
 ### Helpers
 
 sch_is_included() {
 	case " ${2} " in
-		*" ${1} "*)
-			return 0 ;;
-		*)
-			return 1
+		*" ${1} "*) return 0 ;;
+		*) return 1
 	esac
 }
 
@@ -48,6 +31,16 @@ sch_append()
 {
 	sch_check_name "var" "${1}" || return 1
 	eval "${1}=\"\${${1}}\${${1}:+\" \"}\${2}\""
+}
+
+sch_rm_trailing() {
+	sch_check_name "var" "${1}" || return 1
+	eval "${1}=\"\${${1}%\"\${${1}##*[!\"\${2}\"]}\"}\""
+}
+
+sch_rm_leading() {
+	sch_check_name "var" "${1}" || return 1
+	eval "${1}=\"\${${1}#\"\${${1}%%[!\"\${2}\"]*}\"}\""
 }
 
 sch_had_f() {
@@ -68,8 +61,8 @@ sch_rm_elem() {
 		sre_l=" ${sre_l} "
 		local sre_s=" ${sre_e} "
 		sre_l="${sre_l%%"${sre_s}"*} ${sre_l#*"${sre_s}"}"
-		sre_l="${sre_l%"${sre_l##*[!" "]}"}"
-		sre_l="${sre_l#"${sre_l%%[!" "]*}"}"
+		sch_rm_trailing sre_l " "
+		sch_rm_leading sre_l " "
 	}
 
 	export -n "${sre_out_var}=${sre_l}"
@@ -123,7 +116,7 @@ sch_get_uptime_cs() {
 		return 1
 	}
 	cs="${s:-0}${cs:-00}"
-	cs="${cs#"${cs%%[!0]*}"}"
+	sch_rm_leading cs "0"
 	export -n "${1}=${cs:-0}"
 }
 
@@ -136,7 +129,7 @@ sch_get_cur_pid() {
 	while IFS= read -r line; do
 		case "${line}" in
 			Pid:*)
-				__pid="${line##*[^0-9]}"
+				__pid="${line##*[!0-9]}"
 				break
 			;;
 		esac
@@ -175,12 +168,25 @@ sch_finalize() {
 	exec 3>&-
 	rm -f "${sch_ipc_fifo}"
 
-	set -f
+	# Restore the caller's noglob state: a trap may have entered sch_finalize()
+	#   from inside an internal 'set -f' section. Job IDs and PIDs are
+	#   glob-safe, and user-provided code must run with the caller's state
+	if [ -n "${SCH_HAD_F}" ]; then set -f; else set +f; fi
 
-	# Pids of timed-out jobs that never reported belong in <running_pids>
-	# (see TIMEKEEPING.md)
+	# Kill the process trees of all jobs still running
+	# Verified kills are scrubbed from ${SCH_RUNNING_PIDS} by sch_term_run()
+	[ -n "${SCH_TERM_ACTIVE}" ] && {
+		# shellcheck disable=SC2086
+		[ -n "${SCH_RUNNING_PIDS}" ] &&
+			sch_term_run term ${SCH_RUNNING_PIDS}
+		sch_term_run cleanup
+	}
+
+	# Pids of timed-out jobs that never reported belong in <running_pids> -
+	#   except those whose kill has been verified
 	for sch_exp_e in ${SCH_EXPIRED}; do
-		sch_append SCH_RUNNING_PIDS "${sch_exp_e%%:*}"
+		sch_is_included "${sch_exp_e%%:*}" "${SCH_TERM_KILLED}" ||
+			sch_append SCH_RUNNING_PIDS "${sch_exp_e%%:*}"
 	done
 
 	# Compute sch_unfinished_ids
@@ -188,7 +194,6 @@ sch_finalize() {
 		sch_is_included "${sch_id}" "${SCH_OK_IDS} ${SCH_UNDISPATCHED_IDS} ${SCH_FAIL_IDS} ${SCH_EXPIRED_IDS}" ||
 			sch_append sch_unfinished_ids "${sch_id}"
 	done
-	[ -n "${SCH_HAD_F}" ] || set +f
 
 	[ -z "${SCHED_FINALIZE_CB}" ] ||
 		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${SCH_FAIL_IDS}" "${sch_unfinished_ids}" "${SCH_UNDISPATCHED_IDS}" "${SCH_EXPIRED_IDS}" ||
@@ -215,6 +220,16 @@ sch_start_job() {
 	' EXIT
 
 	sch_get_cur_pid sch_job_pid || exit 1
+
+	# Per-job termination setup - runs in this (the job's) process so a
+	# shell-function command can affect the process itself (e.g. join a cgroup)
+	[ -n "${SCH_TERM_ACTIVE}" ] && {
+		"${JOB_TERM_CB}" setup "${sch_job_id}" "${sch_job_pid}" ||
+		{
+			sch_fail_msg "Job '${sch_job_id}' (PID ${sch_job_pid}): termination setup failed."
+			exit 1
+		}
+	}
 
 	[ "${SCHED_AUTO_PARAMS}" = 1 ] &&
 		{ job_get_params -export "${sch_job_id}" sch_all || exit 1; }
@@ -253,7 +268,7 @@ process_done_record() {
 
 	sch_read_t_cs="${SCH_REMAIN_TIME_CS}"
 
-	# Cap the wait by the nearest job deadline, if any (see TIMEKEEPING.md)
+	# Cap the wait by the nearest job deadline if any
 	[ -n "${SCH_DEADLINES}" ] && {
 		sch_get_uptime_cs sch_now_cs || sch_finalize 1
 
@@ -273,14 +288,14 @@ process_done_record() {
 
 	sch_read_t_s=$(( (sch_read_t_cs + 99) / 100 ))
 
-	# Wait for the next completion record; an empty record means read -t
-	# timed out (or was skipped): a job deadline and/or a scheduler timeout
-	# is due, both handled by the common tail below
+	# Wait for the next completion record;
+	#   an empty record means read -t timed out (or was skipped):
+	#   a job deadline and/or a scheduler timeout is due, both handled by the common tail below
 	[ "${sch_read_t_s}" -gt 0 ] &&
 	read -t "${sch_read_t_s}" -r sch_done_pid sch_done_rv sch_done_id < "${sch_ipc_fifo}"
 
-	# Process the completion record, if any (arrival wins over expiry: the
-	# record is handled before deadlines are swept - see TIMEKEEPING.md)
+	# Process the completion record, if any
+	# Arrival wins over expiry: the record is handled before deadlines are swept
 	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] && {
 		sch_is_uint "${sch_done_pid}" "${sch_done_rv}" &&
 		[ -n "${sch_done_id}" ] &&
@@ -308,9 +323,9 @@ process_done_record() {
 			"${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
 				sch_finalize ${?}
 		else
-			# Unknown pid: either a late record from a job already classified
-			# as timed out - the timeout classification stands (see
-			# TIMEKEEPING.md) - or a fatal protocol error
+			# Unknown PID: either
+			# - late record from a timed out job
+			# - or fatal protocol error
 			sch_rec_verdict=malformed
 			set -f
 			for sch_e in ${SCH_EXPIRED}; do
@@ -347,15 +362,10 @@ process_done_record() {
 				sch_append SCH_DEADLINES "${sch_e}"
 			fi
 		done
-		[ -n "${sch_had_f}" ] || set +f
 
-		# Chomp expired entries one by one (no word-splitting: job IDs may contain glob characters,
-		#   and the callback below must run with unmodified glob state)
-		while [ -n "${sch_expired}" ]; do
-			sch_e="${sch_expired%% *}"
-			sch_expired="${sch_expired#"${sch_e}"}"
-			sch_expired="${sch_expired# }"
-
+		# ${sch_expired} is glob-safe
+		for sch_e in ${sch_expired}; do
+			[ -n "${sch_had_f}" ] || set +f
 			sch_pid="${sch_e%%:*}"
 			sch_id="${sch_e#*:*:}"
 
@@ -366,14 +376,18 @@ process_done_record() {
 			sch_append SCH_EXPIRED "${sch_e}" ||
 				sch_finalize 1
 
+			# Kill the timed-out job's whole process tree (wrapper included)
+			[ -n "${SCH_TERM_ACTIVE}" ] && sch_term_run term "${sch_pid}"
+
 			[ -z "${sch_job_done_cb}" ] ||
 			"${sch_job_done_cb}" "${sch_id}" 124 "${sch_pid}" ||
 				sch_finalize ${?}
 		done
+		[ -n "${sch_had_f}" ] || set +f
 	}
 
-	# Recompute remaining time from a fresh clock reading.
-	# If scheduler timeout is due, refresh_remain_time() calls sch_finalize().
+	# Recompute remaining time from a fresh clock reading
+	# If scheduler timeout is due, refresh_remain_time() calls sch_finalize()
 	refresh_remain_time
 
 	return 0
@@ -404,13 +418,14 @@ refresh_remain_time() {
 	if [ "${gt_idle_remain_time_cs}" -lt "${SCH_REMAIN_TIME_CS}" ]; then
 		SCH_REMAIN_TIME_CS="${gt_idle_remain_time_cs}"
 	fi
+	:
 }
 
-# Remove the entry matching <pid> from a deadline list
+# Remove entry matching <pid> from a deadline list
 #
-# A deadline list is a space-separated list of <pid>:<deadline_cs>:<job_id> entries.
+# Deadline list is a space-separated list of <pid>:<deadline_cs>:<job_id> entries.
 # <pid> and <deadline_cs> are uints,
-#   so the job ID parses as the trailing remainder and may contain any non-whitespace character.
+#   so the job ID ([a-zA-Z0-9_] only) parses as the trailing remainder.
 #
 # 1: out var name
 # 2: pid
@@ -428,6 +443,40 @@ sch_deadline_rm_pid() {
 }
 
 
+# Modular job termination (JOB_TERM_CB) - see REFERENCE.md
+
+# Invoke '<cb> <subcommand> sch_tr_out [pids...]'
+#   and process the verified-PID report assigned by the callback:
+#   scrub reported PIDs from ${SCH_RUNNING_PIDS}, record them in ${SCH_TERM_KILLED}
+# 1: subcommand: <term|cleanup>
+# Extra args: passed to the command after the out var name
+sch_term_run() {
+	local sch_tr_sub="${1:?}" sch_tr_out='' sch_tr_p sch_tr_had_f
+
+	shift
+	"${JOB_TERM_CB}" "${sch_tr_sub}" sch_tr_out "${@}" ||
+		sch_fail_msg "Job termination callback '${JOB_TERM_CB} ${sch_tr_sub}' returned code ${?}."
+
+	[ -n "${sch_tr_out}" ] || return 0
+
+	sch_had_f && sch_tr_had_f=1
+	set -f
+	for sch_tr_p in ${sch_tr_out}; do
+		sch_is_uint "${sch_tr_p}" || {
+			sch_fail_msg "'${JOB_TERM_CB} ${sch_tr_sub}': ignoring invalid verified PID '${sch_tr_p}'."
+			continue
+		}
+		[ -n "${sch_tr_had_f}" ] || set +f
+		sch_rm_elem SCH_RUNNING_PIDS "${sch_tr_p}" "${SCH_RUNNING_PIDS}"
+		sch_is_included "${sch_tr_p}" "${SCH_TERM_KILLED}" ||
+		sch_append SCH_TERM_KILLED "${sch_tr_p}" ||
+			sch_finalize 1
+	done
+	[ -n "${sch_tr_had_f}" ] || set +f
+	:
+}
+
+
 #
 # User-facing functions
 #
@@ -437,6 +486,7 @@ schedule_jobs() {
 	# 2: required(1/empty)
 	sch_check_cb() {
 		local val
+		sch_check_name "var" "${1}" "sch_check_cb" || return 1
 		eval "val=\"\${${1}}\""
 		[ -z "${val}" ] && [ -z "${2}" ] && return 0
 		[ -z "${val}" ] && { sch_fail_msg "Required callback is missing (set via \${${1}})."; return 1; }
@@ -467,7 +517,7 @@ schedule_jobs() {
 		[ -z "${val}" ] && [ -z "${3}" ] && return 0
 		sch_is_uint "${val}" && [ "${val}" -ge 1 ] ||
 			{ sch_fail_msg "Invalid value '${val}' of env var SCHED_${1#SCH_}."; return 1; }
-		val="${val#"${val%%[!0]*}"}"
+		sch_rm_leading val "0"
 		export -n "${1}=${val}"
 	}
 
@@ -504,6 +554,8 @@ schedule_jobs() {
 		SCH_DEADLINES \
 		SCH_EXPIRED \
 		SCH_EXPIRED_IDS \
+		SCH_TERM_ACTIVE \
+		SCH_TERM_KILLED \
 		\
 		SCH_JOB_IDS="${1?}"
 	
@@ -521,6 +573,7 @@ schedule_jobs() {
 	sch_check_cb SCHED_FINALIZE_CB &&
 	sch_check_cb DO_JOB_CB required &&
 	sch_check_cb JOB_DONE_CB &&
+	sch_check_cb JOB_TERM_CB &&
 	sch_check_cb SCHED_DISPATCH_TICK_CB || exit 1
 
 	# Check env vars, normalize into internal copies
@@ -529,8 +582,7 @@ schedule_jobs() {
 	sch_normalize_uint SCH_IDLE_TIMEOUT_S "${SCHED_IDLE_TIMEOUT_S:-300}" &&
 	sch_normalize_uint SCH_JOB_TIMEOUT_S "${SCHED_JOB_TIMEOUT_S}" || exit 1
 
-	# Removing trailing '/'
-	sch_dir="${sch_dir%"${sch_dir##*[!/]}"}"
+	sch_rm_trailing sch_dir "/"
 
 	[ -n "${sch_dir}" ] ||
 		{ sch_fail_msg "Invalid value '${SCHED_DIR}' of env var SCHED_DIR."; exit 1; }
@@ -538,14 +590,15 @@ schedule_jobs() {
 	# Convert ${SCH_JOB_IDS} to space-separated list
 	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || exit 1
 
+	# Validate job IDs ([a-zA-Z0-9_] only), check for duplicates
+	# set -f: not-yet-validated IDs may contain glob characters -
+	#   they must reach validation unexpanded, to be rejected verbatim
 	set -f
 	for sch_id in ${SCH_JOB_IDS}; do
+		[ -n "${SCH_HAD_F}" ] || set +f
+		sch_check_name "job ID" "${sch_id}" || exit 1
 		sch_is_included "${sch_id}" "${sch_seen_ids}" &&
-			{
-				[ -n "${SCH_HAD_F}" ] || set +f
-				sch_fail_msg "Duplicate Job ID '${sch_id}'."
-				exit 1
-			}
+			{ sch_fail_msg "Duplicate Job ID '${sch_id}'."; exit 1; }
 		sch_append sch_seen_ids "${sch_id}"
 	done
 	[ -n "${SCH_HAD_F}" ] || set +f
@@ -557,6 +610,12 @@ schedule_jobs() {
 	sch_get_uptime_cs SCH_INIT_UPTIME_CS &&
 	sch_get_cur_pid SCH_PID ||
 		exit 1
+
+	# Initialize the job termination callback if configured
+	[ -n "${JOB_TERM_CB}" ] && {
+		"${JOB_TERM_CB}" init || exit 1
+		SCH_TERM_ACTIVE=1
+	}
 
 	SCH_LAST_PROGRESS_TIME_CS="${SCH_INIT_UPTIME_CS}"
 
@@ -572,9 +631,9 @@ schedule_jobs() {
 	trap 'sch_finalize "${SCH_RV_INT_TERM}"' INT TERM
 
 	# Start jobs
-	set -f
+
+	# ${SCH_JOB_IDS} are glob-safe here
 	for sch_id in ${SCH_JOB_IDS}; do
-		[ -n "${SCH_HAD_F}" ] || set +f
 		while [ "${SCH_RUNNING_JOBS_CNT}" -ge "${SCH_MAX_JOBS}" ] &&
 			[ -e "${sch_ipc_fifo}" ]
 		do
@@ -594,18 +653,11 @@ schedule_jobs() {
 		sch_rm_elem SCH_UNDISPATCHED_IDS "${sch_id}" "${SCH_UNDISPATCHED_IDS}"
 
 		# A job start counts as scheduler progress: reset the idle timeout
-		# (see TIMEKEEPING.md)
 		sch_get_uptime_cs sch_dl_now_cs || sch_finalize 1
 		SCH_LAST_PROGRESS_TIME_CS="${sch_dl_now_cs}"
 
-		# Register the job's timeout deadline, if it has one (see TIMEKEEPING.md)
-		# The eval is safe: the case statement restricts it to IDs consisting
-		# of name-safe characters (only those can carry a per-job timeout)
-		sch_job_to="${SCH_JOB_TIMEOUT_S}"
-		case "${sch_id}" in
-			''|*[!a-zA-Z0-9_]*) ;;
-			*) eval "sch_job_to=\"\${SCH_TIMEOUT_JOB_${sch_id}:-\${SCH_JOB_TIMEOUT_S}}\"" ;;
-		esac
+		# Register job's timeout deadline if it has one
+		eval "sch_job_to=\"\${SCH_TIMEOUT_JOB_${sch_id}:-\${SCH_JOB_TIMEOUT_S}}\""
 
 		[ -n "${sch_job_to}" ] &&
 			sch_append SCH_DEADLINES "${sch_pid}:$((sch_dl_now_cs + sch_job_to*100)):${sch_id}"
@@ -613,8 +665,6 @@ schedule_jobs() {
 		[ -z "${SCHED_DISPATCH_TICK_CB}" ] ||
 			"${SCHED_DISPATCH_TICK_CB}" "${sch_id}"
 	done
-
-	[ -n "${SCH_HAD_F}" ] || set +f
 
 	# Wait for running jobs
 	while [ "${SCH_RUNNING_JOBS_CNT}" -gt 0 ] &&
@@ -716,7 +766,7 @@ job_get_params() {
 		sch_check_name "param" "${sch_param}" "${sch_me}" &&
 		sch_check_name "var" "${sch_var}" "${sch_me}" || return 1
 		case "${sch_var}" in
-			sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|IFS)
+			sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|JOB_TERM_CB|IFS)
 				sch_fail_msg "${sch_me}: var name '${sch_var}' is reserved for internal use."
 				return 1
 		esac
@@ -742,7 +792,7 @@ job_set_timeout() {
 		sch_fail_msg "${sch_me}: invalid timeout value '${sch_val}' for job '${sch_job_id}'."
 		return 1
 	}
-	sch_val="${sch_val#"${sch_val%%[!0]*}"}"
+	sch_rm_leading sch_val "0"
 	# Not SCH_JOB_TIMEOUT_<id>: that would collide with the internal
 	# ${SCH_JOB_TIMEOUT_S} copy of ${SCHED_JOB_TIMEOUT_S} for a job named 'S'
 	export -n "SCH_TIMEOUT_JOB_${sch_job_id}=${sch_val}"

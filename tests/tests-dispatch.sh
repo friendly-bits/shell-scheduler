@@ -501,8 +501,8 @@ test_dispatch_08() {
 		PASS "sched_rv=${sched_rv}, msg='${msg}'"
 		return 0
 	else
-		rm -f "${JOB_STARTED_FILE}"
 		FAIL "sched_rv=${sched_rv}, msg='${msg}', started=$([ -f "${JOB_STARTED_FILE}" ] && echo yes || echo no)"
+		rm -f "${JOB_STARTED_FILE}"
 		return 1
 	fi
 }

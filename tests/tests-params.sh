@@ -549,10 +549,10 @@ test_params_09() {
 		PASS
 		return 0
 	else
-		rm -f "${OUT_FILE}" "${INJECT_FILE}"
 		FAIL "sched_rv=${sched_rv}, inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)"
 		printf '%s\n%s\n%s\n' \
 			"expected:" "${expected}" "actual: ${actual}"
+		rm -f "${OUT_FILE}" "${INJECT_FILE}"
 		return 1
 	fi
 }
@@ -1176,8 +1176,8 @@ test_params_22() {
 		PASS "${pass_cnt}/${total_cnt} rejected, no injection"
 		return 0
 	else
-		rm -f "${INJECT_FILE}"
 		FAIL "${pass_cnt}/${total_cnt} rejected, msg_cnt=${msg_cnt}, injected=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)"
+		rm -f "${INJECT_FILE}"
 		return 1
 	fi
 }

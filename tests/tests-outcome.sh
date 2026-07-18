@@ -481,12 +481,15 @@ test_outcome_07() {
 	fi
 }
 
-# Verify job IDs containing glob/injection-shaped characters still land in the
-#   correct ok/fail set (not just "no crash" - test_misc_02/test_misc_03 already cover that).
+# Verify a job-ID list containing glob/injection-shaped IDs is rejected upfront:
+#   schedule_jobs() fails (rv=1), nothing is dispatched, the embedded command
+#   substitution is never evaluated, and SCHED_FINALIZE_CB's ok/fail sets are
+#   never written. Job IDs are restricted to [a-zA-Z0-9_] (REFERENCE.md).
 test_outcome_08() {
 	outcome_08_touch_inject() { touch "${INJECT_FILE:?}"; }
 
 	outcome_08_do_job() {
+		touch "${DISPATCH_FILE:?}"
 		case "${1}" in
 			*ok_marker*) return 0 ;;
 			*) return 1 ;;
@@ -502,21 +505,22 @@ test_outcome_08() {
 		TEST_ID=outcome_08 \
 		sched_rv \
 		ok_raw fail_raw \
-		exp_ok act_ok exp_fail act_fail \
-		ok_id fail_id \
+		inject_exists dispatch_exists \
+		bad_ok_id bad_fail_id \
 		jobs
 
-	ok_id='ok_marker_$(outcome_08_touch_inject)'
-	fail_id='fail_marker_`outcome_08_touch_inject`'
-	jobs="${ok_id} ${fail_id}"
+	bad_ok_id='ok_marker_$(outcome_08_touch_inject)'
+	bad_fail_id='fail_marker_`outcome_08_touch_inject`'
+	jobs="${bad_ok_id} ${bad_fail_id}"
 
 	local \
 		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
-		INJECT_FILE="/tmp/sched.inject8.${TEST_ID:?}.$$"
+		INJECT_FILE="/tmp/sched.inject8.${TEST_ID:?}.$$" \
+		DISPATCH_FILE="/tmp/sched.dispatch8.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${INJECT_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX}".* "${INJECT_FILE}" "${DISPATCH_FILE}"
 
-	print_test_header "${TEST_ID:?}" "Awkward job-ID characters land in the correct ok/fail set" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Injection-shaped job IDs are rejected upfront, never classified" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=outcome_08_finalize_handler \
@@ -530,24 +534,25 @@ test_outcome_08() {
 	wait "$!"
 	sched_rv=$?
 
+	# Capture marker existence before cleanup, for both the check and diagnostics
+	[ -e "${INJECT_FILE}" ] && inject_exists=yes || inject_exists=no
+	[ -e "${DISPATCH_FILE}" ] && dispatch_exists=yes || dispatch_exists=no
+
 	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
 	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX}".* "${INJECT_FILE}" "${DISPATCH_FILE}"
 
-	if [ "${sched_rv}" = 0 ] &&
-		verify_id_set exp_ok act_ok "${ok_id}" "${ok_raw}" &&
-		verify_id_set exp_fail act_fail "${fail_id}" "${fail_raw}" &&
-		[ ! -e "${INJECT_FILE}" ]
+	# Rejected upfront: rv=1, no injection, no dispatch, finalize sets unwritten
+	if [ "${sched_rv}" = 1 ] &&
+		[ "${inject_exists}" = no ] &&
+		[ "${dispatch_exists}" = no ] &&
+		[ -z "${ok_raw}" ] &&
+		[ -z "${fail_raw}" ]
 	then
-		rm -f "${INJECT_FILE}"
-		PASS "ok='${ok_raw}', fail='${fail_raw}'"
+		PASS "list rejected (rv=1), no dispatch, no injection, sets unwritten"
 		return 0
 	else
-		rm -f "${INJECT_FILE}"
-		FAIL "sched_rv=${sched_rv}, inject_marker_exists=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)"
-		printf '%s\n%s\n' \
-			"ok: expected='${exp_ok}' actual='${act_ok}'" \
-			"fail: expected='${exp_fail}' actual='${act_fail}'"
+		FAIL "sched_rv=${sched_rv} (want 1), inject_exists=${inject_exists}, dispatch_exists=${dispatch_exists}, ok_raw='${ok_raw}', fail_raw='${fail_raw}'"
 		return 1
 	fi
 }
