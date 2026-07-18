@@ -159,6 +159,7 @@ sch_check_name() {
 
 sch_finalize() {
 	local sch_cb_rv sch_unfinished_ids sch_exp_e \
+		IFS=" "$'\t'$'\n' \
 		sch_rv="${1}"
 
 	trap ':' USR1 INT TERM
@@ -251,6 +252,9 @@ process_done_record() {
 		sch_done_pid \
 		sch_done_rv \
 		sch_done_id \
+		sch_rec \
+		sch_rec_tail \
+		sch_rec_garbage \
 		sch_rec_verdict \
 		sch_read_t_cs \
 		sch_read_t_s \
@@ -288,19 +292,40 @@ process_done_record() {
 
 	sch_read_t_s=$(( (sch_read_t_cs + 99) / 100 ))
 
-	# Wait for the next completion record;
-	#   an empty record means read -t timed out (or was skipped):
-	#   a job deadline and/or a scheduler timeout is due, both handled by the common tail below
-	[ "${sch_read_t_s}" -gt 0 ] &&
-	read -t "${sch_read_t_s}" -r sch_done_pid sch_done_rv sch_done_id < "${sch_ipc_fifo}"
+	# Wait for the next completion record. Read the whole line into one raw field.
+	[ "${sch_read_t_s}" -gt 0 ] && {
+		IFS= read -t "${sch_read_t_s}" -r sch_rec < "${sch_ipc_fifo}" ||
+		[ -z "${sch_rec}" ] ||
+		{
+			# Non-zero code means read -t timeout mid-line,
+			#   so partial line consumed and remainder is buffered in the FIFO
+			# Finish reading
+			IFS= read -t 1 -r sch_rec_tail < "${sch_ipc_fifo}"
+			sch_rec="${sch_rec}${sch_rec_tail}"
+		}
+	}
 
-	# Process the completion record, if any
+	# Re-split the completion record
+	# Empty record unambiguously means read -t timeout
+	[ -n "${sch_rec}" ] && {
+		set -f
+		set -- ${sch_rec}
+		sch_done_pid=${1}
+		sch_done_rv=${2}
+		sch_done_id=${3}
+		shift 3
+		sch_rec_garbage="${*}"
+		[ -n "${sch_had_f}" ] || set +f
+	}
+
+	# Process the completion record if any
 	# Arrival wins over expiry: the record is handled before deadlines are swept
 	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] && {
+		[ -z "${sch_rec_garbage}" ] &&
 		sch_is_uint "${sch_done_pid}" "${sch_done_rv}" &&
 		[ -n "${sch_done_id}" ] &&
 		sch_is_included "${sch_done_id}" "${SCH_JOB_IDS}" ||
-			sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}'."
+			sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}' or trailing garbage '${sch_rec_garbage}'."
 
 		if sch_is_included "${sch_done_pid}" "${SCH_RUNNING_PIDS}"; then
 			# Normal completion
