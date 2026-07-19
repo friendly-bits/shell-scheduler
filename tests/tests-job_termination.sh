@@ -4,17 +4,18 @@
 
 # tests-job_termination.sh
 
-# Category: Modular job termination (JOB_TERM_CB) and the bundled
-# termination libraries (scheduler-job-term-cgroup.sh, scheduler-job-term-proc.sh)
+# Category: Modular job termination (JOB_TERM_CB) and the supplementary job termination libraries
+#   (scheduler-job-term-cgroup.sh, scheduler-job-term-proc.sh)
+
 # This file is sourced by tests.sh; it defines test_N functions only.
-# All tests exercise the public interface only: schedule_jobs(),
-# JOB_TERM_CB, cgroup_cleanup_supported(), environment variables and
-# callbacks.
-#
-# Tests of the cgroup library require a capable environment (root, or a
-# delegated cgroup subtree - e.g. run the suite via
-# 'systemd-run --user --scope') and SKIP otherwise. Tests of the proc
-# library and of the core contract run everywhere.
+
+# All tests exercise the public interface only:
+#   JOB_TERM_CB, schedule_jobs(), cgroup_cleanup_supported(),
+#   environment variables and callbacks.
+
+# Tests of the cgroup library require a capable environment
+#   (root or a delegated cgroup subtree - e.g. run the suite via 'systemd-run --user --scope')
+#   and SKIP otherwise. Tests of the proc library and of the core contract run everywhere.
 
 . "${script_dir:?}/../scheduler-job-term-cgroup.sh"
 . "${script_dir:?}/../scheduler-job-term-proc.sh"
