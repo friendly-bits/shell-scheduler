@@ -27,8 +27,7 @@ sch_is_included() {
 	esac
 }
 
-sch_append()
-{
+sch_append() {
 	sch_check_name "var" "${1}" || return 1
 	eval "${1}=\"\${${1}}\${${1}:+\" \"}\${2}\""
 }
