@@ -767,3 +767,73 @@ test_scheduler_termination_16() {
 		return 1
 	fi
 }
+
+# Verify sch_finalize() runs with a correct IFS when a signal fires while the
+#   scheduler is blocked in `IFS= read`: the read's IFS= prefix assignment must
+#   not leak into the trap handler. A leaked empty IFS collapses the finalize
+#   callback's running_pids/unfinished_ids into a single field. With 3 concurrent
+#   jobs, SIGUSR1 mid-wait must yield running_pids and unfinished_ids that split
+#   into 3 fields each.
+test_scheduler_termination_17() {
+	scheduler_termination_17_do_job() { sleep 30; return 0; }
+
+	scheduler_termination_17_finalize_handler() {
+		local rv="${1}" pids="${2}" unfinished="${5}" pid_cnt=0 unf_cnt=0
+
+		# Split with the IFS that is live inside sch_finalize (the property under test)
+		[ -z "${pids}" ] || { set -- ${pids}; pid_cnt=$#; }
+		[ -z "${unfinished}" ] || { set -- ${unfinished}; unf_cnt=$#; }
+		printf '%s %s %s\n' "${rv}" "${pid_cnt}" "${unf_cnt}" > "${OUT_FILE:?}"
+
+		# Reuse the shared handler to kill the workers
+		finalize_handler "${rv}" "${pids}"
+	}
+
+	local \
+		TEST_ID=scheduler_termination_17 \
+		sched_rv \
+		out fin_rv pid_cnt unf_cnt \
+		schedule_pid \
+		jobs='ifsfin_1 ifsfin_2 ifsfin_3'
+
+	local OUT_FILE="/tmp/sched.ifsfinalize.${TEST_ID:?}.$$"
+	rm -f "${OUT_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Correct IFS in sch_finalize on signal during read" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=scheduler_termination_17_finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=scheduler_termination_17_do_job \
+	SCHED_MAX_JOBS=3 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=15 \
+		schedule_jobs "${jobs}" &
+
+	schedule_pid=$!
+
+	# Let all 3 jobs dispatch and the scheduler settle into the read wait
+	sleep 2
+	kill -USR1 "${schedule_pid}"
+
+	wait "${schedule_pid}"
+	sched_rv=$?
+
+	read_first_line out "${OUT_FILE}"
+	rm -f "${OUT_FILE}"
+	# The test body's IFS is the default, so this split is reliable
+	set -- ${out}
+	fin_rv="${1}" pid_cnt="${2}" unf_cnt="${3}"
+
+	if [ "${sched_rv}" = 83 ] &&
+		[ "${fin_rv}" = 83 ] &&
+		[ "${pid_cnt}" = 3 ] &&
+		[ "${unf_cnt}" = 3 ]
+	then
+		PASS "pid_cnt=${pid_cnt}, unf_cnt=${unf_cnt}"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, fin_rv=${fin_rv}, pid_cnt=${pid_cnt}, unf_cnt=${unf_cnt}, out='${out}'"
+		return 1
+	fi
+}
