@@ -24,15 +24,19 @@
 # This library owns variables prefixed SCH_TC_.
 
 # Create the per-run base cgroup as a child of <parent dir>
+# mkdir is atomic (fails if the name exists), so concurrent instances - even
+#   ones sharing ${SCH_TC_PID} across PID namespaces under a shared
+#   SCHED_CGROUP_BASE - claim distinct bases; the loser advances the suffix.
 # Sets ${SCH_TC_BASE}
 # 1: parent dir
 sch_tc_mk_base() {
-	local stc_d="${1}/sched_${SCH_TC_PID:?}"
-
-	# Remove a stale (empty) leftover from a previous run with a reused PID
-	rmdir "${stc_d}" 2>/dev/null
-	mkdir "${stc_d}" 2>/dev/null || return 1
-	SCH_TC_BASE="${stc_d}"
+	local stc_n=0 stc_d
+	while :; do
+		stc_d="${1}/sched_${SCH_TC_PID:?}.${stc_n}"
+		mkdir "${stc_d}" 2>/dev/null && { SCH_TC_BASE="${stc_d}"; return 0; }
+		stc_n=$((stc_n + 1))
+		[ "${stc_n}" -lt 16 ] || return 1
+	done
 }
 
 # Set up the per-run base cgroup which will hold per-job child cgroups.
