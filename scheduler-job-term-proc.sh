@@ -3,55 +3,68 @@
 
 # scheduler-job-term-proc.sh - /proc-based job termination library for scheduler.sh
 #
-# Kills the process tree of each job by walking PPID links from /proc/*/stat
+# Kills the process tree of each job by walking /proc/<pid>/task/<tid>/children
 #
 # Usage: source this file after scheduler.sh, select the mechanism:
 #   JOB_TERM_CB=sched_job_term_proc
 
 
-# Prints to stdout all live descendants PIDs (space-separated, seeds excluded)
-# Returns 1 if /proc yielded no parseable records at all.
-# 1: space-separated seed PIDs
+# Walks /proc/<pid>/task/<tid>/children breadth-first from the seeds and
+# collects all live descendant PIDs (space-separated, seeds excluded).
+# Globs task/* so children forked by non-leader threads are found.
+# 1: out-var
+# 2: space-separated seed PIDs
 sch_get_descendants_proc() {
-	local stp_had_f stp_rv stp_seeds="${1}"
+	local \
+		stp_had_f stp_rv=0 \
+		stp_frontier stp_next stp_seen stp_out stp_files \
+		stp_p stp_f stp_kid \
+		stp_out_var="${1}" stp_seeds="${2}"
 
 	sch_had_f && stp_had_f=1
-	set +f
 
-	cat /proc/[0-9]*/stat 2>/dev/null | {
+	stp_seen="${stp_seeds}"
+	stp_frontier="${stp_seeds}"
+	stp_out=
+
+	while [ -n "${stp_frontier}" ]; do
+		stp_files=
 		set -f
-		# shellcheck disable=SC2016
-		${SCHED_AWK_CMD:-awk} -v seeds="${stp_seeds}" '
-		/^[0-9]+ \(/ {
-			pid = $1
-			s = $0
-			# Strip "pid (comm) X " (X = single state char). comm may contain
-			# spaces and parens - the greedy match handles those; a line that
-			# does not match is a fragment of a newline-containing comm - skip
-			if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
-			split(s, f, " ")
-			if (f[1] !~ /^[0-9]+$/) next
-			ppid[pid] = f[1]
-			valid++
-		}
-		END {
-			if (!valid) exit 1
-			n = split(seeds, a, " ")
-			for (i = 1; i <= n; i++)
-				if (a[i] ~ /^[0-9]+$/) {
-					seed[a[i]] = 1
-					want[a[i]] = 1
+		# shellcheck disable=SC2086
+		for stp_p in ${stp_frontier}; do
+			set +f
+			for stp_f in /proc/"${stp_p}"/task/*/children; do
+				sch_append stp_files "${stp_f}"
+			done
+		done
+		set -f
+
+		# getline < file: -1 on missing file (skipped), 0 at EOF
+		stp_next="$(${SCHED_AWK_CMD:-awk} -v paths="${stp_files}" '
+		BEGIN {
+			num_paths = split(paths, path_list, " ")
+			for (i = 1; i <= num_paths; i++) {
+				children_file = path_list[i]
+				while ((getline line < children_file) > 0) {
+					num_kids = split(line, child_pids, " ")
+					for (j = 1; j <= num_kids; j++) printf "%s ", child_pids[j]
 				}
-			do {
-				changed = 0
-				for (p in ppid)
-					if (!(p in want) && (ppid[p] in want)) { want[p] = 1; changed = 1 }
-			} while (changed)
-			for (p in want) if (!(p in seed)) printf "%s ", p
-		}'
-	}
-	stp_rv=${?}
-	[ -n "${stp_had_f}" ] && set -f
+				close(children_file)
+			}
+		}')" || stp_rv=${?}
+
+		stp_frontier=
+		# shellcheck disable=SC2086
+		for stp_kid in ${stp_next}; do
+			sch_is_included "${stp_kid}" "${stp_seen}" && continue
+			sch_append stp_seen "${stp_kid}"
+			sch_append stp_frontier "${stp_kid}"
+			sch_append stp_out "${stp_kid}"
+		done
+	done
+
+	[ -n "${stp_had_f}" ] || set +f
+	export -n "${stp_out_var}=${stp_out}"
 	return ${stp_rv}
 }
 
@@ -99,11 +112,11 @@ sched_job_term_proc() {
 	for stp_try in 1 2 3; do
 		# shellcheck disable=SC2086
 		kill -STOP ${stp_all} 2>/dev/null
-		stp_found="$(sch_get_descendants_proc "${stp_all}")" || {
+		sch_get_descendants_proc stp_found "${stp_all}" || {
 			sch_fail_msg "${stp_lib_name}: /proc scan failed."
 			break
 		}
-		stp_all="${stp_seeds} ${stp_found}"
+		stp_all="${stp_seeds}${stp_found:+ }${stp_found}"
 		sch_rm_trailing stp_all " "
 		[ "${stp_all}" = "${stp_prev}" ] && break
 		stp_prev="${stp_all}"
