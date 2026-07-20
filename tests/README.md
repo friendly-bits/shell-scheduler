@@ -6,7 +6,7 @@ Categories: `dispatch`, `core`, `scheduler_termination`, `config`, `params`, `mi
 
 Note: the `security` category consolidates the command-injection / forgery-resistance tests (job-ID and completion-record validation, param value/name and callback-value injection, and internal param-key namespace integrity).
 
-Note: the `job_termination` category covers the modular job termination feature (`JOB_TERM_CB`) and its two bundled libraries. Tests of the cgroup library require an environment where it is supported: root, or a delegated cgroup v2 subtree - e.g. run the suite via `systemd-run --user --scope sh ./tests.sh run job_termination`. In an unsupported environment those tests report SKIP (counted separately in the summary), while the core-contract and proc-library tests still run.
+Note: the `job_termination` category covers the modular job termination feature (`JOB_TERM_CB`) and its two supplementary libraries. Tests of the cgroup library require an environment where it is supported: root, or a delegated cgroup v2 subtree - e.g. run the suite via `systemd-run --user --scope sh ./tests.sh run job_termination`. In an unsupported environment those tests report SKIP (counted separately in the summary), while the core-contract and proc-library tests still run.
 
 ### Testing suite command line options
 
