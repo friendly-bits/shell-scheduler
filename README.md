@@ -81,15 +81,17 @@ The scheduler is configured via environment variables.
 - `SCHED_MAX_JOBS` configures the number of parallel execution **slots**. The queue of job IDs is configured via the first argument passed to `schedule_jobs`. The scheduler starts jobs in the background in the same order as they appear in the list, and whenever a slot frees up it starts the next pending job to fill it. The scheduler keeps running until every job has finished, or it hits a timeout, or receives a signal, or encounters a fatal error.
 - If you want to tune **global scheduler timeouts**, set `SCHED_TIMEOUT_S` (defaults to 900s) and `SCHED_IDLE_TIMEOUT_S` (max allowed time with no job starts and completions, defaults to 300s).
 - If you want to enable **global per-job timeouts**, set `SCHED_JOB_TIMEOUT_S`.
-- You can also set **individual timeouts for each job** via the helper `job_set_timouet`:
 
-```sh
-job_set_timeout <job_id> <seconds>
-```
 -----
-Your code can hook in five places by implementing callbacks. Each callback is a shell function implemented in your application.
+Your code can hook in five places by implementing **callbacks**. Each callback can be implemented as a shell function in your application. To configure a callback, set the value of a corresponding variable to the name of the shell function implementing the callback (see example below).
 
-For example, to implement and use the job execution callback, implement the callback function and set the environment variable `DO_JOB_CB` to the name of that function before calling `schedule_jobs`:
+- For **job implementation**, specify the **job execution callback** as the value of `${DO_JOB_CB}`. When invoking this callback, the scheduler passes the corresponding job ID in the first argument.
+- When a **job completes**, the scheduler calls your optional **job completion callback** (`JOB_DONE_CB`) with the job ID and its return code.
+- If a **job hangs** and hits a per-job timeout, or when either the **global scheduler timeout** or the **idle timeout** is exceeded, the scheduler calls your optional **job termination callback** (`JOB_TERM_CB`).
+- Before the scheduler **exits**, it calls your optional **scheduler completion callback** (`SCHED_FINALIZE_CB`).
+- When the scheduler **encounters an error**, it calls your optional **error reporting callback** (`SCHED_FAIL_MSG_CB`) - if not defined, errors are printed to STDERR.
+
+For example, for the **job execution callback**, implement the callback function and set the environment variable `DO_JOB_CB` to the name of that function before calling `schedule_jobs`:
 
 ```sh
 my_job_exec() {
@@ -97,21 +99,21 @@ my_job_exec() {
 }
 
 DO_JOB_CB=my_job_exec
-schedule_jobs <job_ids> &
+schedule_jobs "<job_ids>" &
 ```
 
-- For **job implementation**, specify the execution callback (`DO_JOB_CB`). When invoking this callback, the scheduler passes the corresponding job ID in the first argument.
-- When a **job completes**, the scheduler calls your optional completion callback (`JOB_DONE_CB`) with the job ID and its return code.
-- If a **job hangs** and hits a per-job timeout, or when either the **global scheduler timeout** or the **idle timeout** is exceeded, the scheduler calls your optional job termination callback (`JOB_TERM_CB`).
-- Before the scheduler **exits**, it calls your optional scheduler completion callback (`SCHED_FINALIZE_CB`).
-- When the scheduler **encounters an error**, it calls your optional error reporting callback (`SCHED_FAIL_MSG_CB`) - if not defined, errors are printed to STDERR.
-
 -----
+
+Before setting per-job parameters and timeouts, and particularly before reconfiguring and re-running jobs in the same process, a good practice is to **reset jobs configuration** via `jobs_init`.
+
+```sh
+jobs_init "<job_id_list>"
+```
 
 To set **per-job parameters**, use the helper `job_set_params` before calling `schedule_jobs`:
 
 ```sh
-job_set_params <job_id> <param_1>=<param_value_1> <param_2>=<param_value_2> ...
+job_set_params <job_id> <param_1>="<param_value_1>" <param_2>="<param_value_2>" ...
 ```
 
 To fetch per-job parameters in each job, either set `SCHED_AUTO_PARAMS=1` to have per-job parameters automatically passed to each job as environment variables or use the helper `job_get_params` in the implementation of your job execution callback (`DO_JOB_CB`):
@@ -131,6 +133,13 @@ job_set_params job_2 param_1=foo   param_2=bar
 schedule_jobs "job_1 job_2" &
 wait ${!}
 ```
+
+To set **individual timeout for a job** (overriding `SCHED_JOB_TIMEOUT_S` for that job), use the helper `job_set_timeout`:
+
+```sh
+job_set_timeout <job_id> <seconds>
+```
+
 -----
 
 **Note**: The scheduler is intended to run in a separate process. This may be a background process (with the `&` after `schedule_jobs`), or a foreground subshell, e.g.:

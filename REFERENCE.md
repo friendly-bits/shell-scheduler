@@ -286,6 +286,40 @@ job_get_params -export "job1" filename url
 
 </details>
 
+### Resetting job parameters (`jobs_init`)
+
+Per-job parameters and timeouts are stored in process-global variables that have no automatic teardown: once set via `job_set_params()` or `job_set_timeout()`, they persist for the lifetime of your shell process - across repeated `schedule_jobs()` runs and across any reuse of the same job ID. To reset them deterministically, use `jobs_init()`:
+
+```sh
+jobs_init "<job_id_list>"
+```
+
+Each argument is a whitespace-separated list of job IDs (spaces, tabs or newlines), mirroring the list accepted by `schedule_jobs()`; you may also spread IDs across several arguments. So `jobs_init "${my_job_ids}"`, `jobs_init A B C`, and combinations such as `jobs_init "a b" c` all work. Pass lists **quoted** - `jobs_init` splits them internally with globbing disabled, so the caller does not have to.
+
+For each job ID given, `jobs_init` clears everything configured for that job: the parameter list and every stored parameter value (set by `job_set_params`), and the per-job timeout (set by `job_set_timeout`). Afterwards a `job_get_params` for that job returns nothing, and the job falls back to the default per-job timeout (`${SCHED_JOB_TIMEOUT_S}`).
+
+As a general rule, it is a good idea to unconditionally call `jobs_init` before setting job-specific parameters and timeouts, especially when you run more than one batch in the same process, or reuse a job ID, and want a clean slate instead of inheriting the prior configuration:
+
+<details>
+<summary><strong>jobs_init example: reconfiguring a job between runs</strong></summary>
+
+```sh
+jobs_init job1
+job_set_params job1 "url=https://example.com/a"
+job_set_timeout job1 60
+schedule_jobs "job1" &
+wait ${!}
+
+jobs_init job1
+job_set_params job1 "url=https://example.com/b"
+# job_set_timeout() is not called this run, so per-job timeout is left unconfigured
+schedule_jobs "job1" &
+wait ${!}
+```
+
+Without the `jobs_init` call, `job1` would still carry the `url` from the first run. This is harmless when the second run overwrites every parameter, but a source of subtle bugs when it sets a different or smaller set of parameters and a job reads one left over from the first run.
+</details>
+
 ### Automatic parameters (`SCHED_AUTO_PARAMS`)
 
 If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job and any external commands it calls. Note that when using automatic parameters, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
@@ -408,7 +442,7 @@ The **scheduler completion callback** (`SCHED_FINALIZE_CB`) is always invoked be
 The scheduler implements three independent timeout mechanisms:
 - **global timeout** (`${SCHED_TIMEOUT_S}`, return code `82`), limiting the scheduler's total run time
 - **idle timeout** (`${SCHED_IDLE_TIMEOUT_S}`, return code `81`), limiting the time the scheduler may go without starting a job or receiving a job completion
-- **per-job timeout** (configurable individually for each job, defaults to `${SCHED_JOB_TIMEOUT_S}` if defined).
+- **per-job timeout** (configurable individually for each job via `job_set_timeout()`, defaults to `${SCHED_JOB_TIMEOUT_S}` if defined). A per-job timeout persists until overwritten or cleared with [`jobs_init()`](#resetting-job-parameters-jobs_init).
 
 Time measurement, timeout mechanisms, and reliable delays in callbacks are documented in detail in [TIMEKEEPING.md](TIMEKEEPING.md).
 
