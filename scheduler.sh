@@ -583,7 +583,7 @@ schedule_jobs() {
 		\
 		SCH_JOB_IDS="${1?}"
 	
-	: "${SCH_REMAIN_TIME_CS}" # Silence shellcheck warning
+	: "${SCH_REMAIN_TIME_CS}" "${SCH_JOB_TIMEOUT_S}" # Silence shellcheck warning
 
 	shift 1
 
@@ -707,6 +707,39 @@ schedule_jobs() {
 	}
 
 	sch_finalize 0
+}
+
+# args: one or more whitespace-separated job ID lists
+jobs_init() {
+	local \
+		IFS=" "$'\t'$'\n' \
+		sch_had_f \
+		sch_cur_params \
+		sch_param \
+		sch_job_id \
+		sch_rv=0
+
+	sch_had_f && sch_had_f=1
+	set -f
+
+	#shellcheck disable=SC2048
+	for sch_job_id in ${*}; do
+		sch_check_name "job ID" "${sch_job_id}" "jobs_init" ||
+			{ sch_rv=1; break; }
+		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
+
+		for sch_param in ${sch_cur_params}; do
+			case "${sch_param}" in
+				''|*[!a-zA-Z0-9_]*) continue ;;
+			esac
+			unset "SCH_JOB_PARAM_${#sch_job_id}_${sch_job_id}_${sch_param}"
+		done
+		unset "SCH_JOB_PARAMS_${sch_job_id}" \
+			"SCH_TIMEOUT_JOB_${sch_job_id}"
+	done
+
+	[ -n "${sch_had_f}" ] || set +f
+	return "${sch_rv}"
 }
 
 # 1: job ID
