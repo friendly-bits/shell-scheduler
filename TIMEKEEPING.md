@@ -21,19 +21,27 @@ Timeout *enforcement* is coarser than the accounting resolution:
 
 ## Global timeout
 
-The global timeout (`${SCHED_TIMEOUT_S}`, default `900` seconds) limits the total time the scheduler is allowed to run. It starts when the scheduler begins execution and continues to run regardless of how many jobs are currently executing or waiting to be started.
+The global timeout (`${SCHED_TIMEOUT_S}`) limits the total time the scheduler is allowed to run. It starts when the scheduler begins execution and continues to run regardless of how many jobs are currently executing or waiting to be started.
 
-If the global timeout is reached, the scheduler reports an error, invokes the **scheduler termination callback** (if defined), and exits with return code `82`.
+If the global timeout is reached, the scheduler reports an error, invokes the **scheduler completion callback** (if defined), and exits with return code `82`.
+
+| Variable                  | Default | Description                                           |
+| ------------------------- | :-----: | ----------------------------------------------------- |
+| SCHED_TIMEOUT_S           |  `900`  | Global scheduler timeout in seconds ( integer >= 1 ). |
 
 ## Idle timeout
 
-The idle timeout (`${SCHED_IDLE_TIMEOUT_S}`, default `300` seconds) limits the maximum time the scheduler may go without making progress. The timeout is reset whenever the scheduler starts a job or successfully processes a job completion.
+The idle timeout (`${SCHED_IDLE_TIMEOUT_S}`) limits the maximum time the scheduler may go without making progress. The timeout is reset whenever the scheduler starts a job or successfully processes a job completion.
 
 This timeout is useful for detecting situations where no progress is being made, for example because one or more jobs became stuck.
 
-If the idle timeout is reached, the scheduler reports an error, invokes the **scheduler termination callback** (if defined), and exits with return code `81`.
+If the idle timeout is reached, the scheduler reports an error, invokes the **scheduler completion callback** (if defined), and exits with return code `81`.
 
-Both timeout values are validated as non-zero unsigned decimal integers; leading zeros are stripped (never interpreted as octal). See the [Environment variables](REFERENCE.md#environment-variables) table for the summary.
+Both timeout values are validated as non-zero unsigned decimal integers; leading zeros are stripped (never interpreted as octal).
+
+| Variable                  | Default | Description                                                                               |
+| ------------------------- | :-----: | ----------------------------------------------------------------------------------------- |
+| SCHED_IDLE_TIMEOUT_S      |  `300`  | Maximum allowed time, in seconds, without any job starts or completions ( integer >= 1 ). |
 
 ## Per-job timeouts
 
@@ -45,9 +53,9 @@ Without per-job timeouts, the scheduler will wait for a single permanently hung 
 
 Global per-job timeouts are set via optional environment variable `${SCHED_JOB_TIMEOUT_S}`.
 
-| Variable              | Required | Default | Description                                                                                                 |
-| --------------------- | :------: | :-----: | ----------------------------------------------------------------------------------------------------------- |
-| SCHED_JOB_TIMEOUT_S   |          |  unset  | Default per-job timeout in seconds ( integer >= 1 ). When unset, jobs without an individual timeout have no deadline. |
+| Variable              | Default | Description                                                                                                           |
+| --------------------- | :-----: | --------------------------------------------------------------------------------------------------------------------- |
+| SCHED_JOB_TIMEOUT_S   |  unset  | Default per-job timeout in seconds ( integer >= 1 ). When unset, jobs without an individual timeout have no deadline. |
 
 An individual job's timeout can be set (overriding `${SCHED_JOB_TIMEOUT_S}` for that job) via a dedicated helper:
 
@@ -71,7 +79,7 @@ Timeout value must be integer >= 1. A per-job timeout may exceed `${SCHED_TIMEOU
 4. **Completion record arrival wins over expiry.** On each scheduler wake-up, a received completion record is processed before deadlines are checked.
 5. **Job expiries do not count as progress.** The idle timeout is reset when the scheduler starts a job or processes a genuine completion record - never when it processes an expiry.
 6. **Late completion records are discarded.** If an abandoned job's completion record arrives after its expiry was processed, the record is silently dropped; the job's classification (timed out, code `124`) stands. The job's PID is removed from the list of `<running_pids>`.
-7. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler termination callback** - not in `<fail_job_ids>`, which is reserved for jobs that exited with a non-zero code. Abandoned jobs whose process never reported back before scheduler exit have their PIDs included in `<running_pids>`; abandoned jobs whose late record was discarded do not, and neither do jobs whose kill was verified by the [job termination callback](REFERENCE.md#job-termination-callback-details).
+7. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler completion callback** - not in `<fail_job_ids>`, which is reserved for jobs that exited with a non-zero code. Abandoned jobs whose process never reported back before scheduler exit have their PIDs included in `<running_pids>`; abandoned jobs whose late record was discarded do not, and neither do jobs whose kill was verified by the [job termination callback](REFERENCE.md#job-termination-callback-details).
 
 ### Implementation notes (internal)
 

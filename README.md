@@ -103,7 +103,7 @@ schedule_jobs <job_ids> &
 - For **job implementation**, specify the execution callback (`DO_JOB_CB`). When invoking this callback, the scheduler passes the corresponding job ID in the first argument.
 - When a **job completes**, the scheduler calls your optional completion callback (`JOB_DONE_CB`) with the job ID and its return code.
 - If a **job hangs** and hits a per-job timeout, or when either the **global scheduler timeout** or the **idle timeout** is exceeded, the scheduler calls your optional job termination callback (`JOB_TERM_CB`).
-- Before the scheduler **exits**, it calls your optional scheduler termination callback (`SCHED_FINALIZE_CB`).
+- Before the scheduler **exits**, it calls your optional scheduler completion callback (`SCHED_FINALIZE_CB`).
 - When the scheduler **encounters an error**, it calls your optional error reporting callback (`SCHED_FAIL_MSG_CB`) - if not defined, errors are printed to STDERR.
 
 -----
@@ -142,14 +142,14 @@ While technically you *can* run the scheduler in the same process as your applic
 
 ## Security
 
-The implementation uses `eval` in a few places in order to pass values from functions back to caller via **indirection** while staying compatible with Busybox ash. This allows to avoid spawning unnecessary subshells and makes the code more compact. Expressions passed to `eval` are carefully constructed to avoid command injection vulnerabilities. Any values expanded inside `eval` are sanitized and vetted, e.g.:
+The implementation uses `eval` in a few places to emulate associative arrays functionality. Expressions passed to `eval` are carefully constructed to avoid command injection vulnerabilities: variable names are vetted, and values are expanded via parameter expansion rather than interpolated into the code string, so they cannot be interpreted as code. E.g.:
 
 ```sh
-# append item to space-separated list
-sch_append() {
-	sch_check_name "var" "${1}" || return 1
-	eval "${1}=\"\${${1}}\${${1}:+\" \"}\${2}\""
-}
+# Vet the value of ${sch_job_id}
+sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
+...
+# Get parameters list for job ${sch_job_id}
+eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 ```
 
 (`sch_check_name()` performs string safety validation)
@@ -158,7 +158,7 @@ This follows the [recommendation](https://www.shellcheck.net/wiki/SC2082) by she
 
 This mechanism and all relevant code has been checked, double-checked and triple-checked by the author and by various AIs.
 
-The test suite includes tests which specifically check for command injection vulnerabilies (`tests/tests-security.sh`).
+The test suite includes tests which specifically check for command injection vulnerabilities (`tests/tests-security.sh`).
 
 The author firmly believes that these precautions are sufficient.
 
@@ -205,7 +205,7 @@ The above information, along with the below example, should be enough for most b
 - **[Signal handling](REFERENCE.md#signal-handling)**
 - **[Termination of running jobs](REFERENCE.md#termination-of-running-jobs)**
 
-Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**.
+Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The two job termination helper libraries - how they kill job process trees, their requirements, and how to deploy them (containers, cron, systemd, unprivileged use) - are documented in **[JOB-TERMINATION-LIBRARIES.md](JOB-TERMINATION-LIBRARIES.md)**.
 
 ## Real-world example
 

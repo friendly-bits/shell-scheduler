@@ -68,7 +68,7 @@ sched_error()
 }
 
 
-# Scheduler termination callback - SCHED_FINALIZE_CB
+# Scheduler completion callback - SCHED_FINALIZE_CB
 #
 # wget PIDs are discovered via `pgrep -P` and signalled directly,
 #   since sending the kill signal to the shell process which invoked wget
@@ -178,7 +178,7 @@ SCHED_AUTO_PARAMS=1 \
 
 Because the scheduler is designed to run asynchronously (in the background), terminating the application script with a signal does not automatically terminate the scheduler or its jobs, so if such termination happens, job subshells - as well as any commands started by those subshells - may continue execution.
 
-To handle this reliably, the example script traps signals `INT` and `TERM` and translates these signals into `USR1` sent to the scheduler's PID. This ensures the scheduler's native cleanup path is triggered and the **scheduler termination callback** (`SCHED_FINALIZE_CB`) is invoked and gets the chance to perform application-specific cleanup and/or to kill orphaned child processes, regardless of whether the interruption came from `Ctrl-C` or a direct `kill` command. The scheduler behaves identically when receiving signals `USR1`, `INT`, or `TERM`, except it exits with code `83` for `USR1` and with code `84` for `INT` or `TERM`.
+To handle this reliably, the example script traps signals `INT` and `TERM` and translates these signals into `USR1` sent to the scheduler's PID. This ensures the scheduler's native cleanup path is triggered and the **scheduler completion callback** (`SCHED_FINALIZE_CB`) is invoked and gets the chance to perform application-specific cleanup and/or to kill orphaned child processes, regardless of whether the interruption came from `Ctrl-C` or a direct `kill` command. The scheduler behaves identically when receiving signals `USR1`, `INT`, or `TERM`, except it exits with code `83` for `USR1` and with code `84` for `INT` or `TERM`.
 
 ```sh
 schedule_jobs "${IDS}" &
@@ -194,7 +194,7 @@ trap '
 
 ### Cleaning up orphaned child processes
 
-The scheduler tracks the PIDs of the jobs (i.e. instances of the shell function `download_list()`, each running in a separate subshell). If your **job execution callback** invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler terminates before all jobs have completed, the subshell in which the callback lives, as well as any external binaries it called, will keep running as orphaned processes. The example script uses `pgrep -P` inside the **scheduler termination callback** (`SCHED_FINALIZE_CB`) to find and terminate the actual child processes along with the job subshell processes:
+The scheduler tracks the PIDs of the jobs (i.e. instances of the shell function `download_list()`, each running in a separate subshell). If your **job execution callback** invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler terminates before all jobs have completed, the subshell in which the callback lives, as well as any external binaries it called, will keep running as orphaned processes. The example script uses `pgrep -P` inside the **scheduler completion callback** (`SCHED_FINALIZE_CB`) to find and terminate the actual child processes along with the job subshell processes:
 
 ```sh
 # Inside SCHED_FINALIZE_CB
@@ -208,4 +208,4 @@ kill -TERM ${child_pids} ${running_pids} 2>/dev/null
 
 This example implements a rudimentary application-specific bookkeeping (incrementing `SUCCESS_CNT` for each successful job) and combines that with scheduler-backed bookkeeping (fetching and reporting the list of jobs by status, i.e. `ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`, `expired_ids`).
 
-Because, from the application point of view, `schedule_jobs` runs in a background child process, any callbacks invoked by the scheduler are isolated from the application process. Hence variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks will not be visible in the scope of the application script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. Rudimentary in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`), while final processing of the collected information is in the **scheduler termination callback** (`SCHED_FINALIZE_CB`) and utilizes both information collected by the application (`SUCCESS_CNT`) and information collected by the scheduler (`ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`, `expired_ids`).
+Because, from the application point of view, `schedule_jobs` runs in a background child process, any callbacks invoked by the scheduler are isolated from the application process. Hence variable updates (e.g. incrementing `SUCCESS_CNT`) inside callbacks will not be visible in the scope of the application script. If your application needs to do bookkeeping on the running jobs, the example script shows how to implement this. Rudimentary in-flight bookkeeping is implemented in the **job completion callback** (`JOB_DONE_CB`), while final processing of the collected information is in the **scheduler completion callback** (`SCHED_FINALIZE_CB`) and utilizes both information collected by the application (`SUCCESS_CNT`) and information collected by the scheduler (`ok_ids`, `fail_ids`, `unfinished_ids`, `undispatched_ids`, `expired_ids`).
