@@ -130,3 +130,23 @@ sched_job_term_proc() {
 	:
 
 }
+
+# Return 0 if the kernel exposes /proc/<pid>/task/<tid>/children (needs
+#   CONFIG_PROC_CHILDREN); the children-walk discovery depends on it. Absent it,
+#   this library discovers no descendants and leaves job subtrees alive. Emits
+#   no messages.
+# Return codes: 0 - supported; 1 - not supported
+proc_children_supported() {
+	local pcs_had_f
+
+	sch_is_cmd "${SCHED_AWK_CMD:-awk}" || return 1
+
+	# Resolve the glob with globbing on; an absent children file leaves the
+	#   pattern literal, so a live glob is the presence test
+	sch_had_f && pcs_had_f=1
+	set +f
+	set -- /proc/self/task/*/children
+	[ -n "${pcs_had_f}" ] && set -f
+
+	[ -e "${1}" ]
+}
