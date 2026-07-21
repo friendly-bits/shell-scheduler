@@ -28,9 +28,9 @@ sch_get_descendants_ppid() {
 		/^[0-9]+ \(/ {
 			pid = $1
 			s = $0
-			# Strip "pid (comm) X " (X = single state char). comm may contain
-			# spaces and parens - the greedy match handles those; a line that
-			# does not match is a fragment of a newline-containing comm - skip
+			# Strip "pid (comm) X " (X = single state char).
+			# comm may contain spaces and parens - the greedy match handles those;
+			# a line that does not match is a fragment of a newline-containing comm - skip
 			if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
 			split(s, f, " ")
 			if (f[1] !~ /^[0-9]+$/) next
