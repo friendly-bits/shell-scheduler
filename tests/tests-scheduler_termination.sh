@@ -734,7 +734,6 @@ test_scheduler_termination_16() {
 		TEST_ID=scheduler_termination_16 \
 		sched_rv \
 		scheduler_pid \
-		sched_fifo \
 		jobs="ok5_1 ok5_2"
 
 	print_test_header "${TEST_ID:?}" "FIFO disappearance during execution" "${jobs}"
@@ -750,10 +749,10 @@ test_scheduler_termination_16() {
 
 	scheduler_pid=$!
 
-	sched_fifo="/tmp/sched_ipc_${scheduler_pid}"
-
+	# The FIFO lives in the scheduler's per-run dir under SCHED_DIR (/tmp),
+	#   whose '.<n>' suffix is chosen at runtime; match it by a PID-scoped glob
 	sleep 1
-	rm -f "${sched_fifo}"
+	rm -f /tmp/sched_"${scheduler_pid}".*/ipc
 
 	wait "${scheduler_pid}"
 	sched_rv=$?
