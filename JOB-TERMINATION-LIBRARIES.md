@@ -10,22 +10,9 @@ This document explains, in depth, the three callback implementations bundled wit
 
 - [Implementations comparison](#implementations-comparison)
 - [Job termination callback subcommands](#job-termination-callback-subcommands)
-- [`scheduler-job-term-ppid.sh` - the /proc PPID-walk library](#scheduler-job-term-ppidsh---the-proc-ppid-walk-library)
-  - [Mechanism](#mechanism)
-  - [Subcommand behavior](#subcommand-behavior)
-  - [Guarantees and limitations](#guarantees-and-limitations)
-  - [Probing availability: `proc_ppid_supported`](#probing-availability-proc_ppid_supported)
-- [`scheduler-job-term-children.sh` - the /proc children-walk library](#scheduler-job-term-childrensh---the-proc-children-walk-library)
-  - [Probing availability: `proc_children_supported`](#probing-availability-proc_children_supported)
-- [`scheduler-job-term-cgroup.sh` - the cgroup v2 library](#scheduler-job-term-cgroupsh---the-cgroup-v2-library)
-  - [Mechanism](#mechanism-1)
-  - [Subcommand behavior](#subcommand-behavior-1)
-  - [Requirements](#requirements)
-  - [When the scheduler can manage cgroups](#when-the-scheduler-can-manage-cgroups)
-  - [Running from cron](#running-from-cron)
-  - [Background: cgroup delegation](#background-cgroup-delegation)
-  - [`SCHED_CGROUP_BASE`](#sched_cgroup_base)
-  - [Probing availability: `cgroup_cleanup_supported`](#probing-availability-cgroup_cleanup_supported)
+- [PPID-walk library](#ppid-walk-library-scheduler-job-term-ppidsh)
+- [Children-walk library](#children-walk-library-scheduler-job-term-childrensh)
+- [cgroup v2 library](#cgroup-v2-library-scheduler-job-term-cgroupsh)
 - [Selecting job termination mechanism at runtime](#selecting-job-termination-mechanism-at-runtime)
 
 ## Implementations comparison
@@ -102,7 +89,7 @@ The helper `proc_ppid_supported`, defined by this library, returns `0` if `awk` 
 
 ## Children-walk library (scheduler-job-term-children.sh)
 
-Identical to the [PPID-walk library](#scheduler-job-term-ppidsh---the-proc-ppid-walk-library) - the same three-phase discover/freeze/kill mechanism, the same subcommand behavior, and the same guarantees and limitations - except in the discovery step: it reads each process's `/proc/<pid>/task/<tid>/children` files (iterating over *all* threads, so children forked by a non-leader thread are still found) instead of scanning parent-PID fields. Those `children` files exist only on a kernel built with `CONFIG_PROC_CHILDREN`, which is absent on some stripped kernels (e.g. typical OpenWrt builds). Reading the per-process `children` lists is more efficient than scanning every `/proc/<pid>/stat`, so prefer this mechanism over PPID-walk where the kernel option is present.
+Identical to the [PPID-walk library](#ppid-walk-library-scheduler-job-term-ppidsh) - the same three-phase discover/freeze/kill mechanism, the same subcommand behavior, and the same guarantees and limitations - except in the discovery step: it reads each process's `/proc/<pid>/task/<tid>/children` files (iterating over *all* threads, so children forked by a non-leader thread are still found) instead of scanning parent-PID fields. Those `children` files exist only on a kernel built with `CONFIG_PROC_CHILDREN`, which is absent on some stripped kernels (e.g. typical OpenWrt builds). Reading the per-process `children` lists is more efficient than scanning every `/proc/<pid>/stat`, so prefer this mechanism over PPID-walk where the kernel option is present.
 
 Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_children`.
 
