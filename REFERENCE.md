@@ -241,6 +241,8 @@ job_get_params <job_ID> <param_name_1> <param_name_2> ...
 
 `job_get_params` will assign the value for each specified parameter to a same-named variable.
 
+This helper works in every callback and in your application script.
+
 <details>
 <summary><strong>job_get_params example</strong></summary>
 
@@ -251,8 +253,6 @@ job_get_params "job_1" filename url
 echo "filename is '${filename}', url is '${url}'"
 ```
 </details>
-
-This works in every callback and in your application script.
 
 <details>
 <summary><strong>Fetching into differently-named variables, and non-identifier param names</strong></summary>
@@ -408,7 +408,7 @@ The scheduler is configured entirely through environment variables. Required var
 | SCHED_TIMEOUT_S           |          |  `900`  | Global scheduler timeout in seconds ( integer >= 1 ).                                                                            |
 | SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job starts or completions ( integer >= 1 ).                                        |
 | SCHED_JOB_TIMEOUT_S       |          |  unset  | Default per-job timeout in seconds ( integer >= 1 ); override per job via `job_set_timeout()`. See [TIMEKEEPING.md](TIMEKEEPING.md#per-job-timeouts). |
-| SCHED_DIR                 |          |  `/tmp` | Directory in which the scheduler creates its FIFO used for communication with running jobs. Trailing `/` characters are ignored. |
+| SCHED_DIR                 |          |  `/tmp` | Directory under which the scheduler creates a unique per-run subdirectory holding its job-communication FIFO; multiple scheduler instances can safely share one `SCHED_DIR`. Trailing `/` characters are ignored. |
 | SCHED_AUTO_PARAMS         |          |  unset  | Whether to export job-specific params when initializing each job ( 1 to enable, any other value to disable ).                    |
 | SCHED_CGROUP_BASE         |          |  unset  | Read by the `scheduler-job-term-cgroup.sh` library, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
 
@@ -486,25 +486,31 @@ The PIDs passed to `term` are job wrapper PIDs (the same PIDs reported in `<runn
 
 ## Job termination helper libraries
 
-The project includes two helper libraries, each one implementing the **job termination callback** (`JOB_TERM_CB`) differently.
+The project includes three helper libraries, each one implementing the **job termination callback** (`JOB_TERM_CB`) differently.
 
 ### TL;DR
 
-For simple use cases with relatively few well-behaved jobs running, it doesn't really matter which mechanism of the two discussed below is used in practice.
+For simple use cases with relatively few well-behaved jobs running, it doesn't really matter which mechanism of the three discussed below is used in practice.
 
-- If an extra file and ~10KiB doesn't make or break your project, include both helper libraries with your application and implement automatic job termination mechanism selection as explained in [Selecting job termination mechanism at runtime](#selecting-job-termination-mechanism-at-runtime) below.
+- If an extra file and ~17KiB doesn't make or break your project, include all three helper libraries with your application and let `sched_job_term_select` pick the mechanism automatically, as explained in [Selecting job termination mechanism at runtime](#selecting-job-termination-mechanism-at-runtime) below.
+- If you want to include only one library and you only care about **which one fits and works best** on the target system and not **why**, use `sched_job_term_select` for testing, then include only the relevant library which hosts the callback it selected.
 - If spawning many jobs, strongly prefer the cgroups-based library because it is much more efficient.
 - If spawning jobs which are prone to misbehavior, hanging or leaving orphaned processes behind, prefer the cgroups-based library because it allows for more deterministic process termination.
-- If you need to pick only one of the helper libraries: prefer the cgroups-based library if your target systems support it.
-- Otherwise just include the proc-based helper library and use the proc-based mechanism.
+- If the target system doesn't support the `cgroup`-based mechanism, use a `/proc`-based library: `scheduler-job-term-ppid.sh` needs only `/proc` and `awk` and works essentially anywhere; `scheduler-job-term-children.sh` is a more efficient variant where the kernel provides `CONFIG_PROC_CHILDREN`.
 
 ### Short version
 
-#### Helper library: `scheduler-job-term-proc.sh`
+#### Helper library: `scheduler-job-term-ppid.sh` (`/proc` PPID-walk)
 
-Reconstructs each job's process tree by walking `/proc/<pid>/task/<tid>/children`, freezes it with `SIGSTOP` (re-scanning to catch races), then delivers `SIGKILL`. Works wherever `/proc` and `awk` are available - no cgroups, no root. It cannot find processes reparented to init, and does not verify process termination, so `<running_pids>` reported to the **scheduler completion callback** may list job PIDs whose trees are already gone.
+Reconstructs each job's process tree by walking PPID links in `/proc/<pid>/stat`, freezes it with `SIGSTOP` (re-scanning to catch races), then delivers `SIGKILL`. Needs only `/proc` and `awk` - no cgroups, no root - which makes it the universal fallback that works on essentially any Linux. It cannot find processes reparented to init, and does not verify process termination, so `<running_pids>` reported to the **scheduler completion callback** may list job PIDs whose trees are already gone.
 
-Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_proc`.
+Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_ppid`; call `proc_ppid_supported` first to probe availability.
+
+#### Helper library: `scheduler-job-term-children.sh` (`/proc` children-walk)
+
+Same mechanism, guarantees, and limitations as the PPID-walk library, but discovers each job's descendants from the kernel's `/proc/<pid>/task/<tid>/children` files instead of PPID links. Those files require a kernel built with `CONFIG_PROC_CHILDREN`; where present they make discovery more efficient, so prefer this library over the PPID-walk one there.
+
+Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_children`; call `proc_children_supported` first to probe availability.
 
 #### Helper library: `scheduler-job-term-cgroup.sh`
 
@@ -518,17 +524,16 @@ The full mechanism of each library, its requirements, and how to deploy it (cont
 
 ### Selecting job termination mechanism at runtime
 
-Your application can select the mechanism automatically from what the environment supports, using `cgroup_cleanup_supported` as the test:
+The scheduler core provides `sched_job_term_select`, which picks the best mechanism among whichever helper libraries are sourced, in the fallback order cgroup -> `/proc` children-walk -> `/proc` PPID-walk:
 
 ```sh
 . ./scheduler.sh
-. ./scheduler-job-term-cgroup.sh # provides the helper 'cgroup_cleanup_supported'
-. ./scheduler-job-term-proc.sh
+. ./scheduler-job-term-ppid.sh
+. ./scheduler-job-term-children.sh
+. ./scheduler-job-term-cgroup.sh
 
-if cgroup_cleanup_supported; then
-    JOB_TERM_CB=sched_job_term_cgroup
-else
-    JOB_TERM_CB=sched_job_term_proc
-fi
+sched_job_term_select JOB_TERM_CB   # cgroup, else children, else ppid
 schedule_jobs "${IDS}" &
 ```
+
+Only the libraries you source are considered. To select manually, use each library's probe (`cgroup_cleanup_supported`, `proc_children_supported`, `proc_ppid_supported`) and set `JOB_TERM_CB` yourself.
