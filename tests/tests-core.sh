@@ -313,3 +313,102 @@ test_core_06() {
 	fi
 }
 
+# Two scheduler instances run concurrently under a SHARED SCHED_DIR with disjoint job sets.
+# Each must finish with rv 0 and report exactly its own jobs in the ok bucket -
+#   no cross-instance leakage through the shared FIFO directory - and both per-run dirs must be cleaned up,
+#   leaving no residue. Guards non-interference between simultaneous instances on a shared volume.
+# Runs in any environment.
+test_core_07() {
+	# Per-instance finalize record, routed by ${CORE07_REC} (set per instance)
+	core_07_finalize() {
+		# $3 = ok ids, $4 = fail ids, $5 = unfinished ids
+		printf 'ok=[%s] fail=[%s] unfin=[%s]\n' "$3" "$4" "$5" > "${CORE07_REC:?}"
+	}
+	# Extract the ok-bucket ids from a record file into <out var>
+	core_07_ok() {
+		local line val
+		read_first_line line "${2}" || { export -n "${1}="; return 1; }
+		val="${line#*ok=[}"
+		val="${val%%]*}"
+		export -n "${1}=${val}"
+	}
+	# Return 0 if <actual> and <expected> are equal as sets (order-insensitive)
+	core_07_same_set() {
+		local e cnt_a=0 cnt_b=0
+		for e in ${1}; do cnt_a=$((cnt_a + 1)); done
+		for e in ${2}; do
+			cnt_b=$((cnt_b + 1))
+			sch_is_included "${e}" "${1}" || return 1
+		done
+		[ "${cnt_a}" = "${cnt_b}" ]
+	}
+
+	local \
+		TEST_ID=core_07 \
+		checks_ok=1 rv_a rv_b pid_a pid_b ok_a ok_b \
+		jobs_a='ok_a1 ok_a2' \
+		jobs_b='ok_b1 ok_b2'
+
+	local \
+		SHARED_DIR="/tmp/sched.concurrency.${TEST_ID}.$$" \
+		REC_A="/tmp/sched.concurrency.reca.${TEST_ID}.$$" \
+		REC_B="/tmp/sched.concurrency.recb.${TEST_ID}.$$"
+	rm -rf "${SHARED_DIR}"; rm -f "${REC_A}" "${REC_B}"
+
+	print_test_header "${TEST_ID}" "Two instances share SCHED_DIR without interfering" "${jobs_a} | ${jobs_b}"
+
+	CORE07_REC="${REC_A}" \
+	SCHED_DIR="${SHARED_DIR}" \
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=core_07_finalize \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=10 \
+	SCHED_IDLE_TIMEOUT_S=8 \
+		schedule_jobs "${jobs_a}" &
+	pid_a=$!
+
+	CORE07_REC="${REC_B}" \
+	SCHED_DIR="${SHARED_DIR}" \
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=core_07_finalize \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=10 \
+	SCHED_IDLE_TIMEOUT_S=8 \
+		schedule_jobs "${jobs_b}" &
+	pid_b=$!
+
+	wait "${pid_a}"; rv_a=$?
+	wait "${pid_b}"; rv_b=$?
+
+	[ "${rv_a}" = 0 ] || { checks_ok=; echo "instance A rv=${rv_a} (want 0)"; }
+	[ "${rv_b}" = 0 ] || { checks_ok=; echo "instance B rv=${rv_b} (want 0)"; }
+
+	# Each instance reports exactly its own jobs
+	core_07_ok ok_a "${REC_A}"
+	core_07_ok ok_b "${REC_B}"
+	core_07_same_set "${ok_a}" "${jobs_a}" ||
+		{ checks_ok=; echo "A ok bucket '${ok_a}' (want '${jobs_a}')"; }
+	core_07_same_set "${ok_b}" "${jobs_b}" ||
+		{ checks_ok=; echo "B ok bucket '${ok_b}' (want '${jobs_b}')"; }
+
+	# No cross-instance leakage through the shared FIFO directory
+	case " ${ok_a} " in *" ok_b"*) checks_ok=; echo "A leaked B's ids: '${ok_a}'" ;; esac
+	case " ${ok_b} " in *" ok_a"*) checks_ok=; echo "B leaked A's ids: '${ok_b}'" ;; esac
+
+	# Both per-run dirs cleaned up: no leftover under the shared dir
+	set -- "${SHARED_DIR}"/sched_*
+	[ -e "${1}" ] && { checks_ok=; echo "leftover run dir(s): $*"; }
+
+	rm -rf "${SHARED_DIR}"; rm -f "${REC_A}" "${REC_B}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "both rv 0, ok sets correct and disjoint, run dirs cleaned"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
+
