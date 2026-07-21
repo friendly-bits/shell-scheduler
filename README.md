@@ -214,7 +214,7 @@ The above information, along with the below example, should be enough for most b
 - **[Signal handling](REFERENCE.md#signal-handling)**
 - **[Termination of running jobs](REFERENCE.md#termination-of-running-jobs)**
 
-Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The two job termination helper libraries - how they kill job process trees, their requirements, and how to deploy them (containers, cron, systemd, unprivileged use) - are documented in **[JOB-TERMINATION-LIBRARIES.md](JOB-TERMINATION-LIBRARIES.md)**.
+Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The three optional job termination helper libraries are documented in **[JOB-TERMINATION-LIBRARIES.md](JOB-TERMINATION-LIBRARIES.md)**.
 
 ## Real-world example
 
