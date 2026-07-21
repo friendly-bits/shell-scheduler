@@ -371,10 +371,14 @@ test_config_08() {
 		schedule_jobs "${jobs}" &
 
 	scheduler_pid=$!
-	sched_fifo="${custom_dir}/sched_ipc_${scheduler_pid}"
+
+	# The FIFO lives in the scheduler's per-run dir under the custom SCHED_DIR,
+	#   whose '.<n>' suffix is chosen at runtime; resolve it by a PID-scoped glob
+	sleep 1
+	set -- "${custom_dir}"/sched_"${scheduler_pid}".*/ipc
+	sched_fifo="${1}"
 
 	# Observe the FIFO exists in the custom dir while the job runs.
-	sleep 1
 	[ -p "${sched_fifo}" ] && fifo_in_dir=yes
 
 	wait "${scheduler_pid}"
