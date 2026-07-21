@@ -87,7 +87,7 @@ JOB_DONE_CB=job_done \
 SCHED_FINALIZE_CB=finalize \
 SCHED_MAX_JOBS=3 \
 SCHED_TIMEOUT_S=60 \
-JOB_TERM_CB=sched_term_cgroup \
+JOB_TERM_CB=sched_job_term_cgroup \
 	schedule_jobs "straggler timeout ok" &
 wait "${!}"
 sched_rv=${?}
