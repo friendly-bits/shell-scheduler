@@ -4,8 +4,9 @@
 
 # tests-job_termination.sh
 
-# Category: Modular job termination (JOB_TERM_CB) and the supplementary job termination libraries
-#   (scheduler-job-term-cgroup.sh, scheduler-job-term-proc.sh)
+# Category: Modular job termination (JOB_TERM_CB)
+#   and the supplementary job termination libraries (scheduler-job-term-cgroup.sh,
+#   scheduler-job-term-children.sh)
 
 # This file is sourced by tests.sh; it defines test_N functions only.
 
@@ -15,10 +16,14 @@
 
 # Tests of the cgroup library require a capable environment
 #   (root or a delegated cgroup subtree - e.g. run the suite via 'systemd-run --user --scope')
-#   and SKIP otherwise. Tests of the proc library and of the core contract run everywhere.
+#   and SKIP otherwise.
+# Tests of the children library require a kernel with CONFIG_PROC_CHILDREN
+#   (the /proc/<pid>/task/<tid>/children files) and SKIP otherwise.
+# Core-contract and ppid-walk tests run everywhere (ppid needs only /proc and awk).
 
 . "${script_dir:?}/../scheduler-job-term-cgroup.sh"
-. "${script_dir:?}/../scheduler-job-term-proc.sh"
+. "${script_dir:?}/../scheduler-job-term-children.sh"
+. "${script_dir:?}/../scheduler-job-term-ppid.sh"
 
 #
 # Category infrastructure
@@ -37,6 +42,36 @@ cg_capable() {
 }
 CG_CAPABLE_CACHED=
 CG_SKIP_REASON="cgroup termination unsupported here - run as root or via 'systemd-run --user --scope'"
+
+# Capability gate for the children library, evaluated once per suite run
+children_capable() {
+	[ -n "${CHILDREN_CAPABLE_CACHED}" ] || {
+		if proc_children_supported; then
+			CHILDREN_CAPABLE_CACHED=yes
+		else
+			CHILDREN_CAPABLE_CACHED=no
+		fi
+	}
+	[ "${CHILDREN_CAPABLE_CACHED}" = yes ]
+}
+CHILDREN_CAPABLE_CACHED=
+CHILDREN_SKIP_REASON="children-walk termination unsupported here - kernel lacks CONFIG_PROC_CHILDREN (/proc/<pid>/task/<tid>/children)"
+
+# Capability gate for the ppid-walk library, evaluated once per suite run. ppid needs only /proc and awk,
+#   so this is effectively always true; the gate exists for symmetry and to SKIP (rather than fail)
+#   if awk is truly absent.
+ppid_capable() {
+	[ -n "${PPID_CAPABLE_CACHED}" ] || {
+		if proc_ppid_supported; then
+			PPID_CAPABLE_CACHED=yes
+		else
+			PPID_CAPABLE_CACHED=no
+		fi
+	}
+	[ "${PPID_CAPABLE_CACHED}" = yes ]
+}
+PPID_CAPABLE_CACHED=
+PPID_SKIP_REASON="ppid-walk termination unsupported here - /proc or awk unavailable"
 
 # Create a private parent cgroup for one test under this process's own cgroup
 #   and assign its path to ${CG_TEST_BASE}; the test passes it to the cgroup
@@ -144,8 +179,7 @@ do_job_cg() {
 		# Proof-of-execution marker
 		cgtouch) : > "${CG_MARK_F:?}" ;;
 
-		# Return instantly, leaving a background child and an orphaned
-		# grandchild behind (both recorded)
+		# Return instantly, leaving a background child and an orphaned grandchild behind (both recorded)
 		cgstrag)
 			sleep 300 &
 			printf '%s\n' "${!}" >> "${CG_PIDS_F:?}"
@@ -158,6 +192,19 @@ do_job_cg() {
 		# Block on a recorded child until killed
 		cgblock)
 			sleep 300 &
+			printf '%s\n' "${!}" >> "${CG_PIDS_F:?}"
+			wait "${!}"
+		;;
+
+		# Live two-level subtree: a child that itself keeps a grandchild alive. Both the child (mid)
+		#   and the grandchild are recorded, then the wrapper blocks.
+		# Exercises multi-level descendant discovery (the fixpoint walk).
+		cgdeep)
+			(
+				sleep 300 &
+				printf '%s\n' "${!}" >> "${CG_PIDS_F:?}"
+				wait "${!}"
+			) &
 			printf '%s\n' "${!}" >> "${CG_PIDS_F:?}"
 			wait "${!}"
 		;;
@@ -675,14 +722,21 @@ test_job_termination_08() {
 	fi
 }
 
-# proc library: the job tree is killed at per-job timeout expiry. The
-#   completion callback must observe the job's recorded child already dead.
-#   Kills are NOT verified in this library, so the expired job's PID must
-#   still be reported in running_pids. Runs in any environment.
-test_job_termination_09() {
-	job_termination_09_done() {
-		local i pid alive=unknown
+# Shared scenario runners for the /proc-based mechanisms (children, ppid).
+# Both libraries implement the same unverified-kill contract,
+#   so each scenario is written once and run against a given callback + capability gate.
 
+# "per-job timeout kills the job's process tree at expiry (unverified)".
+# 1: test id
+# 2: JOB_TERM_CB
+# 3: capability gate fn
+# 4: skip reason
+# 5: job id (a cgblock_* id, so do_job_cg blocks on a recorded child)
+_jt_timeout_scenario() {
+	# On the expiry notification (rv 124), wait for the job's recorded child to die,
+	#   then record whether it was already dead when the callback ran
+	_jt_timeout_done() {
+		local i pid alive=unknown
 		[ "${2}" = 124 ] && [ -n "${3}" ] ||
 			{ printf 'unexpected|%s|%s|%s\n' "${1}" "${2}" "${3:-}" >> "${DONE_F:?}"; return 0; }
 		for i in 1 2 3; do
@@ -697,7 +751,7 @@ test_job_termination_09() {
 	}
 
 	local \
-		TEST_ID=job_termination_09 \
+		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_job="${5}" \
 		sched_rv checks_ok=1 done_rec done_pid fin_pids fin_expired
 
 	local \
@@ -707,19 +761,21 @@ test_job_termination_09() {
 	rm -f "${CG_PIDS_F}" "${CG_FIN_F}" "${DONE_F}"
 	: > "${CG_PIDS_F}"
 
-	print_test_header "${TEST_ID}" "proc: per-job timeout kills the job's process tree at expiry (unverified)" "cgblock_c09"
+	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: per-job timeout kills the job's process tree at expiry (unverified)" "${jt_job}"
 
-	job_set_timeout cgblock_c09 1 || { FAIL "job_set_timeout failed"; return 1; }
+	"${jt_gate}" || { SKIP "${jt_skip}"; return 0; }
+
+	job_set_timeout "${jt_job}" 1 || { FAIL "job_set_timeout failed"; return 1; }
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=cg_finalize_rec \
-	JOB_DONE_CB=job_termination_09_done \
+	JOB_DONE_CB=_jt_timeout_done \
 	DO_JOB_CB=do_job_cg \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=6 \
 	SCHED_IDLE_TIMEOUT_S=4 \
-	JOB_TERM_CB=sched_job_term_proc \
-		schedule_jobs 'cgblock_c09' &
+	JOB_TERM_CB="${jt_cb}" \
+		schedule_jobs "${jt_job}" &
 
 	wait "${!}"
 	sched_rv=${?}
@@ -727,18 +783,18 @@ test_job_termination_09() {
 	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
 
 	read_first_line done_rec "${DONE_F}"
-	done_pid="${done_rec#expired|cgblock_c09|}"
+	done_pid="${done_rec#expired|${jt_job}|}"
 	done_pid="${done_pid%%|*}"
 	case "${done_rec}" in
-		"expired|cgblock_c09|${done_pid}|dead_at_cb=yes") ;;
-		*) checks_ok=; echo "done record '${done_rec}' (want 'expired|cgblock_c09|<pid>|dead_at_cb=yes')" ;;
+		"expired|${jt_job}|${done_pid}|dead_at_cb=yes") ;;
+		*) checks_ok=; echo "done record '${done_rec}' (want 'expired|${jt_job}|<pid>|dead_at_cb=yes')" ;;
 	esac
 
-	cg_fin_get fin_expired expired "${CG_FIN_F}" && [ "${fin_expired}" = cgblock_c09 ] ||
-		{ checks_ok=; echo "expired bucket '${fin_expired}' (want 'cgblock_c09')"; }
+	cg_fin_get fin_expired expired "${CG_FIN_F}" && [ "${fin_expired}" = "${jt_job}" ] ||
+		{ checks_ok=; echo "expired bucket '${fin_expired}' (want '${jt_job}')"; }
 
-	# No verification in the proc library: the expired job's wrapper PID
-	# must still be reported in running_pids
+	# No verification in a /proc-based library:
+	#   the expired job's wrapper PID must still be reported in running_pids
 	cg_fin_get fin_pids pids "${CG_FIN_F}" && [ "${fin_pids}" = "${done_pid}" ] ||
 		{ checks_ok=; echo "running_pids '${fin_pids}' (want '${done_pid}' - unverified kill)"; }
 
@@ -756,14 +812,16 @@ test_job_termination_09() {
 	fi
 }
 
-# proc library: USR1 abort kills the running job trees (children dead after
-#   the run); the jobs are classified unfinished; running_pids reports both
-#   wrapper PIDs (kills unverified). Runs in any environment.
-test_job_termination_10() {
+# "USR1 abort kills all running job trees (unverified)".
+# 1: test id
+# 2: callback
+# 3: gate fn
+# 4: skip reason
+# 5: space-separated cgblock_* ids
+_jt_abort_scenario() {
 	local \
-		TEST_ID=job_termination_10 \
-		sched_pid sched_rv checks_ok=1 fin_pids fin_unfin pid_cnt=0 p \
-		jobs='cgblock_c10a cgblock_c10b'
+		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_jobs="${5}" \
+		sched_pid sched_rv checks_ok=1 fin_pids fin_unfin pid_cnt=0 job_cnt=0 p
 
 	local \
 		CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
@@ -771,17 +829,21 @@ test_job_termination_10() {
 	rm -f "${CG_PIDS_F}" "${CG_FIN_F}"
 	: > "${CG_PIDS_F}"
 
-	print_test_header "${TEST_ID}" "proc: USR1 abort kills all running job trees (unverified)" "${jobs}"
+	for p in ${jt_jobs}; do job_cnt=$((job_cnt + 1)); done
+
+	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: USR1 abort kills all running job trees (unverified)" "${jt_jobs}"
+
+	"${jt_gate}" || { SKIP "${jt_skip}"; return 0; }
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=cg_finalize_rec \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_cg \
-	SCHED_MAX_JOBS=2 \
+	SCHED_MAX_JOBS="${job_cnt}" \
 	SCHED_TIMEOUT_S=8 \
 	SCHED_IDLE_TIMEOUT_S=6 \
-	JOB_TERM_CB=sched_job_term_proc \
-		schedule_jobs "${jobs}" &
+	JOB_TERM_CB="${jt_cb}" \
+		schedule_jobs "${jt_jobs}" &
 
 	sched_pid=${!}
 	sleep 1
@@ -791,14 +853,14 @@ test_job_termination_10() {
 
 	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
 
-	cg_fin_get fin_unfin unfin "${CG_FIN_F}" && cg_same_set "${fin_unfin}" "${jobs}" ||
-		{ checks_ok=; echo "unfinished bucket '${fin_unfin}' (want '${jobs}')"; }
+	cg_fin_get fin_unfin unfin "${CG_FIN_F}" && cg_same_set "${fin_unfin}" "${jt_jobs}" ||
+		{ checks_ok=; echo "unfinished bucket '${fin_unfin}' (want '${jt_jobs}')"; }
 
-	# Kills are unverified: both wrapper PIDs must still be reported
+	# Kills are unverified: every wrapper PID must still be reported
 	cg_fin_get fin_pids pids "${CG_FIN_F}"
 	for p in ${fin_pids}; do pid_cnt=$((pid_cnt + 1)); done
-	[ "${pid_cnt}" = 2 ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want 2 PIDs - unverified kills)"; }
+	[ "${pid_cnt}" = "${job_cnt}" ] ||
+		{ checks_ok=; echo "running_pids '${fin_pids}' (want ${job_cnt} PIDs - unverified kills)"; }
 
 	cg_assert_dead "${CG_PIDS_F}" ||
 		{ checks_ok=; echo "job children still alive: ${CG_ALIVE}"; }
@@ -806,7 +868,7 @@ test_job_termination_10() {
 	cg_teardown "${CG_PIDS_F}" "" "${CG_FIN_F}"
 
 	if [ -n "${checks_ok}" ]; then
-		PASS "rv=83, unfinished='${fin_unfin}', children dead, running_pids has 2 (unverified)"
+		PASS "rv=83, unfinished='${fin_unfin}', children dead, running_pids has ${job_cnt} (unverified)"
 		return 0
 	else
 		FAIL
@@ -814,20 +876,22 @@ test_job_termination_10() {
 	fi
 }
 
-# proc library, documented limitation: stragglers of a COMPLETED job are not
-#   reaped (the wrapper already exited, so its children are reparented to
-#   init and escape the PPID walk). The recorded stragglers must survive the
-#   run; the test then kills them. Runs in any environment.
-test_job_termination_11() {
+# "completed-job stragglers are NOT reaped (documented limitation)".
+# Orphans escape any /proc-based mechanism regardless of its own availability,
+#   so this holds everywhere - no capability gate.
+# 1: test id
+# 2: callback
+# 3: job id (a cgstrag_* id)
+_jt_strag_scenario() {
 	local \
-		TEST_ID=job_termination_11 \
+		TEST_ID="${1}" jt_cb="${2}" jt_job="${3}" \
 		sched_rv checks_ok=1 alive_cnt=0 pid
 
 	local CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
 	rm -f "${CG_PIDS_F}"
 	: > "${CG_PIDS_F}"
 
-	print_test_header "${TEST_ID}" "proc: completed-job stragglers are NOT reaped (documented limitation)" "cgstrag_c11"
+	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: completed-job stragglers are NOT reaped (documented limitation)" "${jt_job}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	JOB_DONE_CB=done_handler \
@@ -835,8 +899,8 @@ test_job_termination_11() {
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=3 \
 	SCHED_IDLE_TIMEOUT_S=2 \
-	JOB_TERM_CB=sched_job_term_proc \
-		schedule_jobs 'cgstrag_c11' &
+	JOB_TERM_CB="${jt_cb}" \
+		schedule_jobs "${jt_job}" &
 
 	wait "${!}"
 	sched_rv=${?}
@@ -860,6 +924,26 @@ test_job_termination_11() {
 		FAIL
 		return 1
 	fi
+}
+
+# children library: per-job timeout kills the job's process tree at expiry; kills unverified,
+#   so the expired PID stays in running_pids. SKIP where the children mechanism is unavailable.
+test_job_termination_09() {
+	_jt_timeout_scenario job_termination_09 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" cgblock_c09
+}
+
+# children library: USR1 abort kills all running job trees; jobs classified unfinished;
+#   both wrapper PIDs reported (kills unverified). SKIP where the children mechanism is unavailable.
+test_job_termination_10() {
+	_jt_abort_scenario job_termination_10 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" 'cgblock_c10a cgblock_c10b'
+}
+
+# children library, documented limitation:
+#   stragglers of a COMPLETED job are not reaped (the wrapper already exited,
+#   so its children are reparented to init and escape the descendant walk).
+# The recorded stragglers must survive the run; the test then kills them. Runs in any environment.
+test_job_termination_11() {
+	_jt_strag_scenario job_termination_11 sched_job_term_children cgstrag_c11
 }
 
 # Custom (user-defined) termination command exercising the out-var report
@@ -937,6 +1021,223 @@ test_job_termination_12() {
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "rv=83, running_pids empty via out-var report, stdout noise ignored"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
+
+# cgroup base collision under a colliding PID:
+#   a directory named exactly like the base this process would claim (sched_<pid>.0)
+#   is pre-created to stand in for a same-PID sibling instance sharing SCHED_CGROUP_BASE.
+# 'init' must route around it to sched_<pid>.1 without disturbing the squat,
+#   and 'cleanup' must remove only this instance's own base.
+# Deterministically emulates the shared-base collision without containers or a real second process.
+# SCH_TC_BASE/SCH_TC_PENDING are shadowed locally so the in-process init/cleanup calls resolve them by dynamic
+#   scope and don't touch suite-global state.
+test_job_termination_13() {
+	local \
+		TEST_ID=job_termination_13 \
+		CG_TEST_BASE \
+		SCH_TC_BASE SCH_TC_PENDING \
+		checks_ok=1 p init_rv cleanup_rv reaped squat newbase
+
+	print_test_header "${TEST_ID}" "cgroup: base collision with a same-PID sibling is avoided; sibling untouched" "(no jobs)"
+
+	cg_capable || { SKIP "${CG_SKIP_REASON}"; return 0; }
+
+	get_test_pid p || { FAIL "cannot get test PID"; return 1; }
+	cg_mk_test_base "${TEST_ID}" || { FAIL "cannot create test base cgroup"; return 1; }
+
+	squat="${CG_TEST_BASE}/sched_${p}.0"
+	newbase="${CG_TEST_BASE}/sched_${p}.1"
+
+	# Plant the sibling's base, non-empty (its own job cgroup),
+	#   so a regression to steal-then-recreate would be caught
+	mkdir "${squat}" 2>/dev/null && mkdir "${squat}/job_squat" 2>/dev/null ||
+		{ FAIL "cannot create squat cgroup"; cg_teardown "" "${CG_TEST_BASE}"; return 1; }
+
+	# init runs in THIS process, so SCH_TC_PID == our PID;
+	#   SCHED_CGROUP_BASE forces the per-run base under CG_TEST_BASE, where .0 is already taken
+	SCHED_CGROUP_BASE="${CG_TEST_BASE}" sched_job_term_cgroup init
+	init_rv=$?
+
+	[ "${init_rv}" = 0 ] || { checks_ok=; echo "init rv=${init_rv} (want 0)"; }
+	[ -d "${newbase}" ] || { checks_ok=; echo "new base 'sched_${p}.1' not created (did not route around .0)"; }
+	[ -d "${squat}" ] || { checks_ok=; echo "squat 'sched_${p}.0' vanished"; }
+	[ -d "${squat}/job_squat" ] || { checks_ok=; echo "squat's job cgroup vanished (stolen)"; }
+
+	# cleanup removes only this instance's own base; the sibling stays intact
+	sched_job_term_cgroup cleanup reaped
+	cleanup_rv=$?
+
+	[ "${cleanup_rv}" = 0 ] || { checks_ok=; echo "cleanup rv=${cleanup_rv} (want 0)"; }
+	[ -z "${reaped}" ] || { checks_ok=; echo "cleanup reaped '${reaped}' (want empty)"; }
+	[ -d "${newbase}" ] && { checks_ok=; echo "own base 'sched_${p}.1' not removed by cleanup"; }
+	[ -d "${squat}/job_squat" ] || { checks_ok=; echo "cleanup removed the sibling's cgroup"; }
+
+	cg_teardown "" "${CG_TEST_BASE}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "routed .0 -> .1, sibling untouched, cleanup removed only own base"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
+
+# ppid library: per-job timeout kills the job's process tree at expiry; unverified,
+#   so the expired PID stays in running_pids.
+test_job_termination_14() {
+	_jt_timeout_scenario job_termination_14 sched_job_term_ppid ppid_capable "${PPID_SKIP_REASON}" cgblock_p14
+}
+
+# ppid library: USR1 abort kills all running job trees; unverified.
+test_job_termination_15() {
+	_jt_abort_scenario job_termination_15 sched_job_term_ppid ppid_capable "${PPID_SKIP_REASON}" 'cgblock_p15a cgblock_p15b'
+}
+
+# ppid library: completed-job stragglers are NOT reaped (documented orphan limitation).
+test_job_termination_16() {
+	_jt_strag_scenario job_termination_16 sched_job_term_ppid cgstrag_p16
+}
+
+# ppid library: the PPID-map fixpoint walk reaches a multi-level subtree.
+# The job keeps a live wrapper -> child -> grandchild chain (child and grandchild both recorded);
+#   a USR1 abort must kill the whole chain,
+#   proving discovery iterates past direct children rather than stopping at depth 1.
+test_job_termination_17() {
+	local \
+		TEST_ID=job_termination_17 \
+		sched_pid sched_rv checks_ok=1 \
+		jobs='cgdeep_p17'
+
+	local CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
+	rm -f "${CG_PIDS_F}"
+	: > "${CG_PIDS_F}"
+
+	print_test_header "${TEST_ID}" "ppid: abort kills a multi-level subtree (fixpoint walk depth)" "${jobs}"
+
+	ppid_capable || { SKIP "${PPID_SKIP_REASON}"; return 0; }
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_cg \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=6 \
+	JOB_TERM_CB=sched_job_term_ppid \
+		schedule_jobs "${jobs}" &
+
+	sched_pid=${!}
+	sleep 1
+	kill -USR1 "${sched_pid}" 2>/dev/null
+	wait "${sched_pid}"
+	sched_rv=${?}
+
+	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+
+	# Both the mid child and the grandchild (2 recorded PIDs) must be dead
+	[ "$(sed '/^$/d' "${CG_PIDS_F}" | wc -l)" = 2 ] ||
+		{ checks_ok=; echo "recorded pid count $(sed '/^$/d' "${CG_PIDS_F}" | wc -l) (want 2)"; }
+	cg_assert_dead "${CG_PIDS_F}" ||
+		{ checks_ok=; echo "multi-level subtree survivor(s): ${CG_ALIVE}"; }
+
+	cg_teardown "${CG_PIDS_F}" ""
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "rv=83, whole wrapper->child->grandchild chain killed"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
+
+# ppid library: the proc_ppid_supported probe. Reports supported on a normal system,
+#   and reports unsupported when awk cannot be found.
+test_job_termination_18() {
+	local TEST_ID=job_termination_18 checks_ok=1
+
+	print_test_header "${TEST_ID}" "ppid: proc_ppid_supported probe (supported here; fails without awk)" "(no jobs)"
+
+	proc_ppid_supported ||
+		{ checks_ok=; echo "proc_ppid_supported returned non-zero on a normal system"; }
+	SCHED_AWK_CMD=/nonexistent/nope proc_ppid_supported &&
+		{ checks_ok=; echo "proc_ppid_supported reported supported with awk missing"; }
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "supported here, unsupported without awk"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
+
+# ppid library: the /proc/<pid>/stat parser tolerates a comm containing ')'
+#   plus a fake ' <state> <ppid> ' sequence.
+# A job child exec's a shebang script whose basename is 'x) R 99999'
+#   (<=15 bytes, so it survives comm truncation);
+#   its stat line reads '<pid> (x) R 99999) S <wrapper> ...'.
+# A naive first-')' parse mis-reads the ppid and drops the process;
+#   the library's greedy match recovers it, so an abort must still kill the crafted-comm child.
+test_job_termination_19() {
+	job_termination_19_do_job() {
+		local scr="${P6_DIR:?}/x) R 99999"
+		printf '#!/bin/sh\nsleep 300\n' > "${scr}"
+		chmod +x "${scr}"
+		"${scr}" &
+		printf '%s\n' "${!}" >> "${CG_PIDS_F:?}"
+		wait "${!}"
+	}
+
+	local \
+		TEST_ID=job_termination_19 \
+		sched_pid sched_rv checks_ok=1 \
+		jobs='cparse_p19'
+
+	local \
+		CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
+		P6_DIR="/tmp/sched.job_termination.p6.${TEST_ID}.$$"
+	rm -rf "${P6_DIR}"
+	mkdir -p "${P6_DIR}"
+	rm -f "${CG_PIDS_F}"
+	: > "${CG_PIDS_F}"
+
+	print_test_header "${TEST_ID}" "ppid: /proc/<pid>/stat parser handles ')' in comm" "${jobs}"
+
+	ppid_capable || { SKIP "${PPID_SKIP_REASON}"; rm -rf "${P6_DIR}"; return 0; }
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=job_termination_19_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=6 \
+	JOB_TERM_CB=sched_job_term_ppid \
+		schedule_jobs "${jobs}" &
+
+	sched_pid=${!}
+	sleep 1
+	kill -USR1 "${sched_pid}" 2>/dev/null
+	wait "${sched_pid}"
+	sched_rv=${?}
+
+	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+
+	cg_assert_dead "${CG_PIDS_F}" ||
+		{ checks_ok=; echo "crafted-comm child survived (parser mis-read its stat line): ${CG_ALIVE}"; }
+
+	cg_teardown "${CG_PIDS_F}" ""
+	rm -rf "${P6_DIR}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "rv=83, crafted-comm child discovered and killed"
 		return 0
 	else
 		FAIL
