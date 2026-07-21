@@ -22,6 +22,7 @@ This library is designed to solve the following problems:
 - Optional **automatic job termination**
 - **Extensive test suite** validates that every promise made by the API holds in practice
 - **Negligible performance overhead** for almost any feasible use case. Very few invocations of external binaries, very few filesystem operations, and minimum spawned subshells
+- Supports running **multiple scheduler instances** in parallel on the same machine
 
 ## Dependencies
 
