@@ -1355,3 +1355,246 @@ test_params_27() {
 		return 1
 	fi
 }
+
+# jobs_init() resets params for jobs whose IDs are passed in varied groupings: 1/2/3 positional parameters,
+#   IDs split on space/tab/newline, empty inputs tolerated.
+test_params_28() {
+	# Set P=<id> on each ID, confirm the value reads back.
+	p28_set() {
+		local id got
+		for id in "$@"; do
+			job_set_params "${id}" "P=v_${id}" || return 1
+			unset got; job_get_params "${id}" got=P
+			[ "${got}" = "v_${id}" ] || return 1
+		done
+	}
+	# Confirm P reads back empty on each ID.
+	p28_clr() {
+		local id got
+		for id in "$@"; do
+			unset got; job_get_params "${id}" got=P
+			[ -z "${got}" ] || return 1
+		done
+	}
+
+	local \
+		TEST_ID=params_28 \
+		got \
+		total=0 \
+		passed=0
+
+	print_test_header "${TEST_ID:?}" "jobs_init() resets params across ID-list arg groupings and separators" "(direct calls, no scheduler run)"
+
+	# (a) one positional param, three IDs, space-separated.
+	total=$((total + 1))
+	p28_set p28a1 p28a2 p28a3 && jobs_init "p28a1 p28a2 p28a3" &&
+		p28_clr p28a1 p28a2 p28a3 && passed=$((passed + 1))
+
+	# (b) one positional param, tab-separated.
+	total=$((total + 1))
+	p28_set p28b1 p28b2 && jobs_init "p28b1"$'\t'"p28b2" &&
+		p28_clr p28b1 p28b2 && passed=$((passed + 1))
+
+	# (c) one positional param, newline-separated.
+	total=$((total + 1))
+	p28_set p28c1 p28c2 && jobs_init "p28c1${NL}p28c2" &&
+		p28_clr p28c1 p28c2 && passed=$((passed + 1))
+
+	# (d) one positional param, mixed separators with surrounding and repeated whitespace.
+	total=$((total + 1))
+	p28_set p28d1 p28d2 p28d3 && jobs_init " p28d1"$'\t'$'\t'"p28d2${NL}p28d3 " &&
+		p28_clr p28d1 p28d2 p28d3 && passed=$((passed + 1))
+
+	# (e) two positional parameters.
+	total=$((total + 1))
+	p28_set p28e1 p28e2 p28e3 && jobs_init "p28e1 p28e2" "p28e3" &&
+		p28_clr p28e1 p28e2 p28e3 && passed=$((passed + 1))
+
+	# (f) three positional parameters, mixed separators.
+	total=$((total + 1))
+	p28_set p28f1 p28f2 p28f3 p28f4 p28f5 &&
+		jobs_init "p28f1 p28f2" "p28f3" "p28f4${NL}p28f5" &&
+		p28_clr p28f1 p28f2 p28f3 p28f4 p28f5 && passed=$((passed + 1))
+
+	# (g) empty arg and no args are no-ops:
+	# an unrelated configured job stays intact, rv=0.
+	total=$((total + 1))
+	p28_set p28ctrl && jobs_init "" && jobs_init &&
+		{ unset got; job_get_params p28ctrl got=P; [ "${got}" = v_p28ctrl ]; } &&
+		passed=$((passed + 1))
+
+	# (h) empty and whitespace-only args are skipped, real IDs still reset.
+	total=$((total + 1))
+	p28_set p28h1 p28h2 && jobs_init "  " "p28h1 p28h2" "" &&
+		p28_clr p28h1 p28h2 && passed=$((passed + 1))
+
+	if [ "${passed}" = "${total}" ]
+	then
+		PASS "${passed}/${total} groupings reset"
+		return 0
+	else
+		FAIL "${passed}/${total} groupings reset"
+		return 1
+	fi
+}
+
+# jobs_init() resets only the named job, leaving other jobs' params intact.
+test_params_29() {
+	local \
+		TEST_ID=params_29 \
+		rv ga1 ga2 gb1 gb2 \
+		job_a=p29_a \
+		job_b=p29_b
+
+	print_test_header "${TEST_ID:?}" "jobs_init() resets only the named job" "(direct calls, no scheduler run)"
+
+	job_set_params "${job_a}" "K1=aval1" "K2=aval2"
+	job_set_params "${job_b}" "K1=bval1" "K2=bval2"
+
+	jobs_init "${job_a}"
+	rv=$?
+
+	unset ga1 ga2 gb1 gb2
+	job_get_params "${job_a}" ga1=K1 ga2=K2
+	job_get_params "${job_b}" gb1=K1 gb2=K2
+
+	if [ "${rv}" = 0 ] && [ -z "${ga1}" ] && [ -z "${ga2}" ] &&
+		[ "${gb1}" = bval1 ] && [ "${gb2}" = bval2 ]
+	then
+		PASS "job_a reset, job_b intact"
+		return 0
+	else
+		FAIL "rv=${rv}, ga1='${ga1}', ga2='${ga2}', gb1='${gb1}', gb2='${gb2}'"
+		return 1
+	fi
+}
+
+# jobs_init() stops at the first invalid ID: returns 1, resets IDs before it, leaves later IDs untouched,
+#   emits one error, keeps IFS.
+test_params_30() {
+	params_30_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+
+	local \
+		TEST_ID=params_30 \
+		rv msg_cnt saved_ifs gk gl \
+		job_k=p30_k \
+		job_l=p30_l
+
+	local MSG_FILE="/tmp/sched.jobsinit.failfast.${TEST_ID}.$$"
+	rm -f "${MSG_FILE}"
+
+	print_test_header "${TEST_ID:?}" "jobs_init() fail-fast on invalid ID, IFS preserved" "(direct calls, no scheduler run)"
+
+	job_set_params "${job_k}" "P=kval"
+	job_set_params "${job_l}" "P=lval"
+
+	saved_ifs="${IFS}"
+	SCHED_FAIL_MSG_CB=params_30_fail_msg jobs_init "${job_k} !bad ${job_l}"
+	rv=$?
+
+	msg_cnt=0
+	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
+
+	unset gk gl
+	job_get_params "${job_k}" gk=P
+	job_get_params "${job_l}" gl=P
+	rm -f "${MSG_FILE}"
+
+	if [ "${rv}" = 1 ] && [ -z "${gk}" ] && [ "${gl}" = lval ] &&
+		[ "${msg_cnt}" = 1 ] && [ "${IFS}" = "${saved_ifs}" ]
+	then
+		PASS "rv=1, k reset, l intact, 1 msg, IFS ok"
+		return 0
+	else
+		FAIL "rv=${rv}, gk='${gk}', gl='${gl}', msg_cnt=${msg_cnt}, ifs_ok=$([ "${IFS}" = "${saved_ifs}" ] && echo yes || echo no)"
+		return 1
+	fi
+}
+
+# jobs_init() clears a per-job timeout:
+#   a 2s job outlasting the old 1s timeout still completes OK under the reset default.
+# Sleep can not go below ~2s: the per-job timeout is integer seconds (min 1),
+#   so the job must exceed 1s with margin for reliable timeout detection.
+test_params_31() {
+	local \
+		TEST_ID=params_31 \
+		sched_rv \
+		job_id=ok2_p31
+
+	print_test_header "${TEST_ID:?}" "jobs_init() resets per-job timeout" "${job_id}"
+
+	job_set_timeout "${job_id}" 1
+	jobs_init "${job_id}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_JOB_TIMEOUT_S=5 \
+	SCHED_TIMEOUT_S=6 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	if [ "${sched_rv}" = 0 ]
+	then
+		PASS "sched_rv=0 (per-job timeout cleared)"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, expected 0 (per-job timeout not reset?)"
+		return 1
+	fi
+}
+
+# jobs_init() between two scheduler runs clears params: run 1 sees the configured value, run 2 sees it unset.
+test_params_32() {
+	params_32_do_job() {
+		local val
+		job_get_params "${1}" val=P
+		printf '%s\n' "${val}" > "${OUT_FILE:?}"
+		return 0
+	}
+
+	local \
+		TEST_ID=params_32 \
+		sched_rv1 sched_rv2 seen1 seen2 \
+		job_id=p32_job
+
+	local OUT_FILE="/tmp/sched.jobsinit.rerun.${TEST_ID}.$$"
+	rm -f "${OUT_FILE}"
+
+	print_test_header "${TEST_ID:?}" "jobs_init() clears params seen across scheduler re-runs" "${job_id}"
+
+	job_set_params "${job_id}" "P=first"
+
+	SCHED_FAIL_MSG_CB=echo SCHED_FINALIZE_CB=finalize_handler JOB_DONE_CB=done_handler \
+	DO_JOB_CB=params_32_do_job SCHED_MAX_JOBS=1 SCHED_TIMEOUT_S=5 SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id}" &
+	wait "$!"
+	sched_rv1=$?
+	read_first_line seen1 "${OUT_FILE}"
+
+	jobs_init "${job_id}"
+	rm -f "${OUT_FILE}"
+
+	SCHED_FAIL_MSG_CB=echo SCHED_FINALIZE_CB=finalize_handler JOB_DONE_CB=done_handler \
+	DO_JOB_CB=params_32_do_job SCHED_MAX_JOBS=1 SCHED_TIMEOUT_S=5 SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id}" &
+	wait "$!"
+	sched_rv2=$?
+	read_first_line seen2 "${OUT_FILE}"
+	rm -f "${OUT_FILE}"
+
+	if [ "${sched_rv1}" = 0 ] && [ "${sched_rv2}" = 0 ] &&
+		[ "${seen1}" = first ] && [ -z "${seen2}" ]
+	then
+		PASS "run1='first', run2 empty after reset"
+		return 0
+	else
+		FAIL "rv1=${sched_rv1}, rv2=${sched_rv2}, seen1='${seen1}', seen2='${seen2}'"
+		return 1
+	fi
+}
