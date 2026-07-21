@@ -730,3 +730,90 @@ test_security_10() {
 		return 1
 	fi
 }
+
+# jobs_init()'s internal ID-list split does not glob-expand:
+#   a glob-metacharacter ID is rejected verbatim even with a matching file present.
+test_security_11() {
+	security_11_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+
+	local \
+		TEST_ID=security_11 \
+		rv msg_has_glob
+
+	local \
+		WORK_DIR="/tmp/sched.jobsinit.globsafe.${TEST_ID}.$$" \
+		MSG_FILE="/tmp/sched.jobsinit.globsafe.msg.${TEST_ID}.$$"
+
+	rm -rf "${WORK_DIR}"
+	rm -f "${MSG_FILE}"
+	mkdir -p "${WORK_DIR}"
+	# Sentinel filename is a valid job ID: had the glob expanded, jobs_init would accept it and return 0.
+	: > "${WORK_DIR}/zzsentinelJOB"
+
+	print_test_header "${TEST_ID:?}" "jobs_init() rejects glob ID verbatim, no expansion" "zzsentinel*"
+
+	( cd "${WORK_DIR}" &&
+		SCHED_FAIL_MSG_CB=security_11_fail_msg jobs_init 'zzsentinel*' )
+	rv=$?
+
+	msg_has_glob=no
+	[ -f "${MSG_FILE}" ] && grep -qF 'zzsentinel*' "${MSG_FILE}" && msg_has_glob=yes
+
+	rm -rf "${WORK_DIR}"
+	rm -f "${MSG_FILE}"
+
+	# Correct: literal rejected (rv=1), error names the literal glob.
+	if [ "${rv}" = 1 ] && [ "${msg_has_glob}" = yes ]
+	then
+		PASS "glob rejected verbatim (rv=1)"
+		return 0
+	else
+		FAIL "rv=${rv} (want 1), msg_names_glob=${msg_has_glob}"
+		return 1
+	fi
+}
+
+# jobs_init() splits its ID list on whitespace regardless of the caller's IFS,
+#   and leaves the caller's IFS unchanged on return.
+test_security_12() {
+	# Impose IFS, reset two IDs passed space-separated in one arg, check the outcome.
+	sec12_run() {
+		local imposed="${1}" j1="${2}" j2="${3}" rv ifs_after g1 g2 saved="${IFS}"
+
+		job_set_params "${j1}" "P=v1"
+		job_set_params "${j2}" "P=v2"
+
+		IFS="${imposed}"
+		jobs_init "${j1} ${j2}"
+		rv=$?
+		ifs_after="${IFS}"
+		IFS="${saved}"
+
+		unset g1 g2
+		job_get_params "${j1}" g1=P
+		job_get_params "${j2}" g2=P
+
+		[ "${rv}" = 0 ] && [ -z "${g1}" ] && [ -z "${g2}" ] &&
+			[ "${ifs_after}" = "${imposed}" ]
+	}
+
+	local \
+		TEST_ID=security_12 \
+		total=0 \
+		passed=0
+
+	print_test_header "${TEST_ID:?}" "jobs_init() whitespace-splits under any caller IFS, preserves IFS" "(direct calls, no scheduler run)"
+
+	# IFS without a space, then empty IFS (both suppress splitting if jobs_init trusted them).
+	total=$((total + 1)); sec12_run ':' sec12a1 sec12a2 && passed=$((passed + 1))
+	total=$((total + 1)); sec12_run '' sec12b1 sec12b2 && passed=$((passed + 1))
+
+	if [ "${passed}" = "${total}" ]
+	then
+		PASS "${passed}/${total} IFS variants"
+		return 0
+	else
+		FAIL "${passed}/${total} IFS variants"
+		return 1
+	fi
+}
