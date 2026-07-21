@@ -373,9 +373,10 @@ test_job_termination_03() {
 		CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
 		CG_FIN_F="/tmp/sched.job_termination.fin.${TEST_ID}.$$"
 	rm -f "${CG_PIDS_F}" "${CG_FIN_F}"
-	: > "${CG_PIDS_F}"
 
 	cg_mk_test_base "${TEST_ID}" || { FAIL "cannot create test base cgroup"; return 1; }
+
+	: > "${CG_PIDS_F}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=cg_finalize_rec \
@@ -453,11 +454,12 @@ test_job_termination_04() {
 		CG_FIN_F="/tmp/sched.job_termination.fin.${TEST_ID}.$$" \
 		DONE_F="/tmp/sched.job_termination.done.${TEST_ID}.$$"
 	rm -f "${CG_PIDS_F}" "${CG_FIN_F}" "${DONE_F}"
-	: > "${CG_PIDS_F}"
 
 	cg_mk_test_base "${TEST_ID}" || { FAIL "cannot create test base cgroup"; return 1; }
 
 	job_set_timeout cgblock_c04 1 || { FAIL "job_set_timeout failed"; cg_teardown "${CG_PIDS_F}" "${CG_TEST_BASE}"; return 1; }
+
+	: > "${CG_PIDS_F}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=cg_finalize_rec \
@@ -518,9 +520,10 @@ test_job_termination_05() {
 		CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
 		CG_FIN_F="/tmp/sched.job_termination.fin.${TEST_ID}.$$"
 	rm -f "${CG_PIDS_F}" "${CG_FIN_F}"
-	: > "${CG_PIDS_F}"
 
 	cg_mk_test_base "${TEST_ID}" || { FAIL "cannot create test base cgroup"; return 1; }
+
+	: > "${CG_PIDS_F}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=cg_finalize_rec \
@@ -578,9 +581,10 @@ test_job_termination_06() {
 		CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
 		CG_FIN_F="/tmp/sched.job_termination.fin.${TEST_ID}.$$"
 	rm -f "${CG_PIDS_F}" "${CG_FIN_F}"
-	: > "${CG_PIDS_F}"
 
 	cg_mk_test_base "${TEST_ID}" || { FAIL "cannot create test base cgroup"; return 1; }
+
+	: > "${CG_PIDS_F}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=cg_finalize_rec \
@@ -759,13 +763,14 @@ _jt_timeout_scenario() {
 		CG_FIN_F="/tmp/sched.job_termination.fin.${TEST_ID}.$$" \
 		DONE_F="/tmp/sched.job_termination.done.${TEST_ID}.$$"
 	rm -f "${CG_PIDS_F}" "${CG_FIN_F}" "${DONE_F}"
-	: > "${CG_PIDS_F}"
 
 	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: per-job timeout kills the job's process tree at expiry (unverified)" "${jt_job}"
 
 	"${jt_gate}" || { SKIP "${jt_skip}"; return 0; }
 
 	job_set_timeout "${jt_job}" 1 || { FAIL "job_set_timeout failed"; return 1; }
+
+	: > "${CG_PIDS_F}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=cg_finalize_rec \
@@ -827,13 +832,14 @@ _jt_abort_scenario() {
 		CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
 		CG_FIN_F="/tmp/sched.job_termination.fin.${TEST_ID}.$$"
 	rm -f "${CG_PIDS_F}" "${CG_FIN_F}"
-	: > "${CG_PIDS_F}"
 
 	for p in ${jt_jobs}; do job_cnt=$((job_cnt + 1)); done
 
 	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: USR1 abort kills all running job trees (unverified)" "${jt_jobs}"
 
 	"${jt_gate}" || { SKIP "${jt_skip}"; return 0; }
+
+	: > "${CG_PIDS_F}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=cg_finalize_rec \
@@ -1116,11 +1122,12 @@ test_job_termination_17() {
 
 	local CG_PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
 	rm -f "${CG_PIDS_F}"
-	: > "${CG_PIDS_F}"
 
 	print_test_header "${TEST_ID}" "ppid: abort kills a multi-level subtree (fixpoint walk depth)" "${jobs}"
 
 	ppid_capable || { SKIP "${PPID_SKIP_REASON}"; return 0; }
+
+	: > "${CG_PIDS_F}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -1206,11 +1213,12 @@ test_job_termination_19() {
 	rm -rf "${P6_DIR}"
 	mkdir -p "${P6_DIR}"
 	rm -f "${CG_PIDS_F}"
-	: > "${CG_PIDS_F}"
 
 	print_test_header "${TEST_ID}" "ppid: /proc/<pid>/stat parser handles ')' in comm" "${jobs}"
 
 	ppid_capable || { SKIP "${PPID_SKIP_REASON}"; rm -rf "${P6_DIR}"; return 0; }
+
+	: > "${CG_PIDS_F}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
