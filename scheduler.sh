@@ -166,7 +166,7 @@ sch_finalize() {
 	[ -n "${2}" ] && [ "${sch_rv}" != 0 ] && sch_fail_msg "${2}"
 
 	exec 3>&-
-	rm -f "${sch_ipc_fifo}"
+	[ -n "${sch_run_dir}" ] && rm -rf "${sch_run_dir}"
 
 	# Restore the caller's noglob state: a trap may have entered sch_finalize()
 	#   from inside an internal 'set -f' section. Job IDs and PIDs are
@@ -563,6 +563,8 @@ schedule_jobs() {
 		sch_dl_now_cs \
 		SCH_RUNNING_JOBS_CNT=0 \
 		sch_ipc_fifo \
+		sch_run_dir \
+		sch_run_n \
 		sch_dir="${SCHED_DIR:-/tmp}" \
 		\
 		SCH_HAD_F \
@@ -643,10 +645,21 @@ schedule_jobs() {
 
 	SCH_LAST_PROGRESS_TIME_CS="${SCH_INIT_UPTIME_CS}"
 
-	sch_ipc_fifo="${sch_dir}/sched_ipc_${SCH_PID}"
+	mkdir -p "${sch_dir}" ||
+		sch_finalize 1 "Failed to create directory '${sch_dir}'."
 
-	mkdir -p "${sch_dir}" &&
-	rm -f "${sch_ipc_fifo}" &&
+	# Claim a unique run dir. mkdir is atomic: it fails if the name exists,
+	#   so concurrent instances never collide.
+	sch_run_n=0
+	while :; do
+		sch_run_dir="${sch_dir}/sched_${SCH_PID}.${sch_run_n}"
+		mkdir "${sch_run_dir}" 2>/dev/null && break
+		sch_run_n=$((sch_run_n + 1))
+		[ "${sch_run_n}" -lt 16 ] ||
+			sch_finalize 1 "Failed to create run directory under '${sch_dir}'."
+	done
+	sch_ipc_fifo="${sch_run_dir}/ipc"
+
 	mkfifo "${sch_ipc_fifo}" &&
 	exec 3<>"${sch_ipc_fifo}" ||
 		sch_finalize 1 "Failed to create FIFO '${sch_ipc_fifo}'."
@@ -853,4 +866,23 @@ job_set_timeout() {
 	# Not SCH_JOB_TIMEOUT_<id>: that would collide with the internal
 	# ${SCH_JOB_TIMEOUT_S} copy of ${SCHED_JOB_TIMEOUT_S} for a job named 'S'
 	export -n "SCH_TIMEOUT_JOB_${sch_job_id}=${sch_val}"
+}
+
+# Auto-select supported job termination mechanism from whichever helper libraries are sourced.
+# Fallback order:
+#   cgroup -> /proc children-walk -> /proc PPID-walk.
+# 1: out var to output supported & available job termination callback name
+sched_job_term_select() {
+	sch_check_name "var" "${1:?}" "sched_job_term_select" || return 1
+
+	if cgroup_cleanup_supported; then
+		export -n "${1}=sched_job_term_cgroup"
+	elif proc_children_supported; then
+		export -n "${1}=sched_job_term_children"
+	elif proc_ppid_supported; then
+		export -n "${1}=sched_job_term_ppid"
+	else
+		export -n "${1}="
+		return 1
+	fi 2>/dev/null
 }
