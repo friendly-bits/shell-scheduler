@@ -7,8 +7,18 @@
 
 # Download several HaGeZi DNS blocklists concurrently.
 
+# Source the core library
 SCHEDULER_LIB="${SCHEDULER_LIB:-./scheduler.sh}"
 . "${SCHEDULER_LIB}"
+
+# Source job termination helper libraries
+. ./scheduler-job-term-ppid.sh
+. ./scheduler-job-term-children.sh
+. ./scheduler-job-term-cgroup.sh
+
+# Automatically select best available job termination mechanism, assign callback value to ${JOB_TERM_CB}
+sched_job_term_select JOB_TERM_CB || { echo "No compatible job termination mechanisms are available." >&2; exit 1; }
+echo "Automatically selected JOB_TERM_CB: ${JOB_TERM_CB}"
 
 # Params assignment
 job_set_params pro      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt"
@@ -88,19 +98,6 @@ finalize_dl()
 		undispatched_ids="${6}" \
 		expired_ids="${7}"
 
-	if [ -n "${running_pids}" ]
-	then
-		for running_pid in ${running_pids}
-		do
-			child_pids="${child_pids}${child_pids:+ }$(pgrep -P "${running_pid}" 2>/dev/null)"
-		done
-
-		printf '\n%s\n' "Killing job execution PIDs: ${running_pids}"
-		[ -n "${child_pids}" ] && printf '%s\n' "Killing child PIDs (probably wget): ${child_pids}"
-		# shellcheck disable=SC2086
-		kill -TERM ${child_pids} ${running_pids} 2>/dev/null
-	fi
-
 	printf '\n'
 	printf '%s\n' "OK count: ${SUCCESS_CNT}"
 	printf '%s\n' "Failed count (including timed-out, unfinished and undispatched): $((JOBS_CNT - SUCCESS_CNT))"
@@ -113,6 +110,8 @@ finalize_dl()
 	printf '%s\n' "Unfinished jobs:         ${unfinished_ids:-<none>}"
 	printf '%s\n' "Undispatched jobs:       ${undispatched_ids:-<none>}"
 	printf '%s\n' "Timed out jobs:          ${expired_ids:-<none>}"
+	printf '\n'
+	printf '%s\n' "PIDs of jobs which escaped termination: ${running_pids:-<none>}"
 
 	return 0
 }
@@ -192,17 +191,25 @@ trap '
 ' INT TERM
 ```
 
-### Cleaning up orphaned child processes
+### Cleaning up job's processes
 
-The scheduler tracks the PIDs of the jobs (i.e. instances of the shell function `download_list()`, each running in a separate subshell). If your **job execution callback** invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler terminates before all jobs have completed, the subshell in which the callback lives, as well as any external binaries it called, will keep running as orphaned processes. The example script uses `pgrep -P` inside the **scheduler completion callback** (`SCHED_FINALIZE_CB`) to find and terminate the actual child processes along with the job subshell processes:
+The scheduler tracks the PIDs of the jobs (in this case, instances of the shell function `download_list()`, each running in a separate subshell). If your **job execution callback** invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler terminates before all jobs have completed, the subshell in which the callback lives, as well as any external binaries it called, will keep running as orphaned processes. The example script implements termination of any expired and unfinished jobs via one of the job termination libraries included with the project. First, the script sources all three libraries:
 
-```sh
-# Inside SCHED_FINALIZE_CB
-for running_pid in ${running_pids}; do
-    child_pids="${child_pids}${child_pids:+ }$(pgrep -P "${running_pid}" 2>/dev/null)"
-done
-kill -TERM ${child_pids} ${running_pids} 2>/dev/null
 ```
+# Source job termination helper libraries
+. ./scheduler-job-term-ppid.sh
+. ./scheduler-job-term-children.sh
+. ./scheduler-job-term-cgroup.sh
+```
+
+Then the script calls the helper `sched_job_term_select` to automatically select the best available job termination mechanism:
+
+```
+# Automatically select best available job termination mechanism, assign callback value to ${JOB_TERM_CB}
+sched_job_term_select JOB_TERM_CB || { echo "No compatible job termination mechanisms are available." >&2; exit 1; }
+```
+
+All the rest is done automatically: if any jobs need to be terminated, the scheduler will call the **job termination callback** and the callback will terminate any descendant processes.
 
 ### Tracking state across callbacks
 
