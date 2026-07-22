@@ -262,16 +262,16 @@ test_core_05() {
 	fi
 }
 
-# Verify the standalone param/timeout helpers do not leak the caller's noglob
-#   (set -f) state: they save and restore it around internal set -f sections
-#   (e.g. job_get_params 'sch_all'). Checked in both glob-enabled and
-#   glob-disabled callers via ${-}. Direct calls, no scheduler run.
+# Verify the standalone param/timeout helpers do not leak the caller's noglob (set -f) state:
+#   they save and restore it around internal set -f sections (e.g. job_get_params 'sch_all').
+#   Checked in both glob-enabled and glob-disabled callers via ${-}.
+#   Direct calls, no scheduler run.
 test_core_06() {
 	local \
 		TEST_ID=core_06 \
 		mode now \
 		pass_cnt=0 \
-		P Q \
+		P \
 		job_id=core_06_job
 
 	print_test_header "${TEST_ID:?}" "Standalone helpers preserve caller noglob state" \
@@ -315,8 +315,9 @@ test_core_06() {
 
 # Two scheduler instances run concurrently under a SHARED SCHED_DIR with disjoint job sets.
 # Each must finish with rv 0 and report exactly its own jobs in the ok bucket -
-#   no cross-instance leakage through the shared FIFO directory - and both per-run dirs must be cleaned up,
-#   leaving no residue. Guards non-interference between simultaneous instances on a shared volume.
+#   no cross-instance leakage through the shared FIFO directory -
+#   and both per-run dirs must be cleaned up, leaving no residue.
+# Guards non-interference between simultaneous instances on a shared volume.
 # Runs in any environment.
 test_core_07() {
 	# Per-instance finalize record, routed by ${CORE07_REC} (set per instance)

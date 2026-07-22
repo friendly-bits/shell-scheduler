@@ -93,8 +93,8 @@ test_outcome_01() {
 	fi
 }
 
-# Verify a job recorded as failed before an idle-timeout abort stays in the fail
-#   set, while a still-running job at abort time lands in unfinished, not fail.
+# Verify a job recorded as failed before an idle-timeout abort stays in the fail set,
+#   while a still-running job at abort time lands in unfinished, not fail.
 test_outcome_02() {
 	outcome_02_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
@@ -150,9 +150,8 @@ test_outcome_02() {
 	fi
 }
 
-# Verify a job never reached by the dispatch loop before a global-timeout abort
-#   lands in undispatched, while the job dispatched just before the abort
-#   (whose completion was never read) lands in unfinished.
+# Verify a job never reached by the dispatch loop before a global-timeout abort lands in undispatched,
+#   while the job dispatched just before the abort (whose completion was never read) lands in unfinished.
 test_outcome_03() {
 	outcome_03_do_job() {
 		[ "${1}" = second ] && printf 'dispatched\n' > "${SECOND_DISPATCHED_FILE:?}"
@@ -278,9 +277,10 @@ test_outcome_04() {
 	fi
 }
 
-# Verify a malformed-completion-record abort (sch_finalize called directly from
-#   inside process_done_record, not from the normal loop exits) still preserves
-#   an already-completed job's ok status; the malformed job itself is unfinished.
+# Verify a malformed-completion-record abort
+#   (sch_finalize called directly from inside process_done_record, not from the normal loop exits)
+#   still preserves an already-completed job's ok status;
+#   the malformed job itself is unfinished.
 test_outcome_05() {
 	outcome_05_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
@@ -337,9 +337,8 @@ test_outcome_05() {
 	fi
 }
 
-# Verify ok/fail/unfinished/undispatched/expired are pairwise disjoint and
-#   jointly exhaustive over the full job set, in one run where all five are
-#   populated.
+# Verify ok/fail/unfinished/undispatched/expired are pairwise disjoint
+#   and jointly exhaustive over the full job set, in one run where all five are populated.
 test_outcome_06() {
 	outcome_06_do_job() {
 		case "${1}" in
@@ -471,11 +470,11 @@ test_outcome_07() {
 	fi
 }
 
-# Verify the union of ok/fail/unfinished/undispatched/expired delivered to
-#   SCHED_FINALIZE_CB equals the full job-ID list passed to schedule_jobs(),
+# Verify the union of ok/fail/unfinished/undispatched/expired delivered to SCHED_FINALIZE_CB
+#   equals the full job-ID list passed to schedule_jobs(),
 #   and every job ID appears in exactly one bucket.
-#   Bucket-agnostic: asserts the partition invariant, not which bucket each ID lands in
-#   (test_outcome_06 checks specific membership).
+#   Bucket-agnostic: asserts the partition invariant,
+#   not which bucket each ID lands in (test_outcome_06 checks specific membership).
 test_outcome_08() {
 	outcome_08_finalize_handler() {
 		finalize_handler "${1}" "${2}" || return $?
@@ -502,9 +501,11 @@ test_outcome_08() {
 	set -- ${jobs}
 	jobs_cnt="${#}"
 
-	# SCHED_MAX_JOBS=1: ok_1 and fail_1 complete first; hang_o09x expires on its
-	# 1s budget; hang_1 is still running when SCHED_TIMEOUT_S fires (unfinished);
-	# ok_2, ok_3 are never dispatched.
+	# SCHED_MAX_JOBS=1:
+	#   ok_1 and fail_1 complete first;
+	#   hang_o09x expires on its 1s budget;
+	#   hang_1 is still running when SCHED_TIMEOUT_S fires (unfinished);
+	#   ok_2, ok_3 are never dispatched.
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=outcome_08_finalize_handler \
 	JOB_DONE_CB=done_handler \

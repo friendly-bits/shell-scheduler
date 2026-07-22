@@ -2,9 +2,7 @@
 # shellcheck disable=SC3043,SC3045,SC3003
 
 # scheduler-job-term-children.sh - /proc children-walk job termination library for scheduler.sh
-#
 # Kills the process tree of each job by walking /proc/<pid>/task/<tid>/children
-#
 # Usage: source this file after scheduler.sh, select the mechanism: JOB_TERM_CB=sched_job_term_children
 
 

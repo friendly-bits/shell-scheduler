@@ -524,8 +524,7 @@ test_dispatch_09() {
 	local IDS_FILE="/tmp/sched.wsids.${TEST_ID}.$$"
 	rm -f "${IDS_FILE}"
 
-	# Leading newline/space/tab, interior single/repeated space/tab/newline runs,
-	# and trailing spaces.
+	# Leading newline/space/tab, interior single/repeated space/tab/newline runs, and trailing spaces.
 	jobs=$(printf '\n  \talpha\tbeta \t\t gamma\n\n\ndelta   epsilon   ')
 
 	print_test_header "${TEST_ID:?}" "Job list normalized across mixed space/tab/newline separators" \

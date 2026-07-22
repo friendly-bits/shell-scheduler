@@ -932,14 +932,16 @@ _jt_strag_scenario() {
 	fi
 }
 
-# children library: per-job timeout kills the job's process tree at expiry; kills unverified,
-#   so the expired PID stays in running_pids. SKIP where the children mechanism is unavailable.
+# children library: per-job timeout kills the job's process tree at expiry;
+#   kills unverified, so the expired PID stays in running_pids.
+# SKIP where the children mechanism is unavailable.
 test_job_termination_09() {
 	_jt_timeout_scenario job_termination_09 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" cgblock_c09
 }
 
 # children library: USR1 abort kills all running job trees; jobs classified unfinished;
-#   both wrapper PIDs reported (kills unverified). SKIP where the children mechanism is unavailable.
+#   both wrapper PIDs reported (kills unverified).
+# SKIP where the children mechanism is unavailable.
 test_job_termination_10() {
 	_jt_abort_scenario job_termination_10 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" 'cgblock_c10a cgblock_c10b'
 }
@@ -947,17 +949,17 @@ test_job_termination_10() {
 # children library, documented limitation:
 #   stragglers of a COMPLETED job are not reaped (the wrapper already exited,
 #   so its children are reparented to init and escape the descendant walk).
-# The recorded stragglers must survive the run; the test then kills them. Runs in any environment.
+# The recorded stragglers must survive the run; the test then kills them.
+# Runs in any environment.
 test_job_termination_11() {
 	_jt_strag_scenario job_termination_11 sched_job_term_children cgstrag_c11
 }
 
 # Custom (user-defined) termination command exercising the out-var report
-#   contract: the command kills the wrapper PIDs, reports them as verified via
-#   'export -n "${out_var}=..."', and deliberately prints noise to stdout -
-#   which must not corrupt the report: running_pids must come out empty and
-#   no "invalid verified PID" complaints must be raised. Runs in any
-#   environment.
+# Contract: the command kills the wrapper PIDs, reports them as verified via 'export -n "${out_var}=..."',
+#   and deliberately prints noise to stdout - which must not corrupt the report:
+#   running_pids must come out empty and no "invalid verified PID" complaints must be raised.
+# Runs in any environment.
 test_job_termination_12() {
 	job_termination_12_cb() {
 		local t12_sub="${1}" t12_out_var="${2}"

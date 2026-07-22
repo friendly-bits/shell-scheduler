@@ -175,10 +175,10 @@ test_config_03() {
 		return 0
 	}
 
-	# SCHED_MAX_JOBS is required (sch_normalize_uint's 3rd arg); SCHED_TIMEOUT_S,
-	# SCHED_IDLE_TIMEOUT_S and SCHED_JOB_TIMEOUT_S are optional, so '' is a
-	# *valid* value for them (means "use default" / "unset") and must not be
-	# included as a bad value.
+	# SCHED_MAX_JOBS is required (sch_normalize_uint's 3rd arg).
+	# SCHED_TIMEOUT_S, SCHED_IDLE_TIMEOUT_S and SCHED_JOB_TIMEOUT_S are optional,
+	#   so '' is a *valid* value for them (means "use default" / "unset")
+	#   and must not be included as a bad value.
 	config_03_check_bad_value() {
 		# shellcheck disable=SC2034
 		local var="${1}" bad_val="${2}" sched_rv \
@@ -188,8 +188,7 @@ test_config_03() {
 
 		local "${var}=${bad_val}"
 
-		# stderr silenced: out-of-range values make the test builtin print
-		# a diagnostic on some shells
+		# stderr silenced: out-of-range values make the test builtin print a diagnostic on some shells
 		SCHED_FAIL_MSG_CB=config_03_fail_msg_handler \
 		SCHED_FINALIZE_CB=finalize_handler \
 		JOB_DONE_CB=done_handler \
@@ -224,8 +223,8 @@ test_config_03() {
 	print_test_header "${TEST_ID:?}" "Invalid scheduler numeric env var values" \
 		"SCHED_MAX_JOBS(full malformed-uint matrix), SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S/SCHED_JOB_TIMEOUT_S(abc 0 -1)"
 
-	# Full malformed-uint matrix on the required var; all four vars share
-	# the same validation, so the other three get representative classes
+	# Full malformed-uint matrix on the required var;
+	#   all four vars share the same validation, so the other three get representative classes
 	for bad_val in '' abc 0 -1 00 1.5 +1 9x '1 2' 99999999999999999999; do
 		config_03_check_bad_value SCHED_MAX_JOBS "${bad_val}"
 	done
@@ -341,7 +340,8 @@ test_config_07() {
 	fi
 }
 
-# Verify SCHED_DIR: a custom directory (with a trailing slash) is used for the FIFO and cleaned up afterward,
+# Verify SCHED_DIR: a custom directory (with a trailing slash)
+#   is used for the FIFO and cleaned up afterward,
 #   and a directory that normalizes to empty is rejected before any job starts.
 test_config_08() {
 	local \
@@ -413,9 +413,9 @@ test_config_08() {
 }
 
 # Regression: leading-zero numeric env values are treated as decimal, not octal.
-#   Before normalization was added, SCHED_IDLE_TIMEOUT_S=09 killed the scheduler
-#   with a fatal 'arithmetic syntax error' (09 is invalid octal) on the first
-#   remaining-time computation, and 010 silently meant 8 seconds.
+# Before normalization was added, SCHED_IDLE_TIMEOUT_S=09 killed the scheduler
+#   with a fatal 'arithmetic syntax error' (09 is invalid octal)
+#   on the first remaining-time computation, and 010 silently meant 8 seconds.
 test_config_09() {
 	local \
 		TEST_ID=config_09 \

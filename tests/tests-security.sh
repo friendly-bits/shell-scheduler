@@ -6,22 +6,21 @@
 
 # Category: Security (command-injection / forgery resistance)
 # This file is sourced by tests.sh; it defines test_N functions only.
-# The library builds/reads shell variable names via eval (scheduler.sh), so
-#   these tests verify that names crossing public boundaries (job IDs, param
-#   names, destination var names, callback var names) are validated before they
-#   reach eval, and that values are never interpolated as code.
-# Shared helpers used below come from tests.sh (read_first_line, finalize_handler,
-#   done_handler, get_test_pid, write_id_sets).
+# The library builds/reads shell variable names via eval (scheduler.sh),
+#   so these tests verify that names crossing public boundaries (job IDs, param names,
+#   destination var names, callback var names) are validated before they reach eval,
+#   and that values are never interpolated as code. Shared helpers used below come from tests.sh
+#   (read_first_line, finalize_handler, done_handler, get_test_pid, write_id_sets).
 
 #
 # Tests
 #
 
-# Verify job-ID validation: IDs are restricted to [a-zA-Z0-9_]. Each list
-#   containing an ID with any other character is rejected upfront: rv 1, one
-#   error message, nothing dispatched (a valid ID in the same list must not
-#   run), and injection-shaped IDs are never executed. A control run with
-#   valid IDs (including a leading digit) still succeeds.
+# Verify job-ID validation: IDs are restricted to [a-zA-Z0-9_].
+# Each list containing an ID with any other character is rejected upfront: rv 1, one error message,
+#   nothing dispatched (a valid ID in the same list must not run),
+#   and injection-shaped IDs are never executed.
+# A control run with valid IDs (including a leading digit) still succeeds.
 test_security_01() {
 	security_01_do_job() {
 		printf '%s\n' "$1" >> "${ARGS_FILE:?}"
@@ -51,8 +50,8 @@ test_security_01() {
 	print_test_header "${TEST_ID:?}" "Job ID validation: only [a-zA-Z0-9_] accepted" \
 		"(30 invalid IDs rejected + 1 valid control run)"
 
-	# Glob/quote/injection-shaped chars: every one of these IDs must be
-	#   rejected. IDs contain no whitespace, so a plain for-list is safe here.
+	# Glob/quote/injection-shaped chars: every one of these IDs must be rejected.
+	# IDs contain no whitespace, so a plain for-list is safe here.
 	for bad_id in \
 		'star*id' \
 		'quest?id' \
@@ -222,9 +221,9 @@ test_security_02() {
 }
 
 # Verify a job-ID list containing glob/injection-shaped IDs is rejected upfront:
-#   schedule_jobs() fails (rv=1), nothing is dispatched, the embedded command
-#   substitution is never evaluated, and SCHED_FINALIZE_CB's ok/fail sets are
-#   never written. Job IDs are restricted to [a-zA-Z0-9_] (REFERENCE.md).
+#   schedule_jobs() fails (rv=1), nothing is dispatched, the embedded command substitution is never evaluated,
+#   and SCHED_FINALIZE_CB's ok/fail sets are never written.
+# Job IDs are restricted to [a-zA-Z0-9_] (REFERENCE.md).
 test_security_03() {
 	security_03_touch_inject() { touch "${INJECT_FILE:?}"; }
 
@@ -297,9 +296,8 @@ test_security_03() {
 	fi
 }
 
-# Verify param values are stored/delivered as opaque data:
-#   quotes, $(), backticks, globs, spaces, empty value
-#   are preserved and never executed or glob-expanded.
+# Verify param values are stored/delivered as opaque data: quotes, $(), backticks, globs, spaces,
+#   empty value are preserved and never executed or glob-expanded.
 test_security_04() {
 	security_04_touch_inject() { touch "${INJECT_FILE:?}"; }
 
@@ -331,10 +329,10 @@ test_security_04() {
 
 	print_test_header "${TEST_ID:?}" "Param value fidelity / no injection via value content" "${job_id}"
 
-	# GLOBBY uses a bare '*' (matches any file in the non-empty test CWD), so a
-	#   regression that let the value reach an unquoted expansion would visibly
-	#   expand to filenames - unlike a non-matching pattern (e.g. '*.txt'), which
-	#   would stay literal whether or not it was glob-expanded.
+	# GLOBBY uses a bare '*' (matches any file in the non-empty test CWD),
+	#   so a regression that let the value reach an unquoted expansion would visibly expand to filenames -
+	#   unlike a non-matching pattern (e.g. '*.txt'),
+	#   which would stay literal whether or not it was glob-expanded.
 	# shellcheck disable=SC2016
 	job_set_params "${job_id}" \
 		'SPACEY=hello world' \
@@ -377,9 +375,8 @@ test_security_04() {
 	fi
 }
 
-# Verify job_get_params() char-validates the source param name in an alias
-#   (var=param): a source containing shell metacharacters is rejected before the
-#   eval-assignment and is never executed.
+# Verify job_get_params() char-validates the source param name in an alias (var=param):
+#   a source containing shell metacharacters is rejected before the eval-assignment and is never executed.
 test_security_05() {
 	security_05_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
@@ -438,11 +435,10 @@ test_security_05() {
 	fi
 }
 
-# Verify a callback env var whose value is injection-shaped is rejected and never
-#   executed. sch_check_cb reads the value with eval "val=${CB}" (parameter
-#   expansion only, no command substitution) and passes it to command -v as a
-#   single quoted word, so an embedded $(...)/`...` is never run. Distinct from
-#   test_config_02, which uses a benign non-existent command with no marker.
+# Verify a callback env var whose value is injection-shaped is rejected and never executed.
+# sch_check_cb() reads the value with eval "val=${CB}" (parameter expansion only, no command substitution)
+#   and passes it to command -v as a single quoted word, so an embedded $(...)/`...` is never run.
+# Distinct from test_config_02, which uses a benign non-existent command with no marker.
 test_security_06() {
 	security_06_touch_inject() { touch "${INJECT_FILE:?}"; }
 	security_06_do_job() { return 0; }
@@ -507,12 +503,13 @@ test_security_06() {
 	fi
 }
 
-# Verify the public setters reject injection-shaped job IDs and param names
-#   before those names reach eval, and never execute the embedded command.
-#   Covers job_set_params (eval building SCH_JOB_PARAMS_<id>) and job_set_timeout
-#   (eval reading SCH_TIMEOUT_JOB_<id>). Direct calls, no scheduler run. Mirrors
-#   test_security_05 on the set side; distinct from test_params_04, which uses
-#   benign bad names (space/empty) with no injection payload or marker.
+# Verify the public setters reject injection-shaped job IDs and param names before those names reach eval,
+#   and never execute the embedded command.
+# Covers job_set_params (eval building SCH_JOB_PARAMS_<id>)
+#   and job_set_timeout (eval reading SCH_TIMEOUT_JOB_<id>).
+# Direct calls, no scheduler run.
+# Mirrors test_security_05 on the set side; distinct from test_params_04,
+#   which uses benign bad names (space/empty) with no injection payload or marker.
 test_security_07() {
 	security_07_touch_inject() { touch "${INJECT_FILE:?}"; }
 	security_07_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
@@ -586,12 +583,12 @@ test_security_07() {
 	fi
 }
 
-# Verify the ${#job_id} length prefix in the internal param key keeps two
-#   (job_id, param) pairs that would otherwise concatenate identically from
-#   colliding. job1="security_08_x"/param="y_z" and job2="security_08_x_y"/
-#   param="z" both form "security_08_x_y_z"; the length prefix disambiguates them
-#   (SCH_JOB_PARAM_13_... vs SCH_JOB_PARAM_15_...). Distinct values must be stored
-#   and retrieved with no cross-contamination. Direct calls, no scheduler run.
+# Verify the ${#job_id} length prefix in the internal param key keeps two (job_id, param) pairs
+#   that would otherwise concatenate identically from colliding.
+# job1="security_08_x"/param="y_z" and job2="security_08_x_y"/param="z" both form "security_08_x_y_z";
+#   the length prefix disambiguates them (SCH_JOB_PARAM_13_... vs SCH_JOB_PARAM_15_...).
+# Distinct values must be stored and retrieved with no cross-contamination.
+# Direct calls, no scheduler run.
 test_security_08() {
 	local \
 		TEST_ID=security_08 \
@@ -616,12 +613,12 @@ test_security_08() {
 	fi
 }
 
-# Verify the job-ID list split is glob-safe: a glob-shaped ID reaches validation
-#   unexpanded even when it would match a file in the scheduler's CWD, so it is
-#   rejected verbatim and never dispatched. Live sentinel: the scheduler runs in
-#   a dir holding a file whose name is a VALID id ('zzsentinelJOB'), so a dropped
-#   `set -f` on the list split would expand 'zzsentinel*' to that id and dispatch
-#   it - the discriminator here is rejection (rv=1, no dispatch, msg names '*').
+# Verify the job-ID list split is glob-safe:
+#   a glob-shaped ID reaches validation unexpanded even when it would match a file in the scheduler's CWD,
+#   so it is rejected verbatim and never dispatched.
+# Live sentinel: the scheduler runs in a dir holding a file whose name is a VALID id ('zzsentinelJOB'),
+#   so a dropped `set -f` on the list split would expand 'zzsentinel*' to that id and dispatch it -
+#   the discriminator here is rejection (rv=1, no dispatch, msg names '*').
 test_security_09() {
 	security_09_do_job() { touch "${DISPATCH_FILE:?}"; return 0; }
 	security_09_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
@@ -675,10 +672,9 @@ test_security_09() {
 	fi
 }
 
-# Verify a glob-shaped ID in a mixed list is rejected verbatim without expanding
-#   or dispatching its valid sibling. Live sentinel: a file 'zzsibling' (valid id)
-#   exists in the scheduler's CWD, so a dropped `set -f` on the list split would
-#   turn 'zzsibling*' into 'zzsibling' and dispatch both jobs.
+# Verify a glob-shaped ID in a mixed list is rejected verbatim without expanding or dispatching its valid sibling.
+#   Live sentinel: a file 'zzsibling' (valid id) exists in the scheduler's CWD,
+#   so a dropped `set -f` on the list split would turn 'zzsibling*' into 'zzsibling' and dispatch both jobs.
 test_security_10() {
 	security_10_do_job() { printf '%s\n' "${1}" >> "${DISPATCH_FILE:?}"; return 0; }
 	security_10_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }

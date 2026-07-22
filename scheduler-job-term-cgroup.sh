@@ -3,30 +3,27 @@
 
 # scheduler-job-term-cgroup.sh - cgroup v2 job termination library for scheduler.sh
 #
-# Kills each job's whole process tree (background children, orphaned
-# grandchildren) via the kernel's cgroup.kill, with kernel-verified kill
-# reporting. See REFERENCE.md ("Job termination").
+# Kills each job's whole process tree (background children, orphaned grandchildren)
+#   via the kernel's cgroup.kill, with kernel-verified kill reporting.
+# See REFERENCE.md ("Job termination").
 #
 # Usage: source this file after scheduler.sh, then select the mechanism:
 #   JOB_TERM_CB=sched_job_term_cgroup
 # Call cgroup_cleanup_supported() beforehand to check availability.
 #
-# Requirements: cgroup v2 with cgroup.kill (kernel >= 5.14), and either root
-# or a scheduler process already inside a delegated cgroup subtree (e.g. a
-# systemd user service, or any command launched via
-# 'systemd-run --user --scope <cmd>').
-#
 # Environment:
-# SCHED_CGROUP_BASE  Optional, advanced (mainly for testing): writable cgroup2
-#                    directory under which the per-run cgroup is created,
-#                    skipping base autodetection
+# SCHED_CGROUP_BASE (optional): writable cgroup2 directory under which the per-run cgroup is created,
+#  skipping base autodetection
 #
 # This library owns variables prefixed SCH_TC_.
 
-# Create the per-run base cgroup as a child of <parent dir>
-# mkdir is atomic (fails if the name exists), so concurrent instances - even
-#   ones sharing ${SCH_TC_PID} across PID namespaces under a shared
-#   SCHED_CGROUP_BASE - claim distinct bases; the loser advances the suffix.
+# Create the per-run base cgroup as a child of <parent dir>.
+#
+# mkdir is atomic (fails if the name exists), so concurrent instances - even ones sharing
+#   ${SCH_TC_PID} across PID namespaces under a shared SCHED_CGROUP_BASE - claim distinct bases;
+#   the loser advances the suffix.
+
+
 # Sets ${SCH_TC_BASE}
 # 1: parent dir
 sch_tc_mk_base() {
@@ -39,8 +36,8 @@ sch_tc_mk_base() {
 	done
 }
 
-# Set up the per-run base cgroup which will hold per-job child cgroups.
-# Base autodetection tries, in order:
+# Set up the per-run base cgroup which will hold per-job child cgroups. Base autodetection tries,
+#   in order:
 #   - this process's own cgroup: writable when running as root,
 #       or unprivileged inside a delegated subtree (e.g. a systemd user session
 #       or user service, or any command launched via 'systemd-run --user --scope')
@@ -114,29 +111,30 @@ sch_tc_init() {
 }
 
 # Try to remove the per-job cgroup of the job with wrapper PID <pid>.
-# rmdir succeeds only once the kernel has confirmed the cgroup empty and fully
-#   reaped, i.e. the kill of the job's whole process tree is verified: append
-#   the PID to ${stc_reaped} (a local of the calling dispatcher, resolved via
-#   dynamic scoping). Otherwise park the PID in ${SCH_TC_PENDING} for later
-#   retries.
-# 1: job wrapper PID
+# rmdir succeeds only once the kernel confirmed cgroup empty and fully reaped,
+#   i.e. kill of the job's process tree is verified:
+#   append the PID to <out_var>
+# Otherwise park the PID in ${SCH_TC_PENDING} for later retries.
+# 1: out-var to append reaped PID to
+# 2: job wrapper PID
 sch_tc_try_rm() {
-	rmdir "${SCH_TC_BASE:?}/job_${1:?}" 2>/dev/null &&
-		{ sch_append stc_reaped "${1}"; return 0; }
-	sch_is_included "${1}" "${SCH_TC_PENDING}" ||
-		sch_append SCH_TC_PENDING "${1}"
+	rmdir "${SCH_TC_BASE:?}/job_${2:?}" 2>/dev/null &&
+		{ sch_append "${1:?}" "${2}"; return 0; }
+	sch_is_included "${2}" "${SCH_TC_PENDING}" ||
+		sch_append SCH_TC_PENDING "${2}"
 	return 1
 }
 
 # Kill all processes remaining in the per-job cgroup of the job with wrapper
 #   PID <pid> and try to remove the cgroup (verifying the kill)
-# 1: job wrapper PID
+# 1: out-var to append reaped PID to
+# 2: job wrapper PID
 sch_tc_kill_job() {
-	local stc_d="${SCH_TC_BASE:?}/job_${1:?}"
+	local stc_d="${SCH_TC_BASE:?}/job_${2:?}"
 
 	[ -d "${stc_d}" ] || return 0
 	printf '1\n' 2>/dev/null > "${stc_d}/cgroup.kill"
-	sch_tc_try_rm "${1}"
+	sch_tc_try_rm "${1:?}" "${2}"
 	:
 }
 
@@ -145,8 +143,8 @@ sch_tc_kill_job() {
 #   sched_job_term_cgroup setup <job_id> <pid>   (runs in the job process)
 #   sched_job_term_cgroup term <out_var> <pid>...
 #   sched_job_term_cgroup cleanup <out_var>
-# 'term' and 'cleanup' report kernel-verified killed PIDs by assigning a
-# whitespace-separated list to the variable named <out_var>.
+# 'term' and 'cleanup' report kernel-verified killed PIDs by assigning
+#   space-separated list to <out_var>.
 sched_job_term_cgroup() {
 	local \
 		stc_lib_name=sched_job_term_cgroup \
@@ -161,10 +159,9 @@ sched_job_term_cgroup() {
 		;;
 
 		setup)
-			# Join a fresh per-job cgroup: writing '0' to cgroup.procs moves
-			# the writing process, which is the job process since the core
-			# invokes 'setup' there; all the job's descendants inherit the
-			# membership
+			# Join a fresh per-job cgroup: writing '0' to cgroup.procs moves the writing process,
+			#   which is the job process since the core invokes 'setup' there;
+			#   all the job's descendants inherit the membership
 			sch_is_uint "${2}" ||
 				{ sch_fail_msg "${stc_lib_name}: setup: invalid PID '${2}'."; return 1; }
 			mkdir "${SCH_TC_BASE:?}/job_${2}" 2>/dev/null &&
@@ -185,12 +182,12 @@ sched_job_term_cgroup() {
 			stc_prev="${SCH_TC_PENDING}"
 			SCH_TC_PENDING=
 			for stc_p in ${stc_prev}; do
-				sch_tc_try_rm "${stc_p}"
+				sch_tc_try_rm stc_reaped "${stc_p}"
 			done
 			for stc_p in "${@}"; do
 				sch_is_uint "${stc_p}" ||
 					{ sch_fail_msg "${stc_lib_name}: term: ignoring invalid PID '${stc_p}'."; continue; }
-				sch_tc_kill_job "${stc_p}"
+				sch_tc_kill_job stc_reaped "${stc_p}"
 			done
 
 			export -n "${stc_out_var}=${stc_reaped}"
@@ -201,10 +198,9 @@ sched_job_term_cgroup() {
 			sch_check_name "var" "${stc_out_var}" "${stc_lib_name}: cleanup" || return 1
 			export -n "${stc_out_var}="
 
-			# Sweep all remaining job cgroups - including those of completed
-			# jobs that left processes behind: nothing a job spawned survives
-			# the run. The glob must expand regardless of the caller's noglob
-			# state (the application may run under set -f)
+			# Sweep all remaining job cgroups - including those of completed jobs that left processes behind:
+			#   nothing a job spawned survives the run.
+			# The glob must expand regardless of the caller's noglob state (the application may run under set -f)
 			[ -n "${SCH_TC_BASE}" ] && {
 				sch_had_f && stc_had_f=1
 				set +f
@@ -213,18 +209,18 @@ sched_job_term_cgroup() {
 				for stc_p in "${@}"; do
 					[ -d "${stc_p}" ] || continue
 					stc_p="${stc_p##*/job_}"
-					sch_is_uint "${stc_p}" && sch_tc_kill_job "${stc_p}"
+					sch_is_uint "${stc_p}" && sch_tc_kill_job stc_reaped "${stc_p}"
 				done
 			}
 
-			# Bounded retry for unverified removals: rmdir succeeds only once
-			# the kernel has fully reaped a cgroup's processes
+			# Bounded retry for unverified removals:
+			#   rmdir succeeds only once the kernel has fully reaped a cgroup's processes
 			for stc_try in 1 2 3; do
 				[ -n "${SCH_TC_PENDING}" ] || break
 				stc_prev="${SCH_TC_PENDING}"
 				SCH_TC_PENDING=
 				for stc_p in ${stc_prev}; do
-					sch_tc_try_rm "${stc_p}"
+					sch_tc_try_rm stc_reaped "${stc_p}"
 				done
 				[ -n "${SCH_TC_PENDING}" ] || break
 				[ "${stc_try}" = 3 ] || sleep 1
@@ -244,19 +240,15 @@ sched_job_term_cgroup() {
 	esac
 }
 
-# Check whether cgroup v2 job termination is supported in the current
-#   environment: runs the same validation 'sched_job_term_cgroup init' performs
-#   (cgroup v2 mount, cgroup.kill support, base cgroup creation, process
-#   self-migration), then cleans up after itself.
-# Honors ${SCHED_CGROUP_BASE} if set. Emits no messages.
-# Return codes: 0 - supported; 1 - not supported
+# Check whether cgroup v2 job termination is supported in current environment:
+#   runs the same validation 'sched_job_term_cgroup init' performs,
+#   then cleans up after itself.
+# Honors ${SCHED_CGROUP_BASE} if set. Emits no messages. Return codes: 0 - supported; 1 - not supported
 cgroup_cleanup_supported() {
-	# Locals shadow the library state for the probe run; the ':' callback
-	# override silences all reporting
-	local SCH_TC_BASE SCH_TC_PENDING SCHED_FAIL_MSG_CB=: ccs_rv=0
+	local SCH_TC_BASE SCH_TC_PENDING ccs_rv=0
 
-	sch_tc_init || ccs_rv=1
+	SCHED_FAIL_MSG_CB=: sch_tc_init || ccs_rv=1
 
-	[ -z "${SCH_TC_BASE}" ] || rmdir "${SCH_TC_BASE}" 2>/dev/null
+	[ -n "${SCH_TC_BASE}" ] && rmdir "${SCH_TC_BASE}" 2>/dev/null
 	return "${ccs_rv}"
 }

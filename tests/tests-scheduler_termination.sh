@@ -71,8 +71,7 @@ test_scheduler_termination_02() {
 	fi
 }
 
-# Verify SIGUSR1 terminates the scheduler, SCHED_FINALIZE_CB gets a non-empty PID list,
-#   and kills the workers.
+# Verify SIGUSR1 terminates the scheduler, SCHED_FINALIZE_CB gets a non-empty PID list, and kills the workers.
 test_scheduler_termination_03() {
 	scheduler_termination_03_finalize_handler() {
 		local rv="${1}" pids="${2}"
@@ -372,8 +371,8 @@ test_scheduler_termination_07() {
 test_scheduler_termination_08() {
 	scheduler_termination_08_done_handler() {
 		# Delay JOB_DONE_CB to consume part of the idle timeout before the next read -t.
-		# 'sleep N & wait' forces a forked sleep: an in-process NOFORK builtin
-		# sleep would be cut short by SIGCHLD from the exiting job
+		# 'sleep N & wait' forces a forked sleep:
+		#   an in-process NOFORK builtin sleep would be cut short by SIGCHLD from the exiting job
 		sleep 2 & wait "$!"
 		return 0
 	}
@@ -390,8 +389,8 @@ test_scheduler_termination_08() {
 
 	start_time=$(date +%s)
 
-	# MAX_JOBS=2: both jobs dispatch upfront, so no later job start resets
-	# the idle clock (job starts count as progress)
+	# MAX_JOBS=2: both jobs dispatch upfront,
+	#   so no later job start resets the idle clock (job starts count as progress)
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=scheduler_termination_08_done_handler \
@@ -767,12 +766,10 @@ test_scheduler_termination_16() {
 	fi
 }
 
-# Verify sch_finalize() runs with a correct IFS when a signal fires while the
-#   scheduler is blocked in `IFS= read`: the read's IFS= prefix assignment must
-#   not leak into the trap handler. A leaked empty IFS collapses the finalize
-#   callback's running_pids/unfinished_ids into a single field. With 3 concurrent
-#   jobs, SIGUSR1 mid-wait must yield running_pids and unfinished_ids that split
-#   into 3 fields each.
+# Verify sch_finalize() runs with a correct IFS when a signal fires while the scheduler is blocked in `IFS= read`:
+#   the read's IFS= prefix assignment must not leak into the trap handler.
+# A leaked empty IFS collapses the finalize callback's running_pids/unfinished_ids into a single field.
+# With 3 concurrent jobs, SIGUSR1 mid-wait must yield running_pids and unfinished_ids that split into 3 fields each.
 test_scheduler_termination_17() {
 	scheduler_termination_17_do_job() { sleep 30; return 0; }
 

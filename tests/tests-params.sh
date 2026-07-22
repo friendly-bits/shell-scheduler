@@ -113,9 +113,8 @@ test_params_02() {
 	fi
 }
 
-# Verify job_get_params() returns an empty value (rv=0, no error) for a param never
-#   registered for the job, and a multi-name request still fetches every requested name,
-#   including ones after the unregistered one.
+# Verify job_get_params() returns an empty value (rv=0, no error) for a param never registered for the job,
+#   and a multi-name request still fetches every requested name, including ones after the unregistered one.
 test_params_03() {
 	params_03_do_job() {
 		local rv
@@ -175,9 +174,9 @@ test_params_03() {
 }
 
 # Verify job_set_params() rejects invalid input at assignment time:
-#   bad job ID, pair missing '=', bad/empty param names, and accepts a
-#   leading-digit job ID and a leading-digit param name (neither need be a
-#   valid shell identifier).
+#   bad job ID, pair missing '=', bad/empty param names,
+#   and accepts a leading-digit job ID and a leading-digit param name
+#   (neither need be a valid shell identifier).
 test_params_04() {
 	params_04_check_rejected() {
 		total_cnt=$((total_cnt + 1))
@@ -297,8 +296,8 @@ test_params_05() {
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
 	rm -f "${MSG_FILE}"
 
-	# One reserved key is retrievable via a safe alias; a direct fetch into the
-	#   reserved name is rejected before assignment.
+	# One reserved key is retrievable via a safe alias;
+	#   a direct fetch into the reserved name is rejected before assignment.
 	unset GOT
 	job_get_params "${job_id}" GOT=IFS
 	SCHED_FAIL_MSG_CB=: job_get_params "${job_id}" IFS 2>/dev/null
@@ -319,8 +318,8 @@ test_params_05() {
 	fi
 }
 
-# Verify a job's params don't leak into another job's environment: two jobs registering
-#   the same param name with different values must each see only their own value.
+# Verify a job's params don't leak into another job's environment:
+#   two jobs registering the same param name with different values must each see only their own value.
 test_params_06() {
 	params_06_do_job() {
 		local out
@@ -381,8 +380,8 @@ test_params_06() {
 	fi
 }
 
-# Verify that registering the same param key twice for a job
-#   keeps the last value (last write wins) without error
+# Verify that registering the same param key twice for a job keeps the last value
+#   (last write wins) without error
 test_params_07() {
 	params_07_do_job() {
 		job_get_params "${1}" DUPKEY
@@ -772,8 +771,8 @@ test_params_14() {
 }
 
 # Verify job_get_params() works when called from JOB_DONE_CB,
-#   which runs in the main scheduler process (not the forked per-job subshell that runs
-#   DO_JOB_CB) - confirming params are available in every callback, not just DO_JOB_CB.
+#   which runs in the main scheduler process (not the forked per-job subshell that runs DO_JOB_CB) -
+#   confirming params are available in every callback, not just DO_JOB_CB.
 test_params_15() {
 	params_15_do_job() { return 0; }
 
@@ -852,8 +851,7 @@ test_params_16() {
 	wait "$!"
 	sched_rv=$?
 
-	# FROMSCOPE is declared local above so this direct (main-process) call
-	# doesn't leak it into the global scope.
+	# FROMSCOPE is declared local above so this direct (main-process) call doesn't leak it into the global scope.
 	unset FROMSCOPE
 	job_get_params "${job_id}" FROMSCOPE
 	seen="${FROMSCOPE-<unset>}"
@@ -921,7 +919,7 @@ test_params_18() {
 		all_ok=1
 
 	# Noglob preservation around "sch_all" mode's internal set -f handling:
-	# caller's set -f/+f state must survive the call unchanged either way.
+	#   caller's set -f/+f state must survive the call unchanged either way.
 	set +f
 	job_get_params "${job_id}" sch_all >/dev/null
 	case "${-}" in *f*) noglob_ok=0 ;; esac
@@ -1045,8 +1043,8 @@ test_params_20() {
 	fi
 }
 
-# Verify job_get_params() alias form var=param assigns the param value to the named
-#   variable, and does not also assign a variable named after the param.
+# Verify job_get_params() alias form var=param assigns the param value to the named variable,
+#   and does not also assign a variable named after the param.
 test_params_21() {
 	local \
 		TEST_ID=params_21 \
@@ -1071,9 +1069,9 @@ test_params_21() {
 	fi
 }
 
-# Verify a leading-digit param name (a valid param key, not a valid shell variable
-#   name) is retrievable through an alias var=param, while the plain form is rejected
-#   because the name is an invalid destination variable.
+# Verify a leading-digit param name (a valid param key, not a valid shell variable name)
+#   is retrievable through an alias var=param,
+#   while the plain form is rejected because the name is an invalid destination variable.
 test_params_22() {
 	params_22_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
@@ -1116,8 +1114,8 @@ test_params_22() {
 	fi
 }
 
-# Verify job_get_params() applies destination-variable rules to the alias target (the
-#   var in var=param): reserved and leading-digit/malformed target names are rejected,
+# Verify job_get_params() applies destination-variable rules to the alias target (the var in var=param):
+#   reserved and leading-digit/malformed target names are rejected,
 #   nothing is assigned, and IFS is not corrupted; the source param stays valid.
 test_params_23() {
 	params_23_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
@@ -1187,7 +1185,6 @@ test_params_24() {
 		ok_all_rv \
 		alias_rv \
 		msg_cnt \
-		goodname \
 		DEST
 
 	local \
@@ -1228,8 +1225,8 @@ test_params_24() {
 	fi
 }
 
-# Verify job_get_params() rejects an alias with an empty source param (var=) or an
-#   empty destination var (=param); both fail before any assignment.
+# Verify job_get_params() rejects an alias with an empty source param (var=)
+#   or an empty destination var (=param); both fail before any assignment.
 test_params_25() {
 	params_25_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
@@ -1278,8 +1275,8 @@ test_params_25() {
 	fi
 }
 
-# Verify job_get_params() handles a single call mixing plain names and var=param
-#   aliases, assigning each target independently.
+# Verify job_get_params() handles a single call mixing plain names and var=param aliases,
+#   assigning each target independently.
 test_params_26() {
 	local \
 		TEST_ID=params_26 \

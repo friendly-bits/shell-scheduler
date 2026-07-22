@@ -4,9 +4,9 @@
 # scheduler-job-term-ppid.sh - /proc PPID-walk job termination library for scheduler.sh
 #
 # Kills the process tree of each job by walking PPID links from /proc/*/stat.
-# Unlike scheduler-job-term-children.sh (which reads /proc/<pid>/task/<tid>/children
-# and so needs a kernel built with CONFIG_PROC_CHILDREN), this mechanism needs
-# only /proc/<pid>/stat and awk - available on essentially any Linux.
+# Unlike scheduler-job-term-children.sh (which reads /proc/<pid>/task/<tid>/children and so needs a
+#   kernel built with CONFIG_PROC_CHILDREN), this mechanism needs only /proc/<pid>/stat and awk -
+#   available on essentially any Linux.
 #
 # Usage: source this file after scheduler.sh, select the mechanism:
 #   JOB_TERM_CB=sched_job_term_ppid
@@ -30,7 +30,7 @@ sch_get_descendants_ppid() {
 			s = $0
 			# Strip "pid (comm) X " (X = single state char).
 			# comm may contain spaces and parens - the greedy match handles those;
-			# a line that does not match is a fragment of a newline-containing comm - skip
+			#   a line that does not match is a fragment of a newline-containing comm - skip
 			if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
 			split(s, f, " ")
 			if (f[1] !~ /^[0-9]+$/) next

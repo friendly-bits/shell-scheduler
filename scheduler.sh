@@ -616,7 +616,7 @@ schedule_jobs() {
 	# Convert ${SCH_JOB_IDS} to space-separated list
 	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || exit 1
 
-	# Validate job IDs ([a-zA-Z0-9_] only), check for duplicates
+	# Validate job IDs ([a-zA-Z0-9_] only), check for duplicates.
 	# set -f: not-yet-validated IDs may contain glob characters -
 	#   they must reach validation unexpanded, to be rejected verbatim
 	set -f

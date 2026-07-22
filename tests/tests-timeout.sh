@@ -6,19 +6,18 @@
 
 # Category: Per-job timeouts (see TIMEKEEPING.md)
 # This file is sourced by tests.sh; it defines test_N functions only.
-# All tests exercise the public interface only: schedule_jobs(), the
-# documented helpers (job_set_timeout etc.), environment variables and
-# callbacks. No test depends on scheduler internals.
+# All tests exercise the public interface only: schedule_jobs(),
+#   the documented helpers (job_set_timeout etc.), environment variables and callbacks.
+# No test depends on scheduler internals.
 
 #
 # Tests
 #
 
-# Verify job_set_timeout(): accepts valid values and rejects invalid values
-#   and job IDs (API return values and error messages); behaviorally, the
-#   last value set for a job wins, and a leading-zero value is treated as
-#   decimal (a regression there would abort the scheduler with an arithmetic
-#   error at deadline registration).
+# Verify job_set_timeout(): accepts valid values and rejects invalid values and job IDs
+#   (API return values and error messages);
+#   behaviorally, the last value set for a job wins, and a leading-zero value is treated as decimal
+#   (a regression there would abort the scheduler with an arithmetic error at deadline registration).
 test_timeout_01() {
 	timeout_01_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
@@ -47,9 +46,8 @@ test_timeout_01() {
 		fi
 	done
 
-	# Invalid values: rv 1, one message each
-	# (stderr silenced: the out-of-range input makes the test builtin
-	#  print a diagnostic on some shells)
+	# Invalid values: rv 1, one message each (stderr silenced:
+	#   the out-of-range input makes the test builtin print a diagnostic on some shells)
 	for val in '' 0 00 abc -1 1.5 +1 99999999999999999999; do
 		total_cnt=$((total_cnt + 1))
 		SCHED_FAIL_MSG_CB=timeout_01_fail_msg job_set_timeout t01_bad "${val}" 2>/dev/null
@@ -76,9 +74,9 @@ test_timeout_01() {
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
 	rm -f "${MSG_FILE}"
 
-	# Behavior: the last value set wins - with the 1s override in effect the
-	# hung job expires before the 3s idle timeout (rv 0); a stale first
-	# value (5s) would instead end the run with rv 81
+	# Behavior: the last value set wins -
+	#   with the 1s override in effect the hung job expires before the 3s idle timeout (rv 0);
+	#   a stale first value (5s) would instead end the run with rv 81
 	job_set_timeout hang_t01lsw 5 &&
 	job_set_timeout hang_t01lsw 1 || { FAIL "job_set_timeout failed"; return 1; }
 
@@ -94,9 +92,9 @@ test_timeout_01() {
 	wait "$!"
 	rv_lsw=$?
 
-	# Behavior: a leading-zero value must be handled as decimal - stored
-	# verbatim, '09' would abort the scheduler at deadline registration
-	# (invalid octal in arithmetic) instead of reaching the global timeout
+	# Behavior: a leading-zero value must be handled as decimal - stored verbatim,
+	#   '09' would abort the scheduler at deadline registration (invalid octal in arithmetic)
+	#   instead of reaching the global timeout
 	job_set_timeout hang_t01oct 09 || { FAIL "job_set_timeout failed"; return 1; }
 
 	SCHED_FAIL_MSG_CB=echo \
@@ -122,10 +120,9 @@ test_timeout_01() {
 	fi
 }
 
-# Verify deadline-list integrity across completion wakes (regression test for
-#   a real bug where each wake duplicated pending deadline entries): instant
-#   jobs complete while two staggered deadlines (1s/3s) are pending; each
-#   hung job must time out exactly once, with no duplicate pids reported.
+# Verify deadline-list integrity across completion wakes (regression test for a real bug where each wake
+#   duplicated pending deadline entries): instant jobs complete while two staggered deadlines (1s/3s)
+#   are pending; each hung job must time out exactly once, with no duplicate pids reported.
 test_timeout_02() {
 	timeout_02_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
 	timeout_02_finalize() {
@@ -161,8 +158,7 @@ test_timeout_02() {
 	wait "$!"
 	sched_rv=$?
 
-	# Exactly one timeout record per hung job (a multi-line result here
-	# means duplicates and fails the uint check)
+	# Exactly one timeout record per hung job (a multi-line result here means duplicates and fails the uint check)
 	pid_a="$(sed -n 's/^3|hang_t02a|124|\([0-9][0-9]*\)$/\1/p' "${DONE_FILE}" 2>/dev/null)"
 	pid_b="$(sed -n 's/^3|hang_t02b|124|\([0-9][0-9]*\)$/\1/p' "${DONE_FILE}" 2>/dev/null)"
 
@@ -189,10 +185,9 @@ test_timeout_02() {
 	fi
 }
 
-# Verify simultaneous multi-expiry through the public interface: three hung
-#   jobs sharing a 1s default budget are all classified as timed out: one
-#   (id, 124, pid) callback each, exact expired set, all abandoned pids
-#   reported, scheduler exits 0.
+# Verify simultaneous multi-expiry through the public interface:
+#   three hung jobs sharing a 1s default budget are all classified as timed out: one (id, 124, pid)
+#   callback each, exact expired set, all abandoned pids reported, scheduler exits 0.
 test_timeout_03() {
 	timeout_03_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
 	timeout_03_finalize() {
@@ -251,10 +246,9 @@ test_timeout_03() {
 	fi
 }
 
-# Verify a completed job's pending deadline is retired with it: ok1 (1s run,
-#   2s budget) completes and must never be reported as timed out, while a
-#   second hung job (3s budget) keeps the scheduler alive past the retired
-#   deadline and then drains normally.
+# Verify a completed job's pending deadline is retired with it: ok1 (1s run, 2s budget)
+#   completes and must never be reported as timed out, while a second hung job (3s budget)
+#   keeps the scheduler alive past the retired deadline and then drains normally.
 test_timeout_04() {
 	timeout_04_done() { printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"; }
 	timeout_04_finalize() {
@@ -312,13 +306,12 @@ test_timeout_04() {
 	fi
 }
 
-# Verify the late-record discard path (see TIMEKEEPING.md): when a timed-out
-#   job's completion record arrives after its expiry was processed, the record
-#   is dropped, the timeout classification stands, and the job is delisted
-#   from the abandoned set (so finalize's <running_pids> is empty).
-#   Determinism: JOB_DONE_CB forges the late record into the completion FIFO
-#   the moment it receives the synthesized timeout notification -
-#   byte-for-byte what the real late record would be.
+# Verify the late-record discard path (see TIMEKEEPING.md):
+#   when a timed-out job's completion record arrives after its expiry was processed,
+#   the record is dropped, the timeout classification stands,
+#   and the job is delisted from the abandoned set (so finalize's <running_pids> is empty).
+# Determinism: JOB_DONE_CB forges the late record into the completion FIFO the moment it receives the
+#   synthesized timeout notification - byte-for-byte what the real late record would be.
 test_timeout_05() {
 	timeout_05_done() {
 		[ "${2}" = 124 ] && [ -n "${3:-}" ] &&
@@ -386,10 +379,10 @@ test_timeout_05() {
 	fi
 }
 
-# Verify batch survival: a hung job with a per-job timeout is classified as
-#   timed out (JOB_DONE_CB gets rv 124 plus the pid as a third argument),
-#   healthy jobs complete, the scheduler exits 0, and the abandoned pid is
-#   reported to the finalize callback in <running_pids>.
+# Verify batch survival: a hung job with a per-job timeout is classified as timed out
+#   (JOB_DONE_CB gets rv 124 plus the pid as a third argument),
+#   healthy jobs complete, the scheduler exits 0,
+#   and the abandoned pid is reported to the finalize callback in <running_pids>.
 test_timeout_06() {
 	timeout_06_done() {
 		printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"
@@ -450,11 +443,10 @@ test_timeout_06() {
 	fi
 }
 
-# Verify slot reclamation: with SCHED_MAX_JOBS=1, a hung job's expiry inside
-#   the capacity-wait loop frees the slot and the queued job gets dispatched.
-#   Also guards the deadline cap on the completion-wait read timeout: without
-#   the cap, the wait would sleep past the 1s deadline and hit the 3s idle
-#   timeout (rv 81).
+# Verify slot reclamation: with SCHED_MAX_JOBS=1,
+#   a hung job's expiry inside the capacity-wait loop frees the slot and the queued job gets dispatched.
+# Also guards the deadline cap on the completion-wait read timeout: without the cap,
+#   the wait would sleep past the 1s deadline and hit the 3s idle timeout (rv 81).
 test_timeout_07() {
 	timeout_07_finalize() {
 		finalize_handler "$1" "$2"
@@ -505,8 +497,8 @@ test_timeout_07() {
 }
 
 # Verify a per-job timeout (job_set_timeout) overrides ${SCHED_JOB_TIMEOUT_S}:
-#   with a default far beyond ${SCHED_TIMEOUT_S}, only the override can expire
-#   the hung job before the global timeout would abort the run.
+#   with a default far beyond ${SCHED_TIMEOUT_S},
+#   only the override can expire the hung job before the global timeout would abort the run.
 test_timeout_08() {
 	local \
 		TEST_ID=timeout_08 \
@@ -589,8 +581,9 @@ test_timeout_09() {
 	fi
 }
 
-# Verify scheduler timeouts outrank job deadlines: a global timeout due before
-#   any job deadline exits with rv 82, the job stays unfinished (not failed),
+# Verify scheduler timeouts outrank job deadlines:
+#   a global timeout due before any job deadline exits with rv 82,
+#   the job stays unfinished (not failed),
 #   and no timeout completion is synthesized.
 test_timeout_10() {
 	timeout_10_done() {
@@ -646,12 +639,13 @@ test_timeout_10() {
 }
 
 # Verify idle-timeout semantics vs job deadlines (see TIMEKEEPING.md):
-#   expiries do NOT reset the idle timeout. Draining hung jobs with staggered
-#   1s/3s deadlines: a 2s idle timeout fires after the first expiry (rv 81,
-#   half-drained outcome sets), while an idle timeout larger than the biggest
-#   job budget (5s > 3s) lets every deadline fire first (rv 0, full drain).
-#   Also guards the deadline cap on the completion-wait read timeout: without
-#   the cap, the first wake in sub-check 2 would be at the 5s idle limit.
+#   expiries do NOT reset the idle timeout.
+# Draining hung jobs with staggered 1s/3s deadlines:
+#   a 2s idle timeout fires after the first expiry (rv 81, half-drained outcome sets),
+#   while an idle timeout larger than the biggest job budget (5s > 3s)
+#   lets every deadline fire first (rv 0, full drain).
+# Also guards the deadline cap on the completion-wait read timeout: without the cap,
+#   the first wake in sub-check 2 would be at the 5s idle limit.
 test_timeout_11() {
 	timeout_11_finalize() {
 		finalize_handler "$1" "$2"
@@ -672,9 +666,9 @@ test_timeout_11() {
 	job_set_timeout hang_t11a 1 &&
 	job_set_timeout hang_t11b 3 || { FAIL "job_set_timeout failed"; return 1; }
 
-	# Sub-check 1: idle (2s) < max budget (3s). The 1s expiry does not reset
-	# the idle clock (anchored at dispatch), so rv 81 fires at ~2s, before
-	# hang_t11b's 3s deadline: half-drained outcome sets
+	# Sub-check 1: idle (2s) < max budget (3s).
+	# The 1s expiry does not reset the idle clock (anchored at dispatch), so rv 81 fires at ~2s,
+	#   before hang_t11b's 3s deadline: half-drained outcome sets
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=timeout_11_finalize \
 	JOB_DONE_CB=done_handler \
@@ -694,8 +688,8 @@ test_timeout_11() {
 
 	rm -f "${FIN_FILE}"
 
-	# Sub-check 2: idle (5s) > max budget (3s): every deadline fires before
-	# the idle timeout can, the run drains and exits 0 with both jobs expired
+	# Sub-check 2: idle (5s) > max budget (3s): every deadline fires before the idle timeout can,
+	#   the run drains and exits 0 with both jobs expired
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=timeout_11_finalize \
 	JOB_DONE_CB=done_handler \
@@ -725,10 +719,10 @@ test_timeout_11() {
 }
 
 # Verify a non-zero JOB_DONE_CB return on a synthesized timeout notification
-#   (rv 124 + pid, invoked from the deadline sweep) aborts the scheduler with
-#   the callback's code; the timed-out job is already in the expired set and its
-#   abandoned pid is in <running_pids>. The normal-completion counterpart of
-#   this contract is covered by core_03.
+#   (rv 124 + pid, invoked from the deadline sweep)
+#   aborts the scheduler with the callback's code;
+#   the timed-out job is already in the expired set and its abandoned pid is in <running_pids>.
+# The normal-completion counterpart of this contract is covered by core_03.
 test_timeout_12() {
 	timeout_12_done() {
 		if [ "${2}" = 124 ]; then
@@ -788,15 +782,14 @@ test_timeout_12() {
 	fi
 }
 
-# Verify a job start resets the idle timeout: with dispatches staggered by a
-#   1s tick stall, a 2s idle timeout survives the whole dispatch phase (all
-#   jobs dispatched, none left undispatched) and fires only ~2s after the
-#   last dispatch (~4s total). Without the reset, the run would abort
-#   mid-dispatch (~2s), leaving the last job undispatched.
+# Verify a job start resets the idle timeout: with dispatches staggered by a 1s tick stall,
+#   a 2s idle timeout survives the whole dispatch phase (all jobs dispatched, none left undispatched)
+#   and fires only ~2s after the last dispatch (~4s total).
+# Without the reset, the run would abort mid-dispatch (~2s), leaving the last job undispatched.
 test_timeout_13() {
 	timeout_13_dispatch_tick() {
-		# 'sleep N & wait' forces a forked sleep: an in-process NOFORK builtin
-		# sleep would be cut short by SIGCHLD from an exiting job
+		# 'sleep N & wait' forces a forked sleep:
+		#   an in-process NOFORK builtin sleep would be cut short by SIGCHLD from an exiting job
 		sleep 1 & wait "$!"
 	}
 	timeout_13_finalize() {
@@ -851,10 +844,9 @@ test_timeout_13() {
 	fi
 }
 
-# Verify a job's deadline is anchored at its dispatch time (not scheduler
-#   start) and never fires early: a job with a 1s budget dispatched ~1s in
-#   (capacity-delayed behind ok1) must expire at ~2s, so the run lasts at
-#   least 2s and drains to rv 0.
+# Verify a job's deadline is anchored at its dispatch time (not scheduler start) and never fires early:
+#   a job with a 1s budget dispatched ~1s in (capacity-delayed behind ok1) must expire at ~2s,
+#   so the run lasts at least 2s and drains to rv 0.
 test_timeout_14() {
 	local \
 		TEST_ID=timeout_14 \
