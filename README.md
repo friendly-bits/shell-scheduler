@@ -74,7 +74,7 @@ _Note: this is the TL;DR version. For more details, see REFERENCE.md and TIMEKEE
 The scheduler is started via the call to `schedule_jobs` with the list of **job IDs** as the first argument:
 
 ```SH
-schedule_jobs <job_ids> &
+schedule_jobs "<job_ids>" &
 ```
 
 The scheduler is configured via environment variables.

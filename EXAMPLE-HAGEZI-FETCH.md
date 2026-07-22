@@ -7,34 +7,6 @@
 
 # Download several HaGeZi DNS blocklists concurrently.
 
-# Source the core library
-SCHEDULER_LIB="${SCHEDULER_LIB:-./scheduler.sh}"
-. "${SCHEDULER_LIB}"
-
-# Source job termination helper libraries
-. ./job-term-ppid.sh
-. ./job-term-children.sh
-. ./job-term-cgroup.sh
-
-# Automatically select best available job termination mechanism, assign callback value to ${JOB_TERM_CB}
-sched_job_term_select JOB_TERM_CB || { echo "No compatible job termination mechanisms are available." >&2; exit 1; }
-echo "Automatically selected JOB_TERM_CB: ${JOB_TERM_CB}"
-
-# Params assignment
-job_set_params pro      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt"
-job_set_params proplus  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.plus.txt"
-job_set_params multi    "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/multi.txt"
-job_set_params tif      "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.txt"
-job_set_params invalid  "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/invalid.txt"
-job_set_params gambling "url=https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/gambling.txt"
-
-JOBS_CNT=6
-SUCCESS_CNT=0
-
-IDS="pro proplus multi tif invalid gambling"
-
-OUT_DIR="/tmp/lists"
-mkdir -p "${OUT_DIR}" || exit 1
 
 # --- Callbacks ---
 
@@ -77,12 +49,7 @@ sched_error()
 	printf 'scheduler error: %s\n' "${@}" >&2
 }
 
-
 # Scheduler completion callback - SCHED_FINALIZE_CB
-#
-# wget PIDs are discovered via `pgrep -P` and signalled directly,
-#   since sending the kill signal to the shell process which invoked wget
-#   would only orphan the wget process rather than killing it.
 #
 # NOTE: The scheduler (including this callback) runs in a background child process.
 #   Collected statuses are visible here but not in the scope of the main process.
@@ -111,10 +78,46 @@ finalize_dl()
 	printf '%s\n' "Undispatched jobs:       ${undispatched_ids:-<none>}"
 	printf '%s\n' "Timed out jobs:          ${expired_ids:-<none>}"
 	printf '\n'
-	printf '%s\n' "PIDs of jobs which escaped termination: ${running_pids:-<none>}"
+
+
+	# This example implements job termination via one of the helper libraries (selected automatically).
+	# Depending on which library was selected, ${running_pids} may be empty string or not.
+	# In most cases, as long as automatic job termination is enabled,
+	#   non-empty ${running_pids} can be safely ignored.
+	printf '%s\n' "PIDs of jobs which might have escaped termination: ${running_pids:-<none>}"
 
 	return 0
 }
+
+
+# --- Source the core library ---
+SCHEDULER_LIB="${SCHEDULER_LIB:-./scheduler.sh}"
+. "${SCHEDULER_LIB}"
+
+# --- Source job termination helper libraries ---
+. ./job-term-ppid.sh
+. ./job-term-children.sh
+. ./job-term-cgroup.sh
+
+# --- Automatically select best available job termination mechanism, assign callback value to ${JOB_TERM_CB} ---
+sched_job_term_select JOB_TERM_CB || { echo "No compatible job termination mechanisms are available." >&2; exit 1; }
+echo "Automatically selected JOB_TERM_CB: ${JOB_TERM_CB}"
+
+# --- Params assignment ---
+DL_URL_BASE="https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard"
+job_set_params pro      "url=${DL_URL_BASE}/pro.txt"
+job_set_params proplus  "url=${DL_URL_BASE}/pro.plus.txt"
+job_set_params multi    "url=${DL_URL_BASE}/multi.txt"
+job_set_params tif      "url=${DL_URL_BASE}/tif.txt"
+job_set_params invalid  "url=${DL_URL_BASE}/invalid.txt"
+job_set_params gambling "url=${DL_URL_BASE}/gambling.txt"
+
+JOB_NAMES="pro proplus multi tif invalid gambling"
+JOBS_CNT=6
+SUCCESS_CNT=0
+
+OUT_DIR="/tmp/lists"
+mkdir -p "${OUT_DIR}" || exit 1
 
 # --- Run ---
 
@@ -125,7 +128,7 @@ SCHED_FINALIZE_CB=finalize_dl \
 SCHED_MAX_JOBS=4 \
 SCHED_TIMEOUT_S=120 \
 SCHED_AUTO_PARAMS=1 \
-	schedule_jobs "${IDS}" &
+	schedule_jobs "${JOB_NAMES}" &
 sched_pid=$!
 
 # Forward Ctrl-C/TERM as the scheduler's own cancellation signal (USR1), so
@@ -138,7 +141,7 @@ trap '
 ' INT TERM
 
 wait "${sched_pid}"
-exit "$?"
+exit ${?}
 ```
 
 _**Note**: this example script intentionally includes an invalid download URL to showcase scheduler error tracking and propagation._
@@ -170,7 +173,7 @@ download_list() {
 # Setting SCHED_AUTO_PARAMS=1 tells the scheduler to fetch and export job-specific params when initializing each job
 # <...>
 SCHED_AUTO_PARAMS=1 \
-    schedule_jobs "${IDS}" &
+    schedule_jobs "${JOB_NAMES}" &
 ```
 
 ### Signal forwarding
@@ -180,7 +183,7 @@ Because the scheduler is designed to run asynchronously (in the background), ter
 To handle this reliably, the example script traps signals `INT` and `TERM` and translates these signals into `USR1` sent to the scheduler's PID. This ensures the scheduler's native cleanup path is triggered and the **scheduler completion callback** (`SCHED_FINALIZE_CB`) is invoked and gets the chance to perform application-specific cleanup and/or to kill orphaned child processes, regardless of whether the interruption came from `Ctrl-C` or a direct `kill` command. The scheduler behaves identically when receiving signals `USR1`, `INT`, or `TERM`, except it exits with code `83` for `USR1` and with code `84` for `INT` or `TERM`.
 
 ```sh
-schedule_jobs "${IDS}" &
+schedule_jobs "${JOB_NAMES}" &
 sched_pid=$!
 
 trap '
