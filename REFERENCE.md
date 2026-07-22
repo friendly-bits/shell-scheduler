@@ -454,21 +454,19 @@ The scheduler installs handlers for signals `USR1`, `INT`, `TERM`. When any of t
 
 By default, the scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received.
 
-If your application needs to stop expired and unfinished jobs, you can either set up the **job termination callback** or implement custom job termination in the **scheduler completion callback** using the list of unfinished job PIDs (`<running_pids>`) passed to it.
+If your application needs to stop timed-out and unfinished jobs, you can either configure the **job termination callback** or implement custom job termination in the **scheduler completion callback** using the list of unfinished job PIDs (`<running_pids>`) passed to it.
 
 The projects implements three job termination mechanisms, each in a separate helper library, discussed below.
 
-Corresponding job IDs are also available in `<unfinished_job_ids>` `<expired_job_ids>` - if your cleanup or logging is keyed by job ID rather than by PID.
-
 ### TL;DR
 
-For simple use cases with relatively few well-behaved jobs running, it doesn't really matter which mechanism of the three implemented in the included helper libraries is used in practice.
+For simple use cases with relatively few well-behaved jobs, it doesn't really matter which mechanism of the three implemented in the included helper libraries is used in practice.
 
 - If an extra file and ~17KiB doesn't make or break your project, include all three helper libraries with your application and let `sched_job_term_select` pick the mechanism automatically, as explained in [Selecting job termination mechanism at runtime](#selecting-job-termination-mechanism-at-runtime) below. If you implement this exactly as shown in the example code snippet, it will just work [almost] anywhere without any extra configuration.
-- If you want to include only one library and you only care about **which one fits and works best** on the target system and not **why**, use `sched_job_term_select` for testing, then include only the relevant library which hosts the callback it selected.
+- If you want to include only one library and you only care about **which one fits and works best** on the target system and not **why**, use `sched_job_term_select` for testing, then include only the relevant library which implements the callback it selected.
 - If spawning many jobs, strongly prefer the cgroups-based library because it is much more efficient.
 - If spawning jobs which are prone to misbehavior, hanging or leaving orphaned processes behind, prefer the cgroups-based library because it allows for more deterministic process termination.
-- If the target system doesn't support the `cgroup`-based mechanism, use a `/proc`-based library: `scheduler-job-term-ppid.sh` needs only `/proc` and `awk` and works essentially anywhere; `scheduler-job-term-children.sh` is a more efficient variant where the kernel provides `CONFIG_PROC_CHILDREN`.
+- If the target system doesn't support the `cgroup`-based mechanism, use a `/proc`-based library: `scheduler-job-term-ppid.sh` needs only `/proc` and `awk` and works essentially anywhere; `scheduler-job-term-children.sh` is a more efficient variant, available where the kernel provides `CONFIG_PROC_CHILDREN`.
 
 ## Job termination callback (details)
 
