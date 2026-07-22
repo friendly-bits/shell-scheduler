@@ -1,7 +1,7 @@
 #!/bin/sh
 # shellcheck disable=SC3043,SC3045,SC3003
 
-# scheduler-job-term-cgroup.sh - cgroup v2 job termination library for scheduler.sh
+# job-term-cgroup.sh - cgroup v2 job termination library for scheduler.sh
 #
 # Kills each job's whole process tree (background children, orphaned grandchildren)
 #   via the kernel's cgroup.kill, with kernel-verified kill reporting.

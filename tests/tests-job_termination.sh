@@ -5,8 +5,8 @@
 # tests-job_termination.sh
 
 # Category: Modular job termination (JOB_TERM_CB)
-#   and the supplementary job termination libraries (scheduler-job-term-cgroup.sh,
-#   scheduler-job-term-children.sh)
+#   and the supplementary job termination libraries (job-term-cgroup.sh,
+#   job-term-children.sh)
 
 # This file is sourced by tests.sh; it defines test_N functions only.
 
@@ -21,9 +21,9 @@
 #   (the /proc/<pid>/task/<tid>/children files) and SKIP otherwise.
 # Core-contract and ppid-walk tests run everywhere (ppid needs only /proc and awk).
 
-. "${script_dir:?}/../scheduler-job-term-cgroup.sh"
-. "${script_dir:?}/../scheduler-job-term-children.sh"
-. "${script_dir:?}/../scheduler-job-term-ppid.sh"
+. "${script_dir:?}/../job-term-cgroup.sh"
+. "${script_dir:?}/../job-term-children.sh"
+. "${script_dir:?}/../job-term-ppid.sh"
 
 #
 # Category infrastructure

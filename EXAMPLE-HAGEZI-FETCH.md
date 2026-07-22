@@ -12,9 +12,9 @@ SCHEDULER_LIB="${SCHEDULER_LIB:-./scheduler.sh}"
 . "${SCHEDULER_LIB}"
 
 # Source job termination helper libraries
-. ./scheduler-job-term-ppid.sh
-. ./scheduler-job-term-children.sh
-. ./scheduler-job-term-cgroup.sh
+. ./job-term-ppid.sh
+. ./job-term-children.sh
+. ./job-term-cgroup.sh
 
 # Automatically select best available job termination mechanism, assign callback value to ${JOB_TERM_CB}
 sched_job_term_select JOB_TERM_CB || { echo "No compatible job termination mechanisms are available." >&2; exit 1; }
@@ -197,9 +197,9 @@ The scheduler tracks the PIDs of the jobs (in this case, instances of the shell 
 
 ```
 # Source job termination helper libraries
-. ./scheduler-job-term-ppid.sh
-. ./scheduler-job-term-children.sh
-. ./scheduler-job-term-cgroup.sh
+. ./job-term-ppid.sh
+. ./job-term-children.sh
+. ./job-term-cgroup.sh
 ```
 
 Then the script calls the helper `sched_job_term_select` to automatically select the best available job termination mechanism:

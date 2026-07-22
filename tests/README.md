@@ -6,7 +6,7 @@ Categories: `dispatch`, `core`, `scheduler_termination`, `config`, `params`, `mi
 
 Note: the `security` category consolidates the command-injection / forgery-resistance tests (job-ID and completion-record validation, param value/name and callback-value injection, and internal param-key namespace integrity).
 
-Note: the `job_termination` category covers the modular job termination feature (`JOB_TERM_CB`) and the three optional helper libraries implementing job termination via three different mechanisms: cgroup (`scheduler-job-term-cgroup.sh`), `/proc` children-walk (`scheduler-job-term-children.sh`), and `/proc` PPID-walk (`scheduler-job-term-ppid.sh`). Each mechanism's tests are gated on that mechanism being usable in the current environment, and report SKIP otherwise (counted separately in the summary):
+Note: the `job_termination` category covers the modular job termination feature (`JOB_TERM_CB`) and the three optional helper libraries implementing job termination via three different mechanisms: cgroup (`job-term-cgroup.sh`), `/proc` children-walk (`job-term-children.sh`), and `/proc` PPID-walk (`job-term-ppid.sh`). Each mechanism's tests are gated on that mechanism being usable in the current environment, and report SKIP otherwise (counted separately in the summary):
 
 - cgroup tests require root or a delegated cgroup v2 subtree - e.g. run the suite via `systemd-run --user --scope sh ./tests.sh run job_termination`.
 - children-walk tests require a kernel built with `CONFIG_PROC_CHILDREN` (which exposes `/proc/<pid>/task/<tid>/children`).

@@ -410,7 +410,7 @@ The scheduler is configured entirely through environment variables. Required var
 | SCHED_JOB_TIMEOUT_S       |          |  unset  | Default per-job timeout in seconds ( integer >= 1 ); override per job via `job_set_timeout()`. See [TIMEKEEPING.md](TIMEKEEPING.md#per-job-timeouts). |
 | SCHED_DIR                 |          |  `/tmp` | Directory under which the scheduler creates a unique per-run subdirectory holding its job-communication FIFO; multiple scheduler instances can safely share one `SCHED_DIR`. Trailing `/` characters are ignored. |
 | SCHED_AUTO_PARAMS         |          |  unset  | Whether to export job-specific params when initializing each job ( 1 to enable, any other value to disable ).                    |
-| SCHED_CGROUP_BASE         |          |  unset  | Read by the `scheduler-job-term-cgroup.sh` library, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
+| SCHED_CGROUP_BASE         |          |  unset  | Read by the `job-term-cgroup.sh` library, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
 
 Notes:
 
@@ -466,7 +466,7 @@ For simple use cases with relatively few well-behaved jobs, it doesn't really ma
 - If you want to include only one library and you only care about **which one fits and works best** on the target system and not **why**, use `sched_job_term_select` for testing, then include only the relevant library which implements the callback it selected.
 - If spawning many jobs, strongly prefer the cgroups-based library because it is much more efficient.
 - If spawning jobs which are prone to misbehavior, hanging or leaving orphaned processes behind, prefer the cgroups-based library because it allows for more deterministic process termination.
-- If the target system doesn't support the `cgroup`-based mechanism, use a `/proc`-based library: `scheduler-job-term-ppid.sh` needs only `/proc` and `awk` and works essentially anywhere; `scheduler-job-term-children.sh` is a more efficient variant, available where the kernel provides `CONFIG_PROC_CHILDREN`.
+- If the target system doesn't support the `cgroup`-based mechanism, use a `/proc`-based library: `job-term-ppid.sh` needs only `/proc` and `awk` and works essentially anywhere; `job-term-children.sh` is a more efficient variant, available where the kernel provides `CONFIG_PROC_CHILDREN`.
 
 ## Job termination callback (details)
 
@@ -502,19 +502,19 @@ The project includes three helper libraries, each one implementing the **job ter
 
 ### Short version
 
-#### Helper library: `scheduler-job-term-ppid.sh` (`/proc` PPID-walk)
+#### Helper library: `job-term-ppid.sh` (`/proc` PPID-walk)
 
 Reconstructs each job's process tree by walking PPID links in `/proc/<pid>/stat`, freezes it with `SIGSTOP` (re-scanning to catch races), then delivers `SIGKILL`. Needs only `/proc` and `awk` - no cgroups, no root - which makes it the universal fallback that works on essentially any Linux. It cannot find processes reparented to init, and does not verify process termination, so `<running_pids>` reported to the **scheduler completion callback** may list job PIDs whose trees are already gone.
 
 Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_ppid`; call `proc_ppid_supported` first to probe availability.
 
-#### Helper library: `scheduler-job-term-children.sh` (`/proc` children-walk)
+#### Helper library: `job-term-children.sh` (`/proc` children-walk)
 
 Same mechanism, guarantees, and limitations as the PPID-walk library, but discovers each job's descendants from the kernel's `/proc/<pid>/task/<tid>/children` files instead of PPID links. Those files require a kernel built with `CONFIG_PROC_CHILDREN`; where present they make discovery more efficient, so prefer this library over the PPID-walk one there.
 
 Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_children`; call `proc_children_supported` first to probe availability.
 
-#### Helper library: `scheduler-job-term-cgroup.sh`
+#### Helper library: `job-term-cgroup.sh`
 
 When spawning jobs, puts each job in its own **cgroup v2**. When terminating jobs, kills the whole process tree - including orphaned grandchildren - via the kernel's `cgroup.kill`. Process kills are kernel-verified, so under normal operation `<running_pids>` reported to the **scheduler completion callback** is empty even after timeouts or an early exit. Requires cgroup v2 with `cgroup.kill` (kernel >= 5.14) and write access to a cgroup - available when running as root, when started by the systemd user manager, or in a container with a writable cgroup mount.
 
@@ -530,9 +530,9 @@ The scheduler core provides `sched_job_term_select`, which picks the best mechan
 
 ```sh
 . ./scheduler.sh
-. ./scheduler-job-term-ppid.sh
-. ./scheduler-job-term-children.sh
-. ./scheduler-job-term-cgroup.sh
+. ./job-term-ppid.sh
+. ./job-term-children.sh
+. ./job-term-cgroup.sh
 
 sched_job_term_select JOB_TERM_CB   # cgroup, else children, else ppid
 schedule_jobs "${IDS}" &

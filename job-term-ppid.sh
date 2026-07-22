@@ -1,10 +1,10 @@
 #!/bin/sh
 # shellcheck disable=SC3043,SC3045,SC3003
 
-# scheduler-job-term-ppid.sh - /proc PPID-walk job termination library for scheduler.sh
+# job-term-ppid.sh - /proc PPID-walk job termination library for scheduler.sh
 #
 # Kills the process tree of each job by walking PPID links from /proc/*/stat.
-# Unlike scheduler-job-term-children.sh (which reads /proc/<pid>/task/<tid>/children and so needs a
+# Unlike job-term-children.sh (which reads /proc/<pid>/task/<tid>/children and so needs a
 #   kernel built with CONFIG_PROC_CHILDREN), this mechanism needs only /proc/<pid>/stat and awk -
 #   available on essentially any Linux.
 #

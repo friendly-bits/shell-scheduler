@@ -22,7 +22,7 @@
 # Env overrides:
 #   CGTEST_LOG    log file (default: /tmp/sched-cgtest.log)
 #   SCHEDULER_SH  path to scheduler.sh (default: next to this script); must
-#                 contain a '/', and scheduler-job-term-cgroup.sh must sit next to it
+#                 contain a '/', and job-term-cgroup.sh must sit next to it
 
 LOG="${CGTEST_LOG:-/tmp/sched-cgtest.log}"
 exec >> "${LOG}" 2>&1
@@ -39,8 +39,8 @@ fail() {
 
 SCHED_LIB="${SCHEDULER_SH:-${0%/*}/scheduler.sh}"
 . "${SCHED_LIB}" &&
-. "${SCHED_LIB%/*}/scheduler-job-term-cgroup.sh" || {
-	log "RESULT: FAIL - cannot source scheduler.sh / scheduler-job-term-cgroup.sh"
+. "${SCHED_LIB%/*}/job-term-cgroup.sh" || {
+	log "RESULT: FAIL - cannot source scheduler.sh / job-term-cgroup.sh"
 	exit 1
 }
 

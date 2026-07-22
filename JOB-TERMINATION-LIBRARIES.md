@@ -10,9 +10,9 @@ This document explains, in depth, the three callback implementations bundled wit
 
 - [Implementations comparison](#implementations-comparison)
 - [Job termination callback subcommands](#job-termination-callback-subcommands)
-- [PPID-walk library](#ppid-walk-library-scheduler-job-term-ppidsh)
-- [Children-walk library](#children-walk-library-scheduler-job-term-childrensh)
-- [cgroup v2 library](#cgroup-v2-library-scheduler-job-term-cgroupsh)
+- [PPID-walk library](#ppid-walk-library-job-term-ppidsh)
+- [Children-walk library](#children-walk-library-job-term-childrensh)
+- [cgroup v2 library](#cgroup-v2-library-job-term-cgroupsh)
 - [Selecting job termination mechanism at runtime](#selecting-job-termination-mechanism-at-runtime)
 
 ## Implementations comparison
@@ -53,7 +53,7 @@ The below table shows the **action** taken by the helper libraries in response t
 | `term`     | Discover, kill job's processes | Kill specified job's process tree                    |
 | `cleanup`  | None                           | Kill all remaining job process trees; remove cgroups |
 
-## PPID-walk library (scheduler-job-term-ppid.sh)
+## PPID-walk library (job-term-ppid.sh)
 
 Kills each job's process tree by reconstructing it from the kernel's `/proc` data. Only `/proc` and `awk` are required, which makes it the universal fallback - it works on essentially any Linux.
 
@@ -87,9 +87,9 @@ Given a set of **seed** PIDs (the job wrapper PIDs handed to `term`), the librar
 
 The helper `proc_ppid_supported`, defined by this library, returns `0` if `awk` is available and `/proc/<pid>/stat` is readable, and `1` otherwise. It emits no messages.
 
-## Children-walk library (scheduler-job-term-children.sh)
+## Children-walk library (job-term-children.sh)
 
-Identical to the [PPID-walk library](#ppid-walk-library-scheduler-job-term-ppidsh) - the same three-phase discover/freeze/kill mechanism, the same subcommand behavior, and the same guarantees and limitations - except in the discovery step: it reads each process's `/proc/<pid>/task/<tid>/children` files (iterating over *all* threads, so children forked by a non-leader thread are still found) instead of scanning parent-PID fields. Those `children` files exist only on a kernel built with `CONFIG_PROC_CHILDREN`, which is absent on some stripped kernels (e.g. typical OpenWrt builds). Reading the per-process `children` lists is more efficient than scanning every `/proc/<pid>/stat`, so prefer this mechanism over PPID-walk where the kernel option is present.
+Identical to the [PPID-walk library](#ppid-walk-library-job-term-ppidsh) - the same three-phase discover/freeze/kill mechanism, the same subcommand behavior, and the same guarantees and limitations - except in the discovery step: it reads each process's `/proc/<pid>/task/<tid>/children` files (iterating over *all* threads, so children forked by a non-leader thread are still found) instead of scanning parent-PID fields. Those `children` files exist only on a kernel built with `CONFIG_PROC_CHILDREN`, which is absent on some stripped kernels (e.g. typical OpenWrt builds). Reading the per-process `children` lists is more efficient than scanning every `/proc/<pid>/stat`, so prefer this mechanism over PPID-walk where the kernel option is present.
 
 Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_children`.
 
@@ -97,7 +97,7 @@ Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_ter
 
 The helper `proc_children_supported`, defined by this library, returns `0` if the mechanism can work here - `awk` is available and the kernel exposes the `/proc/<pid>/task/<tid>/children` files - and `1` otherwise. It emits no messages.
 
-## cgroup v2 library (scheduler-job-term-cgroup.sh)
+## cgroup v2 library (job-term-cgroup.sh)
 
 This is the most efficient job termination mechanism but it comes with extra dependencies.
 
@@ -133,7 +133,7 @@ Validated by the `init` subcommand, which fails the run upfront when unmet:
 
 ### When the scheduler can manage cgroups
 
-The mechanism is usable in each of the situations below, none of which needs any pre-configuration. If none of them fits your environment - or arranging one is inconvenient - use a `/proc`-based library instead: `scheduler-job-term-ppid.sh` (needs only `/proc` and `awk`) works anywhere, or the more efficient `scheduler-job-term-children.sh` where the kernel provides `CONFIG_PROC_CHILDREN`. `sched_job_term_select` can automatically pick among available job termination mechanisms from whichever libraries you sourced.
+The mechanism is usable in each of the situations below, none of which needs any pre-configuration. If none of them fits your environment - or arranging one is inconvenient - use a `/proc`-based library instead: `job-term-ppid.sh` (needs only `/proc` and `awk`) works anywhere, or the more efficient `job-term-children.sh` where the kernel provides `CONFIG_PROC_CHILDREN`. `sched_job_term_select` can automatically pick among available job termination mechanisms from whichever libraries you sourced.
 
 - **Running as root**: works everywhere (provided the kernel supports cgroup v2 and `cgroup.kill`): in a root shell, in a system service, in a system cron job, or on an OpenWrt device (23.05 and later ships the required kernel; cgroup support is enabled in default builds except `SMALL_FLASH` targets).
 - **Unprivileged, started by systemd's per-user manager**: root is not needed when the scheduler is launched *by* the systemd **user** manager - either as a systemd user service, or wrapped in `systemd-run --user --scope <cmd>`. Running it straight from an ordinary shell (interactive or SSH login) or a cron job does **not** qualify, even though you own them; prefix such commands with `systemd-run --user --scope`.
@@ -162,9 +162,9 @@ The scheduler core provides `sched_job_term_select`, which picks the best mechan
 
 ```sh
 . ./scheduler.sh
-. ./scheduler-job-term-ppid.sh
-. ./scheduler-job-term-children.sh
-. ./scheduler-job-term-cgroup.sh
+. ./job-term-ppid.sh
+. ./job-term-children.sh
+. ./job-term-cgroup.sh
 
 sched_job_term_select JOB_TERM_CB   # cgroup, else children, else ppid
 schedule_jobs "${IDS}" &
