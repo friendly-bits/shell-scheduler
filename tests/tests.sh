@@ -10,11 +10,37 @@
 # 'run <category>' - run all tests in the given category
 # 'run <category> <space_separated_list_of_numbers>' - e.g. 'run params 1 3 5'
 # 'run <category> <test_num_start>-<test_num_end>' - run tests in a range, e.g. 'run scheduler_termination 3-6'
-# Categories: dispatch, core, scheduler_termination, config, params, misc, outcome, timeout, job_termination, security
+# Categories: dispatch, core, scheduler_termination, config, config_full, config_mini, params, misc, outcome, timeout, job_termination, job_termination_full, job_termination_mini, security
+#
+# Variant selection (env var SCHEDULER_VARIANT): 'full' (default, scheduler.sh) or
+#   'mini' (scheduler-mini.sh). The *_full / *_mini categories hold tests specific
+#   to one variant and SKIP under the other; the plain categories run against both.
 
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 
-. "${script_dir}/../scheduler.sh"
+# Select scheduler variant: full (scheduler.sh) or mini (scheduler-mini.sh)
+SCHEDULER_VARIANT="${SCHEDULER_VARIANT:-full}"
+case "${SCHEDULER_VARIANT}" in
+	full) SCHEDULER_LIB=scheduler.sh; SCHED_IS_MINI= ;;
+	mini) SCHEDULER_LIB=scheduler-mini.sh; SCHED_IS_MINI=1 ;;
+	*) printf '%s\n' "Unknown SCHEDULER_VARIANT '${SCHEDULER_VARIANT}' (want 'full' or 'mini')." >&2; exit 1 ;;
+esac
+
+. "${script_dir}/../${SCHEDULER_LIB}"
+
+# The full variant uses the standalone job-termination libraries; the mini
+#   variant has its own built-in mechanism (sched_job_term_mini).
+if [ -z "${SCHED_IS_MINI}" ]; then
+	. "${script_dir}/../job-term-cgroup.sh"
+	. "${script_dir}/../job-term-children.sh"
+	. "${script_dir}/../job-term-ppid.sh"
+	SCHED_TERM_CB_DEFAULT=sched_job_term_ppid
+	term_default_capable() { proc_ppid_supported; }
+else
+	SCHED_TERM_CB_DEFAULT=sched_job_term_mini
+	term_default_capable() { sch_is_cmd "${SCHED_AWK_CMD:-awk}" && [ -r /proc/self/stat ]; }
+fi
+TERM_DEFAULT_SKIP_REASON="default termination mechanism unsupported here - /proc or awk unavailable"
 
 
 #
@@ -29,11 +55,18 @@ FAIL() {
 	printf '%s\n' "Result: ${FAIL}${1:+" ("}${1}${1:+")"}"
 }
 
-# For environment-gated tests: report a skip (counted separately in the
-# summary) and have the test return 0 right after
+# For environment-gated tests: print a skip result line. The test must then
+# 'return 2', which the run loop counts as a skip (separately in the summary).
 SKIP() {
-	TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
 	printf '%s\n' "Result: ${SKIP_C}${1:+" ("}${1}${1:+")"}"
+}
+
+# Skip a test that only applies to the other variant: prints a skip line and
+# returns non-zero so the caller can 'return 2' (counted as a skip).
+# Usage: require_variant full|mini || return 2
+require_variant() {
+	[ "${SCHEDULER_VARIANT}" = "${1}" ] ||
+		{ SKIP "needs '${1}' variant (running '${SCHEDULER_VARIANT}')"; return 1; }
 }
 
 is_uint() {
@@ -60,7 +93,7 @@ set_ansi() {
 }
 
 print_test_header() {
-	printf '\n%s\n' "== ${purple}${1%_*}:${1##*_}: ${2}${n_c} =="
+	printf '\n%s\n' "${MATRIX_ID:+"[${yellow}${MATRIX_ID}${n_c}] "}== ${purple}${1%_*}:${1##*_}: ${2}${n_c} =="
 	printf 'Running jobs: %s\n' "${blue}${3}${n_c}"
 }
 
@@ -237,14 +270,18 @@ run_generic_test() {
 . "${script_dir}/tests-outcome.sh"
 . "${script_dir}/tests-timeout.sh"
 . "${script_dir}/tests-job_termination.sh"
+. "${script_dir}/tests-job_termination_full.sh"
+. "${script_dir}/tests-job_termination_mini.sh"
 . "${script_dir}/tests-security.sh"
+. "${script_dir}/tests-config_full.sh"
+. "${script_dir}/tests-config_mini.sh"
 
 
 #
 # Category registry
 #
 
-TEST_CATEGORIES="dispatch core scheduler_termination config params misc outcome timeout job_termination security"
+TEST_CATEGORIES="dispatch core scheduler_termination config config_full config_mini params misc outcome timeout job_termination job_termination_full job_termination_mini security"
 
 is_valid_cat() {
 	case " ${TEST_CATEGORIES} " in
@@ -358,10 +395,7 @@ case "${1}" in
 		printf '%s\n' "Unexpected argument '${1}'." >&2; exit 1
 esac
 
-
 if [ -n "${RUN_TESTS}" ]; then
-	printf '%s\n' "Scheduler tests${RUN_CAT:+ (${RUN_CAT})}"
-
 	TESTS_RUN=0
 	TESTS_PASSED=0
 	TESTS_SKIPPED=0
@@ -371,14 +405,23 @@ if [ -n "${RUN_TESTS}" ]; then
 		TEST_CAT="${RUN_TEST#test_}"
 		TEST_CAT="${TEST_CAT%_*}"
 
-		if "${RUN_TEST}"
-		then
-			TESTS_PASSED=$((TESTS_PASSED + 1))
-		fi
+		"${RUN_TEST}"
+		test_rv=${?}
+		case "${test_rv}" in
+			0) TESTS_PASSED=$((TESTS_PASSED + 1)) ;;
+			1) ;;
+			2) TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
+		esac
+
+		# Under test-matrix.sh, emit a delimiter after each test so the matrix
+		#   drainer can print each test's block contiguously (${TEST_BLOCK_END}
+		#   is supplied via the environment).
+		[ -z "${MATRIX_ID}" ] || printf '%s\n' "${TEST_BLOCK_END}"
 	done
 
-	printf '\n%s\n' "== ${purple}Summary${n_c} =="
+	printf '\n%s\n' "${MATRIX_ID:+"[${yellow}${MATRIX_ID}${n_c}] "}== ${purple}Summary${n_c} =="
 	printf 'Ran: %s, Passed: %s, Skipped: %s, Failed: %s\n' \
-		"${TESTS_RUN}" "$((TESTS_PASSED - TESTS_SKIPPED))" "${TESTS_SKIPPED}" "$((TESTS_RUN - TESTS_PASSED))"
+		"${TESTS_RUN}" "${TESTS_PASSED}" "${TESTS_SKIPPED}" "$((TESTS_RUN - TESTS_PASSED - TESTS_SKIPPED))"
 fi
 
+[ "$((TESTS_RUN - TESTS_PASSED - TESTS_SKIPPED))" -eq 0 ]

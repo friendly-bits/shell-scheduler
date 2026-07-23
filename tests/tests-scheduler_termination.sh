@@ -321,6 +321,9 @@ test_scheduler_termination_07() {
 				)
 				;;
 			INT)
+				[ -t 0 ] ||
+				{ printf '%s\n' "SIG${sig}: ${SKIP_C} (output is not routed to TTY)"; continue; }
+
 				# Send INT signal to foreground scheduler process
 				(
 					local pid killer_pid
@@ -464,6 +467,8 @@ test_scheduler_termination_09() {
 				)
 				;;
 			INT)
+				[ -t 0 ] ||
+					{ printf '%s\n' "SIG${sig}: ${SKIP_C} (output is not routed to TTY)"; continue; }
 				# Send INT signal to foreground scheduler process
 				(
 					local pid killer_pid
