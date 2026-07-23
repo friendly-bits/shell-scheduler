@@ -32,23 +32,6 @@ sch_append() {
 	eval "${1}=\"\${${1}}\${${1}:+\" \"}\${2}\""
 }
 
-sch_rm_trailing() {
-	sch_check_name "var" "${1}" || return 1
-	eval "${1}=\"\${${1}%\"\${${1}##*[!\"\${2}\"]}\"}\""
-}
-
-sch_rm_leading() {
-	sch_check_name "var" "${1}" || return 1
-	eval "${1}=\"\${${1}#\"\${${1}%%[!\"\${2}\"]*}\"}\""
-}
-
-sch_had_f() {
-	case "${-}" in
-		*f*) return 0 ;;
-		*) return 1
-	esac
-}
-
 # Remove first matching element
 # 1: out var
 # 2: element
@@ -75,18 +58,6 @@ sch_is_uint() {
 		esac
 	done
 	:
-}
-
-sch_is_cmd() {
-	command -v "${1}" 1>/dev/null 2>&1
-}
-
-sch_fail_msg() {
-	if [ -n "${SCHED_FAIL_MSG_CB}" ] && sch_is_cmd "${SCHED_FAIL_MSG_CB}"; then
-		"${SCHED_FAIL_MSG_CB}" "${@}"
-	else
-		printf '%s\n' "${@}" >&2
-	fi
 }
 
 # 1 - var name for centiseconds output
@@ -117,6 +88,35 @@ sch_get_uptime_cs() {
 	cs="${s:-0}${cs:-00}"
 	sch_rm_leading cs "0"
 	export -n "${1}=${cs:-0}"
+}
+
+sch_fail_msg() {
+	if [ -n "${SCHED_FAIL_MSG_CB}" ] && sch_is_cmd "${SCHED_FAIL_MSG_CB}"; then
+		"${SCHED_FAIL_MSG_CB}" "${@}"
+	else
+		printf '%s\n' "${@}" >&2
+	fi
+}
+
+sch_is_cmd() {
+	command -v "${1}" 1>/dev/null 2>&1
+}
+
+sch_had_f() {
+	case "${-}" in
+		*f*) return 0 ;;
+		*) return 1
+	esac
+}
+
+sch_rm_leading() {
+	sch_check_name "var" "${1}" || return 1
+	eval "${1}=\"\${${1}#\"\${${1}%%[!\"\${2}\"]*}\"}\""
+}
+
+sch_rm_trailing() {
+	sch_check_name "var" "${1}" || return 1
+	eval "${1}=\"\${${1}%\"\${${1}##*[!\"\${2}\"]}\"}\""
 }
 
 # Get PID of current shell process
@@ -617,8 +617,6 @@ schedule_jobs() {
 	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || exit 1
 
 	# Validate job IDs ([a-zA-Z0-9_] only), check for duplicates.
-	# set -f: not-yet-validated IDs may contain glob characters -
-	#   they must reach validation unexpanded, to be rejected verbatim
 	set -f
 	for sch_id in ${SCH_JOB_IDS}; do
 		[ -n "${SCH_HAD_F}" ] || set +f
