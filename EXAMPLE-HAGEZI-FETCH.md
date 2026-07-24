@@ -150,7 +150,7 @@ _**Note**: this example script intentionally includes an invalid download URL to
 
 ### Passing parameters to jobs
 
-As explained in the [Job parameters](REFERENCE.md#job-parameters) section of REFERENCE.md, this example sets job-specific parameters via `job_set_params`. Setting `SCHED_AUTO_PARAMS=1` makes it so these parameters are immediately available to each job as variables inside the **job execution callback** (`DO_JOB_CB`).
+As explained in the [Job parameters](REFERENCE.md#job-parameters) section of REFERENCE.md, this example sets job-specific parameters via `job_set_params`. Setting `SCHED_AUTO_PARAMS=1` makes it so these parameters are immediately available to each job as variables inside the **job execution callback** (`DO_JOB_CB`). **(This example targets the full scheduler variant; the mini variant always behaves as if `SCHED_AUTO_PARAMS` was set to `1`)**
 
 ```sh
 # Job-specific parameters are assigned in the main script

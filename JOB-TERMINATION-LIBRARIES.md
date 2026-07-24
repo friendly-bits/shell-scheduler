@@ -1,8 +1,10 @@
 # shell-scheduler: Job termination libraries
 
+**These libraries apply to the full variant (`scheduler.sh`).** The mini variant (`scheduler-mini.sh`) ships the "PPID-walk" job termination mechanism built-in and is incompatible with the separate job termination libraries; see [Variants](README.md#variants).
+
 The scheduler does not kill unfinished or expired jobs on its own. Instead it delegates that to a **job termination callback** (`JOB_TERM_CB`), invoked with the subcommands `init`, `setup`, `term`, and `cleanup` at defined points of a run.
 
-The full callback contract - when each subcommand is called, with which arguments, and how verified kills are reported back - is specified in [REFERENCE.md](REFERENCE.md#job-termination-callback-details).
+The full callback contract - when each subcommand is called, with which arguments, and how verified kills are reported back - is specified in [REFERENCE.md](REFERENCE.md#job-termination-callback---full).
 
 This document explains, in depth, the three callback implementations bundled with the project. For a short overview and the one-line "how do I switch it on" usage, see [REFERENCE.md](REFERENCE.md#job-termination-helper-libraries); if you are just getting started, read the [README](README.md) first.
 

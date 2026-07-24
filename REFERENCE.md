@@ -11,8 +11,9 @@ Complete technical reference for the `shell-scheduler` library. If you're just g
 - [Return codes](#return-codes)
 - [Timeouts](#timeouts)
 - [Signal handling](#signal-handling)
-- [Termination of running jobs](#termination-of-running-jobs)
-- [Job termination callback (details)](#job-termination-callback-details)
+- [Job termination mechanisms](#job-termination-mechanisms)
+- [Job termination callback - mini](#job-termination-callback---mini)
+- [Job termination callback - full](#job-termination-callback---full)
 
 ## How to use (Scheduler API)
 
@@ -134,7 +135,7 @@ ${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_j
 - `<fail_job_ids>`: job IDs whose **job execution callback** returned a non-zero code.
 - `<undispatched_job_ids>`: job IDs that were never started at all. Under normal operation this is an empty string; it becomes non-empty when the scheduler exits before it has dispatched every job ID from the original list.
 - `<expired_job_ids>`: job IDs abandoned via a [per-job timeout](TIMEKEEPING.md#per-job-timeouts). Empty unless per-job timeouts are in use. Unlike a failed job, an expired job's process may still be running at this point - and unless your code kills it, may even complete later (with a [job termination callback](#job-termination-callback-job_term_cb) configured, the scheduler kills it at expiry time instead). The PIDs of expired jobs which the scheduler never got a completion record from (including after expiration time) will be included in the list of `<running_pids>` - except those whose kill was verified by the termination callback.
-- `<unfinished_job_ids>`: dispatched jobs whose [per-job timeout](TIMEKEEPING.md#per-job-timeouts) did not expire, but which had not yet completed when the scheduler exited early - because of a signal, a fatal error, a timeout (global or idle), or a non-zero return code from `JOB_DONE_CB`. Under normal operation this is an empty string. Note that the scheduler exiting does not by itself terminate these jobs' processes - see [Termination of running jobs](#termination-of-running-jobs).
+- `<unfinished_job_ids>`: dispatched jobs whose [per-job timeout](TIMEKEEPING.md#per-job-timeouts) did not expire, but which had not yet completed when the scheduler exited early - because of a signal, a fatal error, a timeout (global or idle), or a non-zero return code from `JOB_DONE_CB`. Under normal operation this is an empty string. Note that the scheduler exiting does not by itself terminate these jobs' processes - see [Job termination mechanisms](#job-termination-mechanisms).
 
 (all above lists are space-separated)
 
@@ -142,7 +143,7 @@ If this callback returns a non-zero code while `<scheduler_return_code>` is `0`,
 
 **Notes**:
 - every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of `<ok_job_ids>`, `<fail_job_ids>`, `<unfinished_job_ids>`, `<undispatched_job_ids>`, `<expired_job_ids>`. This makes them a convenient basis for final bookkeeping, logging, or cleanup in the **scheduler completion callback**, without having to separately track job status yourself.
-- The scheduler does not terminate expired and unfinished jobs on its own. See [Termination of running jobs](#termination-of-running-jobs).
+- The scheduler does not terminate expired and unfinished jobs on its own. See [Job termination callback](#job-termination-callback-job_term_cb).
 - If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" job IDs.
 
 <details>
@@ -211,7 +212,17 @@ Since all five jobs run to completion in this example, `<unfinished_job_ids>`, `
 
 ### Job termination callback (`JOB_TERM_CB`)
 
-This callback exists to support implementing scheduler-assisted termination of **expired** and **unfinished** jobs. Details in [Job termination callback (details)](#job-termination-callback-details).
+The scheduler can facilitate termination of **unfinished** and **expired** jobs via the **job termination callback** interface. This allows termination of any descendants (children, grandchildren etc) of processes spawned by the jobs.
+
+This callback, as all shell-scheduler callbacks, must be implemented as a shell function.
+
+The scheduler invokes this callback - `JOB_TERM_CB` - like so:
+
+```
+${JOB_TERM_CB} <subcommand> [arguments]
+```
+
+Additional details in [Job termination callback - mini](#job-termination-callback---mini) and [Job termination callback - full](#job-termination-callback---full).
 
 ### Scheduler error reporting callback (optional)
 
@@ -322,6 +333,8 @@ Without the `jobs_init` call, `job1` would still carry the `url` from the first 
 
 ### Automatic parameters (`SCHED_AUTO_PARAMS`)
 
+**(full variant only** - the mini variant always delivers registered params to jobs and ignores `SCHED_AUTO_PARAMS`.**)**
+
 If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job and any external commands it calls. Note that when using automatic parameters, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
 
 <details>
@@ -403,14 +416,14 @@ The scheduler is configured entirely through environment variables. Required var
 | JOB_DONE_CB               |          |  unset  | Command implementing the job completion callback.                                                                                |
 | SCHED_FINALIZE_CB         |          |  unset  | Command implementing the scheduler completion callback.                                                                          |
 | SCHED_FAIL_MSG_CB         |          |  unset  | Command implementing the scheduler error reporting callback.                                                                     |
-| JOB_TERM_CB               |          |  unset  | Command implementing the job termination callback. See [Termination of running jobs](#termination-of-running-jobs).        |
+| JOB_TERM_CB               |          |  unset  | Command implementing the job termination callback. See [Job termination callback](#job-termination-callback-job_term_cb).        |
 | SCHED_MAX_JOBS            |     *    |    -    | Concurrency limit ( integer >= 1 ).                                                                                              |
 | SCHED_TIMEOUT_S           |          |  `900`  | Global scheduler timeout in seconds ( integer >= 1 ).                                                                            |
 | SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job starts or completions ( integer >= 1 ).                                        |
 | SCHED_JOB_TIMEOUT_S       |          |  unset  | Default per-job timeout in seconds ( integer >= 1 ); override per job via `job_set_timeout()`. See [TIMEKEEPING.md](TIMEKEEPING.md#per-job-timeouts). |
 | SCHED_DIR                 |          |  `/tmp` | Directory under which the scheduler creates a unique per-run subdirectory holding its job-communication FIFO; multiple scheduler instances can safely share one `SCHED_DIR`. Trailing `/` characters are ignored. |
-| SCHED_AUTO_PARAMS         |          |  unset  | Whether to export job-specific params when initializing each job ( 1 to enable, any other value to disable ).                    |
-| SCHED_CGROUP_BASE         |          |  unset  | Read by the `job-term-cgroup.sh` library, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
+| SCHED_AUTO_PARAMS         |          |  unset  | **(full variant only)** Whether to export job-specific params when initializing each job ( 1 to enable, any other value to disable ). The mini variant always delivers registered params and ignores this. |
+| SCHED_CGROUP_BASE         |          |  unset  | **(full variant only)** Read by the `job-term-cgroup.sh` library, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
 
 Notes:
 
@@ -450,13 +463,11 @@ Time measurement, timeout mechanisms, and reliable delays in callbacks are docum
 
 The scheduler installs handlers for signals `USR1`, `INT`, `TERM`. When any of these signals is received, the scheduler stops processing, performs its internal cleanup, invokes the **scheduler completion callback** (if defined), and exits with return code `83` (for `USR1`) or `84` (for `INT` or `TERM`).
 
-## Termination of running jobs
+## Job termination mechanisms
 
 By default, the scheduler does not terminate running jobs by itself, including when a timeout is reached or when `USR1` is received.
 
 If your application needs to stop timed-out and unfinished jobs, you can either configure the **job termination callback** or implement custom job termination in the **scheduler completion callback** using the list of unfinished job PIDs (`<running_pids>`) passed to it.
-
-The projects implements three job termination mechanisms, each in a separate helper library, discussed below.
 
 ### TL;DR
 
@@ -468,19 +479,14 @@ For simple use cases with relatively few well-behaved jobs, it doesn't really ma
 - If spawning jobs which are prone to misbehavior, hanging or leaving orphaned processes behind, prefer the cgroups-based library because it allows for more deterministic process termination.
 - If the target system doesn't support the `cgroup`-based mechanism, use a `/proc`-based library: `job-term-ppid.sh` needs only `/proc` and `awk` and works essentially anywhere; `job-term-children.sh` is a more efficient variant, available where the kernel provides `CONFIG_PROC_CHILDREN`.
 
-## Job termination callback (details)
+## Job termination callback - mini
+The **mini scheduler variant** comes with the PPID-walk job termination mechanism built-in and **does not** implement the subcommand interface implemented by the full variant, so the helper libraries discussed below are not supported by the mini variant.
 
-The scheduler can facilitate termination of unfinished and expired jobs via the **job termination callback** interface. This allows termination of any descendants (children, grandchildren etc) of processes spawned by the jobs.
+To enable automatic job termination, set `JOB_TERM_CB=sched_job_term_mini`.
 
-This callback, as all shell-scheduler callbacks, must be implemented as a shell function.
+## Job termination callback - full
 
-The scheduler invokes this callback - `JOB_TERM_CB` - like so:
-
-```
-${JOB_TERM_CB} <subcommand> [arguments]
-```
-
-A specific **subcommand** is used at each invocation point:
+The **full scheduler variant** invokes this callback at several points, with one of the **subcommands** listed below:
 
 | When (invocation point)                                                | Purpose                                 | Subcommand |Arguments                            |
 | -----------------------------------------------------------------------| --------------------------------------  | ---------- |---------------------                |
@@ -497,6 +503,8 @@ The PIDs passed to `term` are job wrapper PIDs (the same PIDs reported in `<runn
 **`term` and `cleanup` may report verified job terminations via the output variable**: `<verified_kills_out_var>` is the name of a variable the callback may assign a whitespace-separated job PID list to - `export -n "${verified_kills_out_var}=<pids>"` - following the same indirection convention as the library's own helpers. A reported job PID asserts that the job's entire process tree has been killed; the scheduler then excludes it from the `<running_pids>` passed to the **scheduler completion callback**.
 
 ## Job termination helper libraries
+
+**(full variant only** - the mini variant has an equivalent mechanism built in and does not use these libraries.**)**
 
 The project includes three helper libraries, each one implementing the **job termination callback** (`JOB_TERM_CB`) differently.
 

@@ -79,7 +79,7 @@ Timeout value must be integer >= 1. A per-job timeout may exceed `${SCHED_TIMEOU
 4. **Completion record arrival wins over expiry.** On each scheduler wake-up, a received completion record is processed before deadlines are checked.
 5. **Job expiries do not count as progress.** The idle timeout is reset when the scheduler starts a job or processes a genuine completion record - never when it processes an expiry.
 6. **Late completion records are discarded.** If an abandoned job's completion record arrives after its expiry was processed, the record is silently dropped; the job's classification (timed out, code `124`) stands. The job's PID is removed from the list of `<running_pids>`.
-7. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler completion callback** - not in `<fail_job_ids>`, which is reserved for jobs that exited with a non-zero code. Abandoned jobs whose process never reported back before scheduler exit have their PIDs included in `<running_pids>`; abandoned jobs whose late record was discarded do not, and neither do jobs whose kill was verified by the [job termination callback](REFERENCE.md#job-termination-callback-details).
+7. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler completion callback** - not in `<fail_job_ids>`. Abandoned jobs whose process never reported back before scheduler exit have their PIDs included in `<running_pids>`; abandoned jobs whose late record was discarded do not, and neither do jobs whose kill was verified by the [job termination callback](REFERENCE.md#job-termination-callback---full).
 
 ### Implementation notes (internal)
 

@@ -30,6 +30,16 @@ This library is designed to solve the following problems:
 - **Bash or BusyBox ash**. Other shells are not supported. Could be conceivably ported to POSIX-compliant code.
 - The utilities `mkfifo`, `mkdir`, and `rm`. No other binary utilities are used by the library.
 
+## Variants
+
+shell-scheduler comes in two variants: full (`scheduler.sh`) and mini (`scheduler-mini.sh`). The differences are listed below:
+
+- **Job termination**: the full variant delegates to pluggable helper libraries (cgroup, `/proc` children-walk, `/proc` PPID-walk); the mini variant comes with the `/proc` PPID-walk job termination mechanism built in, and removes code supporting the cgroup mechanism, as well as automatic job termination mechanism selector.
+- **Per-job parameters**: the full variant exports registered params to jobs only when you opt in with `SCHED_AUTO_PARAMS=1`; the mini variant always exports them.
+- **Code comments**: the mini version removes a lot of them to reduce the size.
+
+Everything else is identical (callbacks, timeouts, per-job parameters and helpers) is identical. Pick mini if file size is important and the PPID-walk job termination mechanism is sufficient for your application; or if you prefer a single file. Pick full when you want to have all three job termination mechanisms available or gate parameter delivery to jobs.
+
 ## Quick start
 
 A minimal setup needs to source the library, write one callback that does the work for a single job, set two variables, and call `schedule_jobs()` with a list of job IDs:
@@ -213,7 +223,7 @@ The above information, along with the below example, should be enough for most b
 - **[Return codes](REFERENCE.md#return-codes)**
 - **[Timeouts](REFERENCE.md#timeouts)**
 - **[Signal handling](REFERENCE.md#signal-handling)**
-- **[Termination of running jobs](REFERENCE.md#termination-of-running-jobs)**
+- **[Job termination mechanisms](REFERENCE.md#job-termination-mechanisms)**
 
 Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The three optional job termination helper libraries are documented in **[JOB-TERMINATION-LIBRARIES.md](JOB-TERMINATION-LIBRARIES.md)**.
 
