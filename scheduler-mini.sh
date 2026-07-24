@@ -1,5 +1,5 @@
 #!/bin/sh
-# shellcheck disable=SC3043,SC3045,SC3003
+# shellcheck disable=SC3043,SC3045,SC3003,SC2086
 
 ### Helpers
 
@@ -153,7 +153,6 @@ sch_finalize() {
 
 	if [ -n "${SCH_HAD_F}" ]; then set -f; else set +f; fi
 
-	# shellcheck disable=SC2086
 	[ -n "${JOB_TERM_CB}" ] &&
 	[ -n "${SCH_RUNNING_PIDS}" ] &&
 		sch_term_run ${SCH_RUNNING_PIDS}
@@ -259,8 +258,6 @@ process_done_record() {
 		IFS= read -t "${sch_read_t_s}" -r sch_rec < "${sch_ipc_fifo}" ||
 		[ -z "${sch_rec}" ] ||
 		{
-			# Non-zero code means read -t timeout mid-line,
-			#   so partial line consumed and remainder is buffered in the FIFO
 			# Finish reading
 			IFS= read -t 1 -r sch_rec_tail < "${sch_ipc_fifo}"
 			sch_rec="${sch_rec}${sch_rec_tail}"
@@ -268,7 +265,6 @@ process_done_record() {
 	}
 
 	# Re-split the completion record
-	# Empty record unambiguously means read -t timeout
 	[ -n "${sch_rec}" ] && {
 		set -f
 		set -- ${sch_rec}
@@ -281,7 +277,6 @@ process_done_record() {
 	}
 
 	# Process the completion record if any
-	# Arrival wins over expiry: the record is handled before deadlines are swept
 	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] && {
 		[ -z "${sch_rec_garbage}" ] &&
 		sch_is_uint "${sch_done_pid}" "${sch_done_rv}" &&
@@ -310,9 +305,7 @@ process_done_record() {
 			"${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
 				sch_finalize ${?}
 		else
-			# Unknown PID: either
-			# - late record from a timed out job
-			# - or fatal protocol error
+			# Unknown PID
 			sch_rec_verdict=malformed
 			set -f
 			for sch_e in ${SCH_EXPIRED}; do
@@ -329,8 +322,7 @@ process_done_record() {
 		fi
 	}
 
-	# Sweep expired deadlines:
-	#   classifies jobs whose deadline has expired as timed out (rv 124) and reclaims their concurrency slots.
+	# Sweep expired deadlines
 	[ -n "${SCH_DEADLINES}" ] && {
 		sch_get_uptime_cs sch_now_cs || sch_finalize 1
 
@@ -348,7 +340,6 @@ process_done_record() {
 			fi
 		done
 
-		# ${sch_expired} is glob-safe
 		for sch_e in ${sch_expired}; do
 			[ -n "${sch_had_f}" ] || set +f
 			sch_pid="${sch_e%%:*}"
@@ -371,8 +362,7 @@ process_done_record() {
 		[ -n "${sch_had_f}" ] || set +f
 	}
 
-	# Recompute remaining time from a fresh clock reading
-	# If scheduler timeout is due, refresh_remain_time() calls sch_finalize()
+	# Recompute remaining time, finalize if timeout
 	refresh_remain_time
 
 	return 0
@@ -486,9 +476,7 @@ sched_job_term_mini() {
 	done
 	[ -n "${sjt_seeds}" ] || return 0
 
-	# Freeze, re-scan to fixpoint, then kill:
-	#   each STOP pass pins down what the previous scan saw,
-	#   while the next scan catches anything forked in between
+	# Freeze, re-scan to fixpoint, kill
 	sjt_all="${sjt_seeds}"
 	sjt_prev=
 
@@ -496,7 +484,6 @@ sched_job_term_mini() {
 	set -f
 
 	for sjt_try in 1 2 3; do
-		# shellcheck disable=SC2086
 		kill -STOP ${sjt_all} 2>/dev/null
 		sjt_found="$(sch_get_descendants_mini "${sjt_all}")" || {
 			sch_fail_msg "${me}: /proc scan failed."
@@ -508,7 +495,6 @@ sched_job_term_mini() {
 		sjt_prev="${sjt_all}"
 	done
 
-	# shellcheck disable=SC2086
 	kill -KILL ${sjt_all} 2>/dev/null
 
 	[ -n "${sjt_had_f}" ] || set +f
@@ -531,7 +517,7 @@ schedule_jobs() {
 		sch_is_cmd "${val}" || { sch_fail_msg "Invalid value of ${1} '${val}'."; return 1; }
 	}
 
-	# Convert any mix of spaces/tabs/newlines to single-space separators
+	# Normalize delimiters to single-space
 	sch_normalize_ids() {
 		local \
 			IFS=" "$'\t'$'\n' \
@@ -626,7 +612,7 @@ schedule_jobs() {
 	# Convert ${SCH_JOB_IDS} to space-separated list
 	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || exit 1
 
-	# Validate job IDs ([a-zA-Z0-9_] only), check for duplicates.
+	# Validate job IDs, check duplicates
 	set -f
 	for sch_id in ${SCH_JOB_IDS}; do
 		[ -n "${SCH_HAD_F}" ] || set +f
@@ -669,7 +655,6 @@ schedule_jobs() {
 
 	# Start jobs
 
-	# ${SCH_JOB_IDS} are glob-safe here
 	for sch_id in ${SCH_JOB_IDS}; do
 		while [ "${SCH_RUNNING_JOBS_CNT}" -ge "${SCH_MAX_JOBS}" ] &&
 			[ -e "${sch_ipc_fifo}" ]
@@ -756,7 +741,7 @@ jobs_init() {
 }
 
 # 1: job ID
-# Extra args: any number of <param=value> pairs
+# Extra args: <param=value> pairs
 job_set_params() {
 	local sch_me=job_set_params \
 		sch_param \
