@@ -122,6 +122,12 @@ sch_get_cur_pid() {
 }
 
 sch_check_name() {
+	local scn_pfx=SCH_JOB_PARAMS_ scn_max_len=2020
+
+	# Limit name length, depending on type
+	[ "${1}" = var ] && scn_max_len=$((scn_max_len + ${#scn_pfx}))
+
+	[ "${#2}" -le "${scn_max_len}" ] &&
 	case "${2}" in
 		''|*[!a-zA-Z0-9_]*) false ;;
 		*) : ;;
@@ -135,7 +141,7 @@ sch_check_name() {
 	} &&
 	return 0
 
-	sch_fail_msg "${3}${3:+": "}${1}${1:+ }'${2}' is empty string or contains incompatible characters."
+	sch_fail_msg "${3}${3:+": "}${1}${1:+ }'${2}' is empty string or contains incompatible characters, or is too long."
 	return 1
 }
 
@@ -257,8 +263,11 @@ process_done_record() {
 	[ "${sch_read_t_s}" -gt 0 ] && {
 		IFS= read -t "${sch_read_t_s}" -r sch_rec < "${sch_ipc_fifo}" ||
 		[ -z "${sch_rec}" ] ||
+		[ -z "${BASH}" ] ||
 		{
-			# Finish reading
+			# Non-zero code means read -t timeout mid-line
+			# Busybox ash throws partial read away and flushes the FIFO buffer
+			# Bash assigns partial line and keeps FIFO buffer
 			IFS= read -t 1 -r sch_rec_tail < "${sch_ipc_fifo}"
 			sch_rec="${sch_rec}${sch_rec_tail}"
 		}
@@ -489,7 +498,7 @@ sched_job_term_mini() {
 			sch_fail_msg "${me}: /proc scan failed."
 			break
 		}
-		sjt_all="${sjt_seeds} ${sjt_found}"
+		sch_append sjt_all "${sjt_found}"
 		sch_rm_trailing sjt_all " "
 		[ "${sjt_all}" = "${sjt_prev}" ] && break
 		sjt_prev="${sjt_all}"
@@ -656,14 +665,14 @@ schedule_jobs() {
 	# Start jobs
 
 	for sch_id in ${SCH_JOB_IDS}; do
-		while [ "${SCH_RUNNING_JOBS_CNT}" -ge "${SCH_MAX_JOBS}" ] &&
-			[ -e "${sch_ipc_fifo}" ]
-		do
+		while [ "${SCH_RUNNING_JOBS_CNT}" -ge "${SCH_MAX_JOBS}" ]; do
+			[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
 			# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING_PIDS}; ${SCH_REMAIN_TIME_CS}; ${SCH_LAST_PROGRESS_TIME_CS}
 			process_done_record \
 				"${sch_ipc_fifo}" \
 				"${JOB_DONE_CB}"
 		done
+		[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
 		refresh_remain_time
 
 		SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT + 1))
@@ -689,9 +698,9 @@ schedule_jobs() {
 	done
 
 	# Wait for running jobs
-	while [ "${SCH_RUNNING_JOBS_CNT}" -gt 0 ] &&
-		[ -e "${sch_ipc_fifo}" ]
+	while [ "${SCH_RUNNING_JOBS_CNT}" -gt 0 ]
 	do
+		[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
 		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING_PIDS}; ${SCH_REMAIN_TIME_CS}; ${SCH_LAST_PROGRESS_TIME_CS}
 		process_done_record \
 			"${sch_ipc_fifo}" \
