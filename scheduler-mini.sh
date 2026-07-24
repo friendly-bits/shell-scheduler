@@ -421,6 +421,99 @@ sch_term_run() {
 	:
 }
 
+#
+# Job termination functions
+#
+
+# Prints to stdout all live descendant PIDs (space-separated, seeds excluded).
+# 1: space-separated seed PIDs
+sch_get_descendants_mini() {
+	local sjt_had_f sjt_rv sjt_seeds="${1}"
+
+	sch_had_f && sjt_had_f=1
+	set +f
+
+	cat /proc/[0-9]*/stat 2>/dev/null | {
+		set -f
+		# shellcheck disable=SC2016
+		${SCHED_AWK_CMD:-awk} -v seeds="${sjt_seeds}" '
+		/^[0-9]+ \(/ {
+			pid = $1
+			s = $0
+			# Strip "pid (comm) X " (X = single state char).
+			# comm may contain spaces and parens - the greedy match handles those;
+			#   a line that does not match is a fragment of a newline-containing comm - skip
+			if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
+			split(s, f, " ")
+			if (f[1] !~ /^[0-9]+$/) next
+			ppid[pid] = f[1]
+			valid++
+		}
+		END {
+			if (!valid) exit 1
+			n = split(seeds, a, " ")
+			for (i = 1; i <= n; i++)
+				if (a[i] ~ /^[0-9]+$/) {
+					seed[a[i]] = 1
+					want[a[i]] = 1
+				}
+			do {
+				changed = 0
+				for (p in ppid)
+					if (!(p in want) && (ppid[p] in want)) { want[p] = 1; changed = 1 }
+			} while (changed)
+			for (p in want) if (!(p in seed)) printf "%s ", p
+		}'
+	}
+	sjt_rv=${?}
+	[ -n "${sjt_had_f}" ] && set -f
+	return ${sjt_rv}
+}
+
+# Job termination callback (ppid-walk mechanism)
+# Args: job PIDs
+sched_job_term_mini() {
+	local \
+		me=sched_job_term_mini \
+		sjt_had_f \
+		sjt_p sjt_seeds sjt_all sjt_prev sjt_found sjt_try
+
+	sjt_seeds=
+	for sjt_p in "${@}"; do
+		sch_is_uint "${sjt_p}" ||
+			{ sch_fail_msg "${me}: ignoring invalid PID '${sjt_p}'."; continue; }
+		sch_append sjt_seeds "${sjt_p}"
+	done
+	[ -n "${sjt_seeds}" ] || return 0
+
+	# Freeze, re-scan to fixpoint, then kill:
+	#   each STOP pass pins down what the previous scan saw,
+	#   while the next scan catches anything forked in between
+	sjt_all="${sjt_seeds}"
+	sjt_prev=
+
+	sch_had_f && sjt_had_f=1
+	set -f
+
+	for sjt_try in 1 2 3; do
+		# shellcheck disable=SC2086
+		kill -STOP ${sjt_all} 2>/dev/null
+		sjt_found="$(sch_get_descendants_mini "${sjt_all}")" || {
+			sch_fail_msg "${me}: /proc scan failed."
+			break
+		}
+		sjt_all="${sjt_seeds} ${sjt_found}"
+		sch_rm_trailing sjt_all " "
+		[ "${sjt_all}" = "${sjt_prev}" ] && break
+		sjt_prev="${sjt_all}"
+	done
+
+	# shellcheck disable=SC2086
+	kill -KILL ${sjt_all} 2>/dev/null
+
+	[ -n "${sjt_had_f}" ] || set +f
+	:
+}
 
 #
 # User-facing functions
@@ -596,7 +689,7 @@ schedule_jobs() {
 		sch_append SCH_RUNNING_PIDS "${sch_pid}" || sch_finalize 1
 		sch_rm_elem SCH_UNDISPATCHED_IDS "${sch_id}" "${SCH_UNDISPATCHED_IDS}"
 
-		# A job start counts as scheduler progress: reset the idle timeout
+		# Reset the idle timeout at job start
 		sch_get_uptime_cs sch_dl_now_cs || sch_finalize 1
 		SCH_LAST_PROGRESS_TIME_CS="${sch_dl_now_cs}"
 
@@ -771,95 +864,4 @@ job_set_timeout() {
 	}
 	sch_rm_leading sch_val "0"
 	export -n "SCH_TIMEOUT_JOB_${sch_job_id}=${sch_val}"
-}
-
-
-# Prints to stdout all live descendant PIDs (space-separated, seeds excluded).
-# 1: space-separated seed PIDs
-sch_get_descendants_mini() {
-	local sjt_had_f sjt_rv sjt_seeds="${1}"
-
-	sch_had_f && sjt_had_f=1
-	set +f
-
-	cat /proc/[0-9]*/stat 2>/dev/null | {
-		set -f
-		# shellcheck disable=SC2016
-		${SCHED_AWK_CMD:-awk} -v seeds="${sjt_seeds}" '
-		/^[0-9]+ \(/ {
-			pid = $1
-			s = $0
-			# Strip "pid (comm) X " (X = single state char).
-			# comm may contain spaces and parens - the greedy match handles those;
-			#   a line that does not match is a fragment of a newline-containing comm - skip
-			if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
-			split(s, f, " ")
-			if (f[1] !~ /^[0-9]+$/) next
-			ppid[pid] = f[1]
-			valid++
-		}
-		END {
-			if (!valid) exit 1
-			n = split(seeds, a, " ")
-			for (i = 1; i <= n; i++)
-				if (a[i] ~ /^[0-9]+$/) {
-					seed[a[i]] = 1
-					want[a[i]] = 1
-				}
-			do {
-				changed = 0
-				for (p in ppid)
-					if (!(p in want) && (ppid[p] in want)) { want[p] = 1; changed = 1 }
-			} while (changed)
-			for (p in want) if (!(p in seed)) printf "%s ", p
-		}'
-	}
-	sjt_rv=${?}
-	[ -n "${sjt_had_f}" ] && set -f
-	return ${sjt_rv}
-}
-
-# Job termination callback (ppid-walk mechanism)
-# Args: job PIDs
-sched_job_term_mini() {
-	local \
-		me=sched_job_term_mini \
-		sjt_had_f \
-		sjt_p sjt_seeds sjt_all sjt_prev sjt_found sjt_try
-
-	sjt_seeds=
-	for sjt_p in "${@}"; do
-		sch_is_uint "${sjt_p}" ||
-			{ sch_fail_msg "${me}: ignoring invalid PID '${sjt_p}'."; continue; }
-		sch_append sjt_seeds "${sjt_p}"
-	done
-	[ -n "${sjt_seeds}" ] || return 0
-
-	# Freeze, re-scan to fixpoint, then kill:
-	#   each STOP pass pins down what the previous scan saw,
-	#   while the next scan catches anything forked in between
-	sjt_all="${sjt_seeds}"
-	sjt_prev=
-
-	sch_had_f && sjt_had_f=1
-	set -f
-
-	for sjt_try in 1 2 3; do
-		# shellcheck disable=SC2086
-		kill -STOP ${sjt_all} 2>/dev/null
-		sjt_found="$(sch_get_descendants_mini "${sjt_all}")" || {
-			sch_fail_msg "${me}: /proc scan failed."
-			break
-		}
-		sjt_all="${sjt_seeds} ${sjt_found}"
-		sch_rm_trailing sjt_all " "
-		[ "${sjt_all}" = "${sjt_prev}" ] && break
-		sjt_prev="${sjt_all}"
-	done
-
-	# shellcheck disable=SC2086
-	kill -KILL ${sjt_all} 2>/dev/null
-
-	[ -n "${sjt_had_f}" ] || set +f
-	:
 }
