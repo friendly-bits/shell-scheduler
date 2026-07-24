@@ -11,7 +11,7 @@
 #   which tests.sh emits after every test - and flushes the whole block to stdout under a shared mutex,
 #   so each test's block prints contiguously even though combos run concurrently.
 # The read-write FIFO opens mean a combo's open-for-write never blocks and a drainer never sees a
-#   premature EOF; drainers stop on a ${STOP} sentinel.
+#   premature EOF; drainers stop on a ${MATRIX_STOP} sentinel.
 
 # The scheduler gives per-combo timeout + tree-kill for free,
 #   so a combo that wedges (e.g. a shell-specific hang) is reaped instead of stalling the matrix.
@@ -19,54 +19,22 @@
 # Usage: bash test-matrix.sh [<tests.sh args>]   (default: run)
 # Exit:  0 if every combo passed, non-zero otherwise.
 
-script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
 
-DEFAULT_IFS=" "$'\t'$'\n'
-IFS="${DEFAULT_IFS}"
+matrix_cleanup() {
+	trap - INT TERM EXIT
+	[ -n "${MATRIX_SCHED_PID}" ] && {
+		kill -TERM "${MATRIX_SCHED_PID}" 2>/dev/null
+		wait "${MATRIX_SCHED_PID}"
+	}
+	[ -n "${DRAIN_PIDS}" ] && kill -KILL ${DRAIN_PIDS} 2>/dev/null
+	exec 8>&- 9>&-
+	rm -rf "${MATRIX_WORK_DIR}"
+}
 
-. "${script_dir}/../scheduler.sh"
-. "${script_dir}/../job-term-ppid.sh"
-
-SUITE="${script_dir}/tests.sh"
-[ "${#}" -gt 0 ] || set -- run
-SUITE_ARGS="${*}"
-
-
-SHELLS="bash"$'\n'"busybox ash"
-
-# --- matrix definition ---
-IFS=$'\n'
-for shell in ${SHELLS}; do
-	command -v "${shell%% *}" 1>/dev/null || { printf '\n%s\n' "Warning: ${shell} not found; its combos will not run." >&2; continue; }
-	for variant in full mini; do
-		combo=${shell##* }_${variant}
-		JOBS="${JOBS}${JOBS:+ }${combo}"
-		job_set_params "${combo}" "shell=${shell}" variant=${variant} || exit 1
-	done
-done
-IFS="${DEFAULT_IFS}"
-
-# --- work dir, markers, mutex, per-combo FIFOs + drainers ---
-NL=$'\n'
-# Distinctive one-line markers (SOH-prefixed so they cannot occur in test text).
-TEST_BLOCK_END=$'\001__test_block_end__'
-STOP=$'\001__matrix_stop__'
-
-work_dir=$(mktemp -d "${TMPDIR:-/tmp}/sched-matrix.XXXXXX") || exit 1
-
-# Mutex as a 1-token FIFO semaphore on fd 9: serializes block flushes to stdout.
-mkfifo "${work_dir}/mutex" || { rm -rf "${work_dir}"; exit 1; }
-exec 9<>"${work_dir}/mutex"
-printf 'x\n' >&9
 lock()   { IFS= read -r _ <&9; }
 unlock() { printf 'x\n' >&9; }
 
-# Summary/control FIFO on fd 8: matrix_finalize writes the summary here;
-#   the main shell prints it in teardown, after all test blocks have drained.
-mkfifo "${work_dir}/summary" || { rm -rf "${work_dir}"; exit 1; }
-exec 8<>"${work_dir}/summary"
-
-get_combo_fifo() { printf '%s/out.%s' "${work_dir}" "${1}"; }
+get_combo_fifo() { printf '%s/out.%s' "${MATRIX_WORK_DIR}" "${1}"; }
 
 # Per-combo drainer: buffer each test's block, flush it contiguously under the mutex.
 # Combo identity is the FIFO it reads, so no per-line tagging is needed.
@@ -75,7 +43,7 @@ drain_combo() {
 	exec 7<>"${1}"
 	while IFS= read -r line <&7; do
 		case "${line}" in
-			"${STOP}") break ;;
+			"${MATRIX_STOP}") break ;;
 			"${TEST_BLOCK_END}") lock; printf '%s' "${blk}"; unlock; blk= ;;
 			*) blk="${blk}${line}${NL}" ;;
 		esac
@@ -85,15 +53,6 @@ drain_combo() {
 	exec 7>&-
 }
 
-for id in ${JOBS}; do
-	mkfifo "$(get_combo_fifo "${id}")" || { rm -rf "${work_dir}"; exit 1; }
-done
-
-DRAIN_PIDS=
-for id in ${JOBS}; do
-	drain_combo "$(get_combo_fifo "${id}")" &
-	DRAIN_PIDS="${DRAIN_PIDS}${DRAIN_PIDS:+ }${!}"
-done
 
 # --- callbacks ---
 
@@ -135,6 +94,80 @@ matrix_finalize() {
 	[ -z "${fail}${unfinished}${undispatched}${expired}" ]
 }
 
+
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+
+DEFAULT_IFS=" "$'\t'$'\n'
+IFS="${DEFAULT_IFS}"
+
+. "${script_dir}/../scheduler.sh"
+. "${script_dir}/../job-term-ppid.sh"
+
+SUITE="${script_dir}/tests.sh"
+[ "${#}" -gt 0 ] || set -- run
+SUITE_ARGS="${*}"
+
+
+SHELLS="bash"$'\n'"busybox ash"
+
+# --- matrix definition ---
+IFS=$'\n'
+for shell in ${SHELLS}; do
+	command -v "${shell%% *}" 1>/dev/null || { printf '\n%s\n' "Warning: ${shell} not found; its combos will not run." >&2; continue; }
+	for variant in full mini; do
+		combo=${shell##* }_${variant}
+		JOBS="${JOBS}${JOBS:+ }${combo}"
+		jobs_init "${combo}" &&
+		job_set_params "${combo}" "shell=${shell}" variant=${variant} || exit 1
+	done
+done
+IFS="${DEFAULT_IFS}"
+
+# --- work dir, markers, mutex, per-combo FIFOs + drainers ---
+NL=$'\n'
+# Distinctive one-line markers (SOH-prefixed so they cannot occur in test text).
+TEST_BLOCK_END=$'\001__test_block_end__'
+MATRIX_STOP=$'\001__matrix_stop__'
+
+# shellcheck disable=SC2154
+trap '
+	rv=${?}
+	matrix_cleanup
+	exit ${rv}
+' EXIT
+
+trap '
+	printf "\nAborting matrix run on receipt of a signal.\n" >&2
+	matrix_cleanup
+	printf "\n"
+	exit 1
+' INT TERM
+
+MATRIX_WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/sched-matrix.XXXXXX") || exit 1
+
+# Mutex as a 1-token FIFO semaphore on fd 9: serializes block flushes to stdout.
+mkfifo "${MATRIX_WORK_DIR}/mutex" || { rm -rf "${MATRIX_WORK_DIR}"; exit 1; }
+exec 9<>"${MATRIX_WORK_DIR}/mutex"
+printf 'x\n' >&9
+
+# Summary/control FIFO on fd 8: matrix_finalize writes the summary here;
+#   the main shell prints it in teardown, after all test blocks have drained.
+mkfifo "${MATRIX_WORK_DIR}/summary" || { rm -rf "${MATRIX_WORK_DIR}"; exit 1; }
+exec 8<>"${MATRIX_WORK_DIR}/summary"
+
+
+# Create drainer FIFO's
+for id in ${JOBS}; do
+	mkfifo "$(get_combo_fifo "${id}")" || { rm -rf "${MATRIX_WORK_DIR}"; exit 1; }
+done
+
+# Start drainers
+DRAIN_PIDS=
+for id in ${JOBS}; do
+	drain_combo "$(get_combo_fifo "${id}")" &
+	DRAIN_PIDS="${DRAIN_PIDS}${DRAIN_PIDS:+ }${!}"
+done
+
 # --- run the matrix (backgrounded: schedule_jobs exits its shell on finalize) ---
 DO_JOB_CB=run_combo \
 SCHED_FAIL_MSG_CB=matrix_fail_msg \
@@ -145,23 +178,28 @@ SCHED_TIMEOUT_S="${MATRIX_TIMEOUT_S:-3600}" \
 SCHED_IDLE_TIMEOUT_S="${MATRIX_IDLE_TIMEOUT_S:-3600}" \
 SCHED_JOB_TIMEOUT_S="${MATRIX_JOB_TIMEOUT_S:-1800}" \
 	schedule_jobs "${JOBS}" &
-sched_pid=${!}
-wait "${sched_pid}"
-matrix_rv=${?}
 
-# Stop the drainers (each flushes any buffered block), then print the summary after all test blocks,
-#   then clean up.
+MATRIX_SCHED_PID=${!}
+wait "${MATRIX_SCHED_PID}"
+MATRIX_RV=${?}
+MATRIX_SCHED_PID=
+
+# Stop the drainers (each flushes any buffered block)
 for id in ${JOBS}; do
-	printf '%s\n' "${STOP}" > "$(get_combo_fifo "${id}")"
+	printf '%s\n' "${MATRIX_STOP}" > "$(get_combo_fifo "${id}")"
 done
 # shellcheck disable=SC2086
 wait ${DRAIN_PIDS} 2>/dev/null
+DRAIN_PIDS=
 
+# Print the summary after all test blocks
 while IFS= read -r line <&8; do
 	[ "${line}" = "${TEST_BLOCK_END}" ] && break
 	printf '%s\n' "${line}"
 done
 
-exec 8>&- 9>&-
-rm -rf "${work_dir}"
-exit "${matrix_rv}"
+# Cleanup
+matrix_cleanup
+
+exit "${MATRIX_RV}"
+
