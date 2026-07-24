@@ -227,6 +227,8 @@ The above information, along with the below example, should be enough for most b
 
 Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The three optional job termination helper libraries are documented in **[JOB-TERMINATION-LIBRARIES.md](JOB-TERMINATION-LIBRARIES.md)**.
 
-## Real-world example
+## Real-world examples
 
-For an integration example, see [`EXAMPLE-HAGEZI-FETCH.md`](EXAMPLE-HAGEZI-FETCH.md) - a concurrent downloader for DNS blocklists. It demonstrates per-job parameters, signal forwarding, cleanup of orphaned child processes, and bookkeeping across callbacks.
+For a complete integration example, see [`EXAMPLE-HAGEZI-FETCH.md`](EXAMPLE-HAGEZI-FETCH.md) - a concurrent downloader for DNS blocklists. It demonstrates per-job parameters, signal forwarding, cleanup of orphaned child processes, and bookkeeping across callbacks.
+
+For another complete (and quite involved) integration example, see [`test-matrix.sh`](tests/test-matrix.sh) - a script which runs multiple instances of the test suite in parallel with Bash and Busybox ash, across the full and mini variants of the scheduler, using the scheduler itself to orchestrate the parallelization.
