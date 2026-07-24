@@ -3,7 +3,19 @@
 # shellcheck source=/dev/null
 
 # Category: Timeouts & Signal Termination
-# This file is sourced by tests.sh; it defines test_N functions only.
+# This file is sourced by tests.sh; it defines test_N functions plus the
+#   category's shared helpers.
+
+#
+# Category infrastructure
+#
+
+# SCHED_FAIL_MSG_CB that echoes each message and appends it to ${MSGS_F}
+#   (a local of the calling test, inherited at fork time).
+st_record_msg() {
+	printf '%s\n' "${@}"
+	printf '%s\n' "${@}" >> "${MSGS_F:?}"
+}
 
 #
 # Tests
@@ -740,9 +752,12 @@ test_scheduler_termination_16() {
 		scheduler_pid \
 		jobs="ok5_1 ok5_2"
 
+	local MSGS_F="/tmp/sched.fifo_gone.msgs.${TEST_ID:?}.$$"
+	rm -f "${MSGS_F}"
+
 	print_test_header "${TEST_ID:?}" "FIFO disappearance during execution" "${jobs}"
 
-	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FAIL_MSG_CB=st_record_msg \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
@@ -761,12 +776,15 @@ test_scheduler_termination_16() {
 	wait "${scheduler_pid}"
 	sched_rv=$?
 
-	if [ "${sched_rv}" = 1 ]
+	if [ "${sched_rv}" = 1 ] &&
+		grep -q 'FIFO.*disappear' "${MSGS_F}" 2>/dev/null
 	then
 		PASS "sched_rv=${sched_rv}"
+		rm -f "${MSGS_F}"
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}"
+		FAIL "sched_rv=${sched_rv} (want 1), 'FIFO.*disappear' message: $(grep -q 'FIFO.*disappear' "${MSGS_F}" 2>/dev/null && echo yes || echo no)"
+		rm -f "${MSGS_F}"
 		return 1
 	fi
 }
@@ -835,6 +853,98 @@ test_scheduler_termination_17() {
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv}, fin_rv=${fin_rv}, pid_cnt=${pid_cnt}, unf_cnt=${unf_cnt}, out='${out}'"
+		return 1
+	fi
+}
+
+# Verify FIFO removal during the dispatch loop stops further dispatch:
+#   the jobs not yet started are reported as undispatched and never run.
+test_scheduler_termination_18() {
+	scheduler_termination_18_do_job() {
+		printf '%s\n' "${1}" >> "${STARTED_F:?}"
+		sleep 2
+	}
+
+	scheduler_termination_18_finalize_handler() {
+		printf '%s\n' "${6}" > "${UNDISPATCHED_FILE:?}"
+
+		finalize_handler "${1}" "${2}"
+	}
+
+	# Return 0 if the id lists ${1} and ${2} are equal as sets
+	scheduler_termination_18_same_set() {
+		local e cnt_a=0 cnt_b=0
+
+		for e in ${1}; do cnt_a=$((cnt_a + 1)); done
+		for e in ${2}; do
+			cnt_b=$((cnt_b + 1))
+			case " ${1} " in *" ${e} "*) ;; *) return 1 ;; esac
+		done
+		[ "${cnt_a}" = "${cnt_b}" ]
+	}
+
+	local \
+		TEST_ID=scheduler_termination_18 \
+		sched_rv \
+		scheduler_pid \
+		undispatched \
+		started_cnt \
+		checks_ok=1 \
+		jobs='ok2_st18a ok2_st18b ok2_st18c ok2_st18d' \
+		want_undispatched='ok2_st18b ok2_st18c ok2_st18d'
+
+	local \
+		STARTED_F="/tmp/sched.fifo_gone.started.${TEST_ID:?}.$$" \
+		UNDISPATCHED_FILE="/tmp/sched.fifo_gone.undispatched.${TEST_ID:?}.$$" \
+		MSGS_F="/tmp/sched.fifo_gone.msgs.${TEST_ID:?}.$$"
+	rm -f "${UNDISPATCHED_FILE}" "${MSGS_F}"
+	: > "${STARTED_F}"
+
+	print_test_header "${TEST_ID:?}" "FIFO disappearance stops dispatch" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=st_record_msg \
+	SCHED_FINALIZE_CB=scheduler_termination_18_finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=scheduler_termination_18_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+		schedule_jobs "${jobs}" &
+
+	scheduler_pid=$!
+
+	# The FIFO lives in the scheduler's per-run dir under SCHED_DIR (/tmp),
+	#   whose '.<n>' suffix is chosen at runtime; match it by a PID-scoped glob
+	sleep 1
+	rm -f /tmp/sched_"${scheduler_pid}".*/ipc
+
+	wait "${scheduler_pid}"
+	sched_rv=$?
+
+	# Let any extra job dispatched at removal time record its start
+	sleep 1
+	started_cnt=$(sed '/^$/d' "${STARTED_F}" | wc -l)
+	read_first_line undispatched "${UNDISPATCHED_FILE}"
+
+	[ "${sched_rv}" = 1 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 1)"; }
+
+	scheduler_termination_18_same_set "${undispatched}" "${want_undispatched}" ||
+		{ checks_ok=; echo "undispatched='${undispatched}' (want '${want_undispatched}')"; }
+
+	[ "${started_cnt}" -eq 1 ] ||
+		{ checks_ok=; echo "started ${started_cnt} job(s) (want 1)"; }
+
+	grep -qF FIFO "${MSGS_F}" 2>/dev/null ||
+		{ checks_ok=; echo "no failure message mentioning the FIFO"; }
+
+	rm -f "${STARTED_F}" "${UNDISPATCHED_FILE}" "${MSGS_F}"
+
+	if [ -n "${checks_ok}" ]
+	then
+		PASS "undispatched='${undispatched}', started=${started_cnt}"
+		return 0
+	else
+		FAIL
 		return 1
 	fi
 }

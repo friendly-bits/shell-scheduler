@@ -1595,3 +1595,100 @@ test_params_32() {
 		return 1
 	fi
 }
+
+# Verify the length cap on param names and job IDs in job_set_params()/job_get_params():
+#   a 2020-char param name is accepted, 2021 rejected; a 2021-char job ID is rejected;
+#   one message per rejection.
+# Long names round-trip their values through the 'var=param' alias form.
+# The job-ID limit here is the same 2020 that schedule_jobs()/jobs_init() accept
+#   (test_security_13), despite the internal 'SCH_JOB_PARAMS_<job_id>' name being
+#   validated too.
+# Direct calls, no scheduler run.
+test_params_33() {
+	params_33_check_rejected() {
+		total_cnt=$((total_cnt + 1))
+		SCHED_FAIL_MSG_CB=params_33_fail_msg job_set_params "${1}" "${2}"
+		rv=$?
+		if [ "${rv}" != 0 ]
+		then
+			pass_cnt=$((pass_cnt + 1))
+		else
+			printf 'Unexpectedly accepted: %s (job_id %s chars, pair %s chars)\n' "${3}" "${#1}" "${#2}" >&2
+		fi
+	}
+
+	params_33_check_accepted() {
+		total_cnt=$((total_cnt + 1))
+		SCHED_FAIL_MSG_CB=params_33_fail_msg job_set_params "${1}" "${2}"
+		rv=$?
+		if [ "${rv}" = 0 ]
+		then
+			pass_cnt=$((pass_cnt + 1))
+		else
+			printf 'Unexpectedly rejected: %s (job_id %s chars, pair %s chars)\n' "${3}" "${#1}" "${#2}" >&2
+		fi
+	}
+
+	params_33_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+
+	local \
+		TEST_ID=params_33 \
+		pass_cnt=0 \
+		total_cnt=0 \
+		rv \
+		msg_cnt \
+		ok_param long_param ok_job long_job \
+		dest
+
+	local MSG_FILE="/tmp/sched.params.namelen.${TEST_ID}.$$"
+	local job_id="${TEST_ID}_job"
+	rm -f "${MSG_FILE}"
+
+	print_test_header "${TEST_ID:?}" "param-name and job-ID length cap (2021-char names rejected)" "(direct calls, no scheduler run)"
+
+	mk_name_of_len ok_param 2020 "p${TEST_ID}_" &&
+	mk_name_of_len long_param 2021 "p${TEST_ID}_" &&
+	mk_name_of_len ok_job 2020 "j${TEST_ID}_" &&
+	mk_name_of_len long_job 2021 "j${TEST_ID}_" || {
+		printf '%s\n' "mk_name_of_len failed" >&2
+		FAIL
+		return 1
+	}
+
+	total_cnt=$((total_cnt + 1))
+	pass_cnt=$((pass_cnt + 1))
+
+	params_33_check_accepted "${job_id}"    "${ok_param}=maxlen_val"   "2020-char param name"
+	params_33_check_rejected "${job_id}"    "${long_param}=x"          "2021-char param name"
+	params_33_check_accepted "${ok_job}"    "P=long_job_val"           "2020-char job ID"
+	params_33_check_rejected "${long_job}"  "P=x"                      "2021-char job ID"
+
+	# The max-length param name round-trips via the 'var=param' alias form
+	total_cnt=$((total_cnt + 1))
+	dest=
+	SCHED_FAIL_MSG_CB=params_33_fail_msg job_get_params "${job_id}" "dest=${ok_param}" &&
+		[ "${dest}" = maxlen_val ] &&
+		pass_cnt=$((pass_cnt + 1)) ||
+		printf 'Round-trip failed for the 2020-char param name: dest=%s\n' "${dest}" >&2
+
+	total_cnt=$((total_cnt + 1))
+	dest=
+	SCHED_FAIL_MSG_CB=params_33_fail_msg job_get_params "${ok_job}" dest=P &&
+		[ "${dest}" = long_job_val ] &&
+		pass_cnt=$((pass_cnt + 1)) ||
+		printf 'Round-trip failed for the 2020-char job ID: dest=%s\n' "${dest}" >&2
+
+	msg_cnt=0
+	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
+	rm -f "${MSG_FILE}"
+
+	# One message per rejected case, none from the accepted ones
+	if [ "${pass_cnt}" = "${total_cnt}" ] && [ "${msg_cnt}" = 2 ]
+	then
+		PASS "${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
+		return 0
+	else
+		FAIL "${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
+		return 1
+	fi
+}

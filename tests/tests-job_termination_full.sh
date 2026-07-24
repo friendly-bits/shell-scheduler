@@ -720,3 +720,13 @@ test_job_termination_full_13() {
 	fi
 }
 
+# children library: abort kills processes forked between discovery scans.
+# The job's helper child starts forking recorded children only once the first
+#   SIGSTOP pass has frozen the wrapper, so they are absent from the first scan.
+# SKIP where the children mechanism is unavailable.
+test_job_termination_full_14() {
+	require_variant full || return 2
+
+	_jt_forkrace_scenario job_termination_full_14 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" forkrace_14
+}
+

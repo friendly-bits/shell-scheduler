@@ -79,6 +79,29 @@ is_uint() {
 	:
 }
 
+# Build a name of exactly <len> chars: <prefix> followed by 'x' filler.
+# Chars are all [a-zA-Z0-9_]-safe.
+# 1: out var
+# 2: length
+# 3: prefix (optional)
+mk_name_of_len() {
+	local mnl_out="${1:?}" mnl_len="${2:?}" mnl_pfx="${3}" mnl_fill mnl_fill_len
+
+	is_uint "${mnl_len}" || return 1
+	[ "${#mnl_pfx}" -le "${mnl_len}" ] || return 1
+	mnl_fill_len=$(( mnl_len - ${#mnl_pfx} ))
+
+	# '%*s' pads to the requested width with spaces; swap those for the filler
+	mnl_fill="$(printf '%*s' "${mnl_fill_len}" '')"
+
+	[ ${#mnl_fill} = "${mnl_fill_len}" ] || {
+		echo "mk_name_of_len failed (mnl_len=${mnl_len}; mnl_pfx=${mnl_pfx}; mnl_fill actual len: ${#mnl_fill} - want ${mnl_fill_len})" >&2
+		return 1
+	}
+
+	export -n "${mnl_out}=${mnl_pfx}${mnl_fill// /x}"
+}
+
 read_first_line() {
 	export -n "${1:?}="
 	[ -f "${2:?}" ] || return 1

@@ -81,7 +81,7 @@ jt_teardown() {
 # Job execution callback for this category.
 # Record file paths are inherited from the calling test's locals at fork time.
 do_job_term() {
-	local job_name="${1%%_*}"
+	local job_name="${1%%_*}" fr_seed fr_i fr_line fr_stopped
 
 	case "${job_name}" in
 		instant) : ;;
@@ -114,6 +114,34 @@ do_job_term() {
 				sleep 300 &
 				printf '%s\n' "${!}" >> "${PIDS_F:?}"
 				wait "${!}"
+			) &
+			printf '%s\n' "${!}" >> "${PIDS_F:?}"
+			wait "${!}"
+		;;
+
+		# Live child (recorded) that forks recorded children only after this
+		#   process has been SIGSTOPped, then blocks; the wrapper blocks on it.
+		# The child polls this process's /proc state (bounded, ~20k reads ~= 2.7 s)
+		#   and forks nothing if it never observes state 'T'.
+		forkrace)
+			get_test_pid fr_seed || return 1
+			(
+				fr_i=0
+				while [ "${fr_i}" -lt 20000 ]; do
+					fr_i=$((fr_i + 1))
+					IFS= read -r fr_line < "/proc/${fr_seed}/stat" || break
+					# Greedy strip of 'pid (comm) ' - comm may contain ')'
+					fr_line="${fr_line##*") "}"
+					[ "${fr_line%% *}" = T ] && { fr_stopped=1; break; }
+				done
+
+				fr_i=0
+				while [ -n "${fr_stopped}" ] && [ "${fr_i}" -lt 200 ]; do
+					fr_i=$((fr_i + 1))
+					sleep 300 &
+					printf '%s\n' "${!}" >> "${PIDS_F:?}"
+				done
+				wait
 			) &
 			printf '%s\n' "${!}" >> "${PIDS_F:?}"
 			wait "${!}"
@@ -358,6 +386,65 @@ _jt_strag_scenario() {
 	fi
 }
 
+# "USR1 abort kills processes forked between discovery scans".
+# The job's helper child forks only after the first SIGSTOP pass, so its children
+#   exist from the second scan onward; every recorded PID must end up dead.
+# 1: test id
+# 2: JOB_TERM_CB
+# 3: capability gate fn
+# 4: skip reason
+# 5: job id (a forkrace_* id)
+_jt_forkrace_scenario() {
+	local \
+		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_job="${5}" \
+		sched_pid sched_rv checks_ok=1 pid_cnt=0
+
+	local PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
+	rm -f "${PIDS_F}"
+
+	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: abort kills processes forked between discovery scans" "${jt_job}"
+
+	"${jt_gate}" || { SKIP "${jt_skip}"; return 2; }
+
+	: > "${PIDS_F}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_term \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=6 \
+	JOB_TERM_CB="${jt_cb}" \
+		schedule_jobs "${jt_job}" &
+
+	sched_pid=${!}
+	sleep 1
+	kill -USR1 "${sched_pid}" 2>/dev/null
+	wait "${sched_pid}"
+	sched_rv=${?}
+
+	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+
+	# The helper child plus at least one process forked after the first SIGSTOP
+	pid_cnt=$(sed '/^$/d' "${PIDS_F}" | wc -l)
+	[ "${pid_cnt}" -ge 2 ] ||
+		{ checks_ok=; echo "recorded pid count ${pid_cnt} (want >=2 - the fork race did not occur)"; }
+
+	jt_assert_dead "${PIDS_F}" ||
+		{ checks_ok=; echo "survivor(s) forked between scans: ${ALIVE_PIDS}"; }
+
+	jt_teardown "${PIDS_F}" ""
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "rv=83, all ${pid_cnt} recorded processes killed"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
+
 #
 # Tests
 #
@@ -595,5 +682,12 @@ test_job_termination_07() {
 		FAIL
 		return 1
 	fi
+}
+
+# term: abort kills processes forked between discovery scans.
+# The job's helper child starts forking recorded children only once the first
+#   SIGSTOP pass has frozen the wrapper, so they are absent from the first scan.
+test_job_termination_08() {
+	_jt_forkrace_scenario job_termination_08 "${SCHED_TERM_CB_DEFAULT}" term_default_capable "${TERM_DEFAULT_SKIP_REASON}" forkrace_08
 }
 

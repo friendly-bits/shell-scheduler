@@ -813,3 +813,114 @@ test_security_12() {
 		return 1
 	fi
 }
+
+# Verify the job-ID length cap: 2020 chars accepted, 2021 rejected.
+# Accepted: schedule_jobs() rv 0, no fail messages, JOB_DONE_CB gets the ID verbatim with rv 0
+#   (a torn completion record would surface as a fatal "Malformed completion record").
+# Rejected: rv 1, one message, nothing dispatched.
+# jobs_init() applies the same cap.
+test_security_13() {
+	security_13_do_job() {
+		printf '%s\n' "${1}" >> "${ARGS_FILE:?}"
+		do_job_default "${1}"
+	}
+
+	security_13_done() {
+		printf '%s %s\n' "${1}" "${2}" >> "${DONE_FILE:?}"
+		return 0
+	}
+
+	security_13_fail_msg() {
+		printf '%s\n' "$*" >> "${MSG_FILE:?}"
+	}
+
+	local \
+		TEST_ID=security_13 \
+		sched_rv msg_cnt done_line ok_id long_id \
+		checks_ok=1
+
+	local \
+		ARGS_FILE="/tmp/sched.idlen.args.${TEST_ID}.$$" \
+		DONE_FILE="/tmp/sched.idlen.done.${TEST_ID}.$$" \
+		MSG_FILE="/tmp/sched.idlen.msg.${TEST_ID}.$$" \
+		SCHED_FAIL_MSG_CB=security_13_fail_msg
+
+	export -n SCHED_FAIL_MSG_CB
+
+	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${MSG_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Job ID length cap: 2020 accepted, 2021 rejected" \
+		"(1 max-length job + 1 oversized ID rejected)"
+
+	mk_name_of_len ok_id 2020 "instant_${TEST_ID}_" &&
+	mk_name_of_len long_id 2021 "instant_${TEST_ID}_" || {
+		echo "mk_name_of_len failed" >&2
+		FAIL
+		return 1
+	}
+
+	# Accepted: 2020-char ID runs and reports back verbatim
+	DO_JOB_CB=security_13_do_job \
+	JOB_DONE_CB=security_13_done \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=4 \
+		schedule_jobs "${ok_id}" &
+	wait "$!"
+	sched_rv=$?
+
+	[ "${sched_rv}" = 0 ] ||
+		{ checks_ok=; echo "2020-char ID: sched_rv=${sched_rv}, expected 0" >&2; }
+
+	read_first_line done_line "${DONE_FILE}" ||
+		{ checks_ok=; echo "2020-char ID: no JOB_DONE_CB record" >&2; }
+	[ "${done_line}" = "${ok_id} 0" ] ||
+		{ checks_ok=; echo "2020-char ID: JOB_DONE_CB got a record of ${#done_line} chars, expected the ID verbatim with rv 0" >&2; }
+
+	msg_cnt=0
+	[ -f "${MSG_FILE}" ] && msg_cnt="$(wc -l < "${MSG_FILE}")"
+	[ "${msg_cnt}" -eq 0 ] ||
+		{ checks_ok=; echo "2020-char ID: ${msg_cnt} error message(s), expected 0" >&2; }
+
+	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${MSG_FILE}"
+
+	# Rejected: 2021-char ID
+	DO_JOB_CB=security_13_do_job \
+	JOB_DONE_CB=security_13_done \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=4 \
+		schedule_jobs "${long_id}" &
+	wait "$!"
+	sched_rv=$?
+
+	[ "${sched_rv}" = 1 ] ||
+		{ checks_ok=; echo "2021-char ID: sched_rv=${sched_rv}, expected 1" >&2; }
+
+	[ ! -s "${ARGS_FILE}" ] ||
+		{ checks_ok=; echo "2021-char ID: job dispatched despite rejection" >&2; }
+
+	[ ! -s "${DONE_FILE}" ] ||
+		{ checks_ok=; echo "2021-char ID: JOB_DONE_CB invoked despite rejection" >&2; }
+
+	msg_cnt=0
+	[ -f "${MSG_FILE}" ] && msg_cnt="$(wc -l < "${MSG_FILE}")"
+	[ "${msg_cnt}" -eq 1 ] ||
+		{ checks_ok=; echo "2021-char ID: ${msg_cnt} error message(s), expected 1" >&2; }
+
+	# jobs_init() applies the same cap
+	jobs_init "${long_id}" &&
+		{ checks_ok=; echo "jobs_init accepted the 2021-char ID" >&2; }
+	jobs_init "${ok_id}" ||
+		{ checks_ok=; echo "jobs_init rejected the 2020-char ID" >&2; }
+
+	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${MSG_FILE}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "2020-char ID ran and reported verbatim, 2021-char ID rejected"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
