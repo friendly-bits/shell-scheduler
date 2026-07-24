@@ -23,7 +23,7 @@ To start the scheduler:
 schedule_jobs "<job_id_list>" [arg1 [arg2 ...]] &
 ```
 
-- `<job_id_list>` : a string containing one or more job IDs separated by any combination of spaces, tabs and newlines (prefer spaces for simplicity). Job IDs must be non-empty and may only contain the characters `a-z`, `A-Z`, `0-9`, `_` (a leading digit is allowed). `schedule_jobs()` validates the list upfront and fails (return code `1`, nothing dispatched) on any invalid or duplicate ID.
+- `<job_id_list>` : a string containing one or more job IDs separated by any combination of spaces, tabs and newlines (prefer spaces for simplicity). A valid Job IDs: is non-empty, contains only the characters `a-z`, `A-Z`, `0-9`, `_`, is at most 2020 characters long. `schedule_jobs()` validates the list upfront and fails (return code `1`, nothing dispatched) on any invalid or duplicate ID.
 - `arg1 [arg2 ...]` : optional additional arguments. Passed as-is to every invocation of the **job execution callback** (`DO_JOB_CB`) after the job ID.
 
 As a general rule, run the scheduler in a background process: `schedule_jobs <job_ids> & ... wait ${!}`. Alternatively, for certain use cases, running it in a foreground subshell may be preferable. Below spoiler provides more information.
@@ -109,14 +109,16 @@ This callback runs in a separate background process. Its exit code is considered
 Defined by the value of **`${JOB_DONE_CB}`**. Invoked by the scheduler for each job after receiving its completion record:
 
 ```sh
-${JOB_DONE_CB} <job_id> <job_return_code>
+${JOB_DONE_CB} <job_id> <job_return_code> [job_pid]
 ```
 
 If this callback returns a non-zero code, the scheduler terminates immediately with the same return code (after invoking the **scheduler completion callback**).
 
 It can be used to e.g. collect job results or handle failures.
 
-When [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) are in use, a timed-out job is reported with job return code `124` and the job's PID as an extra third argument - the presence of that argument is what distinguishes a scheduler-synthesized timeout from a job that genuinely exited with code `124`.
+When the reason for calling `JOB_DONE_CB` is not a per-job time-out, `[job_pid]` is unset.
+
+When [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) are in use, a timed-out job is reported with job return code `124` and the job's PID as the third argument. The presence of that argument is what distinguishes a scheduler-synthesized timeout from a job that genuinely exited with code `124`.
 
 ### Scheduler completion callback (optional)
 
@@ -401,7 +403,7 @@ For job C, file is ''.
 
 - When `SCHED_AUTO_PARAMS` is set to `1`, parameters are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
 - Assigning and fetching parameters is internally implemented via indirection. In order to keep the implementation compatible with BusyBox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_params()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
-- Setting job-specific parameters via `job_set_params()` requires the **job ID** and each **param name** to contain only the following characters: `a-z`, `A-Z`, `0-9`, `_`. Param names, unlike variable names, **may** start with a digit and **may** coincide with otherwise-reserved names. `job_set_params()` treats param name as a **key** and the actual value is assigned to a variable with a different name. Retrieving a parameter, on the other hand, assigns it to a shell **variable**, so the *destination variable name* used with `job_get_params()` (either the same-named plain form, or `<var_name>` in the `<var_name>=<param_name>` form) must be a valid, non-reserved shell variable name: it must contain only `a-z`, `A-Z`, `0-9`, `_`, must not start with a digit (for compliance with the POSIX specification of valid variable names), must not start with `SCHED_`, `SCH_`, `sch_`, `_sch_`, and must not be a callback variable (`DO_JOB_CB`, `JOB_DONE_CB`) or the `IFS` variable. These prefixes and names are reserved for internal use. When any of these requirements is not met, the corresponding helper prints an error, returns code 1, and does not set the parameter or variable.
+- Setting job-specific parameters via `job_set_params()` requires the **job ID** and each **param name** to contain only the following characters: `a-z`, `A-Z`, `0-9`, `_`. Param names, unlike variable names, **may** start with a digit and **may** coincide with otherwise-reserved names. `job_set_params()` treats param name as a **key** and the actual value is assigned to a variable with a different name. Retrieving a parameter, on the other hand, assigns it to a shell **variable**, so the *destination variable name* used with `job_get_params()` (either the same-named plain form, or `<var_name>` in the `<var_name>=<param_name>` form) must be a valid, non-reserved shell variable name: it must contain only `a-z`, `A-Z`, `0-9`, `_`, must not start with a digit (for compliance with the POSIX specification of valid variable names), must not start with `SCHED_`, `SCH_`, `sch_`, `_sch_`, and must not be a callback variable (`DO_JOB_CB`, `JOB_DONE_CB`) or the `IFS` variable. These prefixes and names are reserved for internal use. Job IDs, param names and destination variable names may each be at most 2020 characters long. When any of these requirements is not met, the corresponding helper prints an error, returns code 1, and does not set the parameter or variable.
 - With `SCHED_AUTO_PARAMS=1`, every registered parameter of a job is exported into a same-named variable before that job runs. All of that job's param names must therefore be valid, **non-reserved** shell variable names per the rules above (in particular, they must not start with a digit and must not use the reserved prefixes or names). If any registered parameter of a job violates these rules, that job fails during initialization: an error is reported, the **job execution callback** is never invoked, and the job completes with job return code `1` - the scheduler itself keeps running and handles the failure through the normal completion path, including invoking the **job completion callback** (`JOB_DONE_CB`) if defined. A parameter whose name is not a valid variable name can still be registered and retrieved explicitly via the `<var_name>=<param_name>` form of `job_get_params()`, but it can not be delivered through `SCHED_AUTO_PARAMS`.
 
 </details>
