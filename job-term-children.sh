@@ -110,7 +110,7 @@ sched_job_term_children() {
 			sch_fail_msg "${stch_lib_name}: /proc scan failed."
 			break
 		}
-		stch_all="${stch_seeds}${stch_found:+ }${stch_found}"
+		sch_append stch_all "${stch_found}"
 		sch_rm_trailing stch_all " "
 		[ "${stch_all}" = "${stch_prev}" ] && break
 		stch_prev="${stch_all}"
