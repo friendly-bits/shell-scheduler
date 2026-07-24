@@ -106,7 +106,7 @@ sched_job_term_ppid() {
 			sch_fail_msg "${spp_lib_name}: /proc scan failed."
 			break
 		}
-		spp_all="${spp_seeds} ${spp_found}"
+		sch_append spp_all "${spp_found}"
 		sch_rm_trailing spp_all " "
 		[ "${spp_all}" = "${spp_prev}" ] && break
 		spp_prev="${spp_all}"
