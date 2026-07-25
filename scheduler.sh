@@ -875,22 +875,3 @@ job_set_timeout() {
 	# ${SCH_JOB_TIMEOUT_S} copy of ${SCHED_JOB_TIMEOUT_S} for a job named 'S'
 	export -n "SCH_TIMEOUT_JOB_${sch_job_id}=${sch_val}"
 }
-
-# Auto-select supported job termination mechanism from whichever helper libraries are sourced.
-# Fallback order:
-#   cgroup -> /proc children-walk -> /proc PPID-walk.
-# 1: out var to output supported & available job termination callback name
-sched_job_term_select() {
-	sch_check_name "var" "${1:?}" "sched_job_term_select" || return 1
-
-	if cgroup_cleanup_supported; then
-		export -n "${1}=sched_job_term_cgroup"
-	elif proc_children_supported; then
-		export -n "${1}=sched_job_term_children"
-	elif proc_ppid_supported; then
-		export -n "${1}=sched_job_term_ppid"
-	else
-		export -n "${1}="
-		return 1
-	fi 2>/dev/null
-}
