@@ -218,11 +218,18 @@ The scheduler can facilitate termination of **unfinished** and **expired** jobs 
 
 This callback, as all shell-scheduler callbacks, must be implemented as a shell function.
 
-The scheduler invokes this callback - `JOB_TERM_CB` - like so:
+The **full** scheduler variant invokes this callback - `JOB_TERM_CB` - like so:
 
 ```
 ${JOB_TERM_CB} <subcommand> [arguments]
 ```
+
+The **mini** variant invokes it like so:
+
+```
+${JOB_TERM_CB} <job_pid>
+```
+
 
 Additional details in [Job termination callback - mini](#job-termination-callback---mini) and [Job termination callback - full](#job-termination-callback---full).
 
@@ -482,9 +489,9 @@ For simple use cases with relatively few well-behaved jobs, it doesn't really ma
 - If the target system doesn't support the `cgroup`-based mechanism, use a `/proc`-based library: `job-term-ppid.sh` needs only `/proc` and `awk` and works essentially anywhere; `job-term-children.sh` is a more efficient variant, available where the kernel provides `CONFIG_PROC_CHILDREN`.
 
 ## Job termination callback - mini
-The **mini scheduler variant** comes with the PPID-walk job termination mechanism built-in and **does not** implement the subcommand interface implemented by the full variant, so the helper libraries discussed below are not supported by the mini variant.
+The **mini scheduler variant** comes with the **PPID-walk** job termination mechanism built-in and **does not** implement the subcommand interface implemented by the full variant, so the helper libraries discussed below are not supported by the mini variant.
 
-To enable automatic job termination, set `JOB_TERM_CB=sched_job_term_mini`.
+To enable automatic job termination via the built-in mechanism in the **mini** variant, set `JOB_TERM_CB=sched_job_term_mini` or (equivalent) `SCHED_AUTO_JOB_TERM=1`.
 
 ## Job termination callback - full
 
@@ -512,21 +519,21 @@ The project includes three helper libraries, each one implementing the **job ter
 
 ### Short version
 
-#### Helper library: `job-term-ppid.sh` (`/proc` PPID-walk)
+#### Helper library: `job-term-ppid.sh` (**PPID-walk mechanism**)
 
-Reconstructs each job's process tree by walking PPID links in `/proc/<pid>/stat`, freezes it with `SIGSTOP` (re-scanning to catch races), then delivers `SIGKILL`. Needs only `/proc` and `awk` - no cgroups, no root - which makes it the universal fallback that works on essentially any Linux. It cannot find processes reparented to init, and does not verify process termination, so `<running_pids>` reported to the **scheduler completion callback** may list job PIDs whose trees are already gone.
+Reconstructs each job's process tree by walking PPID links in `/proc/<pid>/stat`, freezes all processes in the tree with `SIGSTOP`, then delivers `SIGKILL`. Needs only `/proc` and `awk` - no cgroups, no root - which makes it the universal fallback that works on essentially any Linux. It cannot find orphaned processes, and does not verify process termination, so `<running_pids>` reported to the **scheduler completion callback** may list job PIDs whose trees are already gone.
 
 Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_ppid`; call `proc_ppid_supported` first to probe availability.
 
-#### Helper library: `job-term-children.sh` (`/proc` children-walk)
+#### Helper library: `job-term-children.sh` (**children-walk mechanism**)
 
-Same mechanism, guarantees, and limitations as the PPID-walk library, but discovers each job's descendants from the kernel's `/proc/<pid>/task/<tid>/children` files instead of PPID links. Those files require a kernel built with `CONFIG_PROC_CHILDREN`; where present they make discovery more efficient, so prefer this library over the PPID-walk one there.
+Same mechanism, guarantees, and limitations as the **PPID-walk** library, but discovers each job's descendants from the kernel's `/proc/<pid>/task/<tid>/children` files instead of PPID links. Those files require a kernel built with `CONFIG_PROC_CHILDREN`. This mechanism implements discovery of descendant processes PIDs more efficiently, so prefer it over the PPID-walk mechanism.
 
-Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_children`; call `proc_children_supported` first to probe availability.
+Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_children`. Optionally call `proc_children_supported` first to probe availability.
 
-#### Helper library: `job-term-cgroup.sh`
+#### Helper library: `job-term-cgroup.sh` (**cgroup mechanism**)
 
-When spawning jobs, puts each job in its own **cgroup v2**. When terminating jobs, kills the whole process tree - including orphaned grandchildren - via the kernel's `cgroup.kill`. Process kills are kernel-verified, so under normal operation `<running_pids>` reported to the **scheduler completion callback** is empty even after timeouts or an early exit. Requires cgroup v2 with `cgroup.kill` (kernel >= 5.14) and write access to a cgroup - available when running as root, when started by the systemd user manager, or in a container with a writable cgroup mount.
+When spawning jobs, puts each job in its own cgroup. When terminating jobs, kills the whole process tree - including orphaned grandchildren - via the kernel's `cgroup.kill`. Process kills are kernel-verified, so under normal operation `<running_pids>` reported to the **scheduler completion callback** is empty even after timeouts or an early exit. Requires cgroup v2 with `cgroup.kill` (kernel >= 5.14) and write access to a cgroup - available when running as root, when started by the systemd user manager, or in a container with a writable cgroup mount.
 
 Usage: source the file after `scheduler.sh`, then set `JOB_TERM_CB=sched_job_term_cgroup`; call `cgroup_cleanup_supported` first to probe availability.
 
