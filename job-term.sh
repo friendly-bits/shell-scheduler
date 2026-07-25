@@ -163,9 +163,8 @@ sch_jt_desc_children() {
 }
 
 # Shared implementation of the /proc job termination callbacks.
-#   init and setup are no-ops
-#   term freezes, re-scans to a fixpoint and kills;
-#   cleanup only validates and clears the out var.
+#   init, setup and cleanup are no-ops: no per-run or per-job state is held.
+#   term freezes, re-scans to a fixpoint and kills.
 # Reports no verified killed PIDs (assigns empty list to <out var>):
 #   kill verification is not possible here.
 # 1: mechanism (ppid|children)
@@ -183,16 +182,14 @@ sch_jt_proc() {
 	[ -n "${1}" ] && shift
 
 	case "${sjtp_subcmd}" in
-		init|setup) return 0 ;;
-		term|cleanup) : ;;
+		init|setup|cleanup) return 0 ;;
+		term) : ;;
 		*) sch_fail_msg "${sjtp_caller}: unknown subcommand '${sjtp_subcmd}'."; return 1
 	esac
 
-	sch_check_name "var" "${1}" "${sjtp_caller}: ${sjtp_subcmd}" || return 1
+	sch_check_name "var" "${1}" "${sjtp_caller}: term" || return 1
 	export -n "${1}="
 	shift
-
-	[ "${sjtp_subcmd}" = term ] || return 0
 
 	sch_jt_get_valid_pids sjtp_seeds "${sjtp_caller}" "${@}"
 	[ -n "${sjtp_seeds}" ] || return 0
