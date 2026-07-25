@@ -2,7 +2,7 @@
 # shellcheck disable=SC3043,SC3045,SC3003
 
 # job-term.sh - job termination library for scheduler.sh
-#
+
 # Kills each job's whole process tree (background children, orphaned grandchildren)
 #   via one of three mechanisms:
 #   - cgroup: the kernel's cgroup.kill, with kernel-verified kill reporting;
@@ -13,18 +13,19 @@
 #       needs only /proc/<pid>/stat and awk - available on essentially any Linux
 #   The /proc mechanisms cannot verify kills and report no verified PIDs.
 # See REFERENCE.md ("Job termination").
-#
+
 # Usage: source this file after scheduler.sh, then select the mechanism:
-#   sched_use_job_term auto        # or cgroup|children|ppid
-# which sets JOB_TERM_CB=sched_job_term_<mech> on success, or JOB_TERM_CB= and
+#   sched_use_job_term <cgroup|children|ppid|auto>
+# which sets JOB_TERM_CB=sched_job_term_<mechanism> on success, or JOB_TERM_CB= and
 #   returns 1 when the requested mechanism is unusable here.
-# The callbacks can also be selected directly: JOB_TERM_CB=sched_job_term_ppid
-#
-# Environment:
+
+# Alternatively, select the callback manually: JOB_TERM_CB=sched_job_term_ppid
+
+# Reads env vars:
 # SCHED_CGROUP_BASE (optional): writable cgroup2 directory under which the per-run cgroup is created,
 #  skipping base autodetection
 # SCHED_AWK_CMD (optional): awk command to use for the /proc mechanisms
-#
+
 # This library owns variables prefixed SCH_JT_.
 
 
@@ -32,87 +33,85 @@
 
 # Collect the valid PIDs from <pid>..., warning about and skipping the invalid ones.
 # 1: out var for the space-separated valid PIDs
-# 2: library name for messages
+# 2: caller name
 # 3..: candidate PIDs
-sch_jt_seeds() {
-	local sjts_out_var="${1}" sjts_lib_name="${2}" sjts_p sjts_list=
-
+sch_jt_get_valid_pids() {
+	local sjts_out_var="${1:?}" sjts_caller="${2:?}" sjts_p
 	shift 2
 
+	export -n "${sjts_out_var}="
 	for sjts_p in "${@}"; do
 		sch_is_uint "${sjts_p}" ||
-			{ sch_fail_msg "${sjts_lib_name}: term: ignoring invalid PID '${sjts_p}'."; continue; }
-		sch_append sjts_list "${sjts_p}"
+			{ sch_fail_msg "${sjts_caller}: term: ignoring invalid PID '${sjts_p}'."; continue; }
+		sch_append "${sjts_out_var}" "${sjts_p}"
 	done
-
-	export -n "${sjts_out_var}=${sjts_list}"
+	:
 }
 
 
 ### /proc mechanisms
 
-# Collect all live descendant PIDs (space-separated, seeds excluded) by walking PPID links
-#   from /proc/*/stat.
-# Returns 1 if /proc yielded no parseable records at all.
+# Collect all live descendant PIDs (space-separated, seeds excluded)
+#   by walking /proc/*/stat PPID links
+# Returns 1 if /proc yielded no parseable records
 # 1: out var
 # 2: space-separated seed PIDs
 sch_jt_desc_ppid() {
-	local sjtd_had_f sjtd_rv sjtd_out \
-		sjtd_out_var="${1}" sjtd_seeds="${2}"
-
-	sch_had_f && sjtd_had_f=1
-	set +f
+	local sjtd_rv sjtd_out \
+		sjtd_out_var="${1:?}" sjtd_seeds="${2?}"
 
 	# The awk pipeline runs in a subshell either way, so capture it here rather than
 	#   printing to stdout
-	sjtd_out="$(cat /proc/[0-9]*/stat 2>/dev/null | {
-		set -f
-		# shellcheck disable=SC2016
-		${SCHED_AWK_CMD:-awk} -v seeds="${sjtd_seeds}" '
-		/^[0-9]+ \(/ {
-			pid = $1
-			s = $0
-			# Strip "pid (comm) X " (X = single state char).
-			# comm may contain spaces and parens - the greedy match handles those;
-			#   a line that does not match is a fragment of a newline-containing comm - skip
-			if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
-			split(s, f, " ")
-			if (f[1] !~ /^[0-9]+$/) next
-			ppid[pid] = f[1]
-			valid++
+	sjtd_out="$(
+		set +f
+		cat /proc/[0-9]*/stat 2>/dev/null | {
+			set -f
+			# shellcheck disable=SC2016
+			${SCHED_AWK_CMD:-awk} -v seeds="${sjtd_seeds}" '
+			/^[0-9]+ \(/ {
+				pid = $1
+				s = $0
+				# Strip "pid (comm) X " (X = single state char).
+				# comm may contain spaces and parens - the greedy match handles those;
+				#   a line that does not match is a fragment of a newline-containing comm - skip
+				if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
+				split(s, f, " ")
+				if (f[1] !~ /^[0-9]+$/) next
+				ppid[pid] = f[1]
+				valid++
+			}
+			END {
+				if (!valid) exit 1
+				n = split(seeds, a, " ")
+				for (i = 1; i <= n; i++)
+					if (a[i] ~ /^[0-9]+$/) {
+						seed[a[i]] = 1
+						want[a[i]] = 1
+					}
+				do {
+					changed = 0
+					for (p in ppid)
+						if (!(p in want) && (ppid[p] in want)) { want[p] = 1; changed = 1 }
+				} while (changed)
+				for (p in want) if (!(p in seed)) printf "%s ", p
+			}'
 		}
-		END {
-			if (!valid) exit 1
-			n = split(seeds, a, " ")
-			for (i = 1; i <= n; i++)
-				if (a[i] ~ /^[0-9]+$/) {
-					seed[a[i]] = 1
-					want[a[i]] = 1
-				}
-			do {
-				changed = 0
-				for (p in ppid)
-					if (!(p in want) && (ppid[p] in want)) { want[p] = 1; changed = 1 }
-			} while (changed)
-			for (p in want) if (!(p in seed)) printf "%s ", p
-		}'
-	})"
+	)"
 	sjtd_rv=${?}
-
-	[ -n "${sjtd_had_f}" ] && set -f
 
 	export -n "${sjtd_out_var}=${sjtd_out}"
 	return ${sjtd_rv}
 }
 
 # Walk /proc/<pid>/task/<tid>/children breadth-first from the seeds and collect all live descendant PIDs
-#   (space-separated, seeds excluded). Globs task/* so children forked by non-leader threads are found.
+#   (space-separated, seeds excluded).
+# Globs task/* so children forked by non-leader threads are found.
 # 1: out var
 # 2: space-separated seed PIDs
 sch_jt_desc_children() {
 	local \
 		sjtd_had_f sjtd_rv=0 \
-		sjtd_frontier sjtd_next sjtd_seen sjtd_out sjtd_files \
+		sjtd_frontier sjtd_next sjtd_seen sjtd_files \
 		sjtd_p sjtd_f sjtd_kid \
 		sjtd_out_var="${1}" sjtd_seeds="${2}"
 
@@ -120,7 +119,7 @@ sch_jt_desc_children() {
 
 	sjtd_seen="${sjtd_seeds}"
 	sjtd_frontier="${sjtd_seeds}"
-	sjtd_out=
+	export -n "${sjtd_out_var}="
 
 	while [ -n "${sjtd_frontier}" ]; do
 		sjtd_files=
@@ -154,48 +153,48 @@ sch_jt_desc_children() {
 			sch_is_included "${sjtd_kid}" "${sjtd_seen}" && continue
 			sch_append sjtd_seen "${sjtd_kid}"
 			sch_append sjtd_frontier "${sjtd_kid}"
-			sch_append sjtd_out "${sjtd_kid}"
+			sch_append "${sjtd_out_var}" "${sjtd_kid}"
 		done
 	done
 
 	[ -n "${sjtd_had_f}" ] || set +f
 
-	export -n "${sjtd_out_var}=${sjtd_out}"
 	return ${sjtd_rv}
 }
 
 # Shared implementation of the /proc job termination callbacks.
-#   init and setup are no-ops; term freezes, re-scans to a fixpoint and kills;
+#   init and setup are no-ops
+#   term freezes, re-scans to a fixpoint and kills;
 #   cleanup only validates and clears the out var.
-# Reports no verified PIDs (assigns an empty list to <out var>):
+# Reports no verified killed PIDs (assigns empty list to <out var>):
 #   kill verification is not possible here.
 # 1: mechanism (ppid|children)
 # 2: subcommand
-# 3..: subcommand arguments
+# 3..: subcommand args
 sch_jt_proc() {
 	local \
-		sjtp_mech="${1}" \
-		sjtp_lib_name="sched_job_term_${1}" \
+		sjtp_mech="${1:?}" \
+		sjtp_caller="sched_job_term_${1}" \
 		sjtp_had_f \
 		sjtp_seeds sjtp_all sjtp_prev sjtp_found sjtp_try \
 		sjtp_subcmd="${2}"
 
-	shift 2>/dev/null
-	shift 2>/dev/null
+	shift
+	[ -n "${1}" ] && shift
 
 	case "${sjtp_subcmd}" in
 		init|setup) return 0 ;;
 		term|cleanup) : ;;
-		*) sch_fail_msg "${sjtp_lib_name}: unknown subcommand '${sjtp_subcmd}'."; return 1
+		*) sch_fail_msg "${sjtp_caller}: unknown subcommand '${sjtp_subcmd}'."; return 1
 	esac
 
-	sch_check_name "var" "${1}" "${sjtp_lib_name}: ${sjtp_subcmd}" || return 1
+	sch_check_name "var" "${1}" "${sjtp_caller}: ${sjtp_subcmd}" || return 1
 	export -n "${1}="
-	shift 2>/dev/null
+	shift
 
 	[ "${sjtp_subcmd}" = term ] || return 0
 
-	sch_jt_seeds sjtp_seeds "${sjtp_lib_name}" "${@}"
+	sch_jt_get_valid_pids sjtp_seeds "${sjtp_caller}" "${@}"
 	[ -n "${sjtp_seeds}" ] || return 0
 
 	# Freeze, re-scan to fixpoint, then kill:
@@ -212,10 +211,11 @@ sch_jt_proc() {
 		kill -STOP ${sjtp_all} 2>/dev/null
 		case "${sjtp_mech}" in
 			ppid) sch_jt_desc_ppid sjtp_found "${sjtp_all}" ;;
-			children) sch_jt_desc_children sjtp_found "${sjtp_all}"
+			children) sch_jt_desc_children sjtp_found "${sjtp_all}" ;;
+			*) false
 		esac ||
 		{
-			sch_fail_msg "${sjtp_lib_name}: /proc scan failed."
+			sch_fail_msg "${sjtp_caller}: /proc scan failed."
 			break
 		}
 		sch_append sjtp_all "${sjtp_found}"
@@ -226,7 +226,7 @@ sch_jt_proc() {
 
 	# SIGKILL is delivered to stopped processes; no CONT needed
 	# shellcheck disable=SC2086
-	kill -KILL ${sjtp_all} 2>/dev/null
+	[ -n "${sjtp_all}" ] && kill -KILL ${sjtp_all} 2>/dev/null
 
 	[ -n "${sjtp_had_f}" ] || set +f
 	:
@@ -255,6 +255,7 @@ sched_job_term_children() { sch_jt_proc children "${@}"; }
 sch_jt_cg_mk_base() {
 	local sjtc_n=0 sjtc_d
 
+	export -n "${1}="
 	while :; do
 		sjtc_d="${2}/sched_${3:?}.${sjtc_n}"
 		mkdir "${sjtc_d}" 2>/dev/null && { export -n "${1}=${sjtc_d}"; return 0; }
@@ -342,11 +343,12 @@ sch_jt_cg_init() {
 #   i.e. kill of the job's process tree is verified:
 #   append the PID to <out var>
 # Otherwise park the PID in ${SCH_JT_PENDING} for later retries.
-# 1: out var to append reaped PID to
+# 1: out var for reaped PID
 # 2: job wrapper PID
 sch_jt_cg_try_rm() {
+	export -n "${1:?}="
 	rmdir "${SCH_JT_BASE:?}/job_${2:?}" 2>/dev/null &&
-		{ sch_append "${1:?}" "${2}"; return 0; }
+		{ export -n "${1:?}=${2}"; return 0; }
 	sch_is_included "${2}" "${SCH_JT_PENDING}" ||
 		sch_append SCH_JT_PENDING "${2}"
 	return 1
@@ -354,11 +356,12 @@ sch_jt_cg_try_rm() {
 
 # Kill all processes remaining in the per-job cgroup of the job with wrapper
 #   PID <pid> and try to remove the cgroup (verifying the kill)
-# 1: out var to append reaped PID to
+# 1: out var for reaped PID
 # 2: job wrapper PID
 sch_jt_cg_kill_job() {
 	local sjtc_d="${SCH_JT_BASE:?}/job_${2:?}"
 
+	export -n "${1:?}="
 	[ -d "${sjtc_d}" ] || return 0
 	printf '1\n' 2>/dev/null > "${sjtc_d}/cgroup.kill"
 	sch_jt_cg_try_rm "${1:?}" "${2}"
@@ -372,25 +375,29 @@ sch_jt_cg_kill_job() {
 sch_jt_cg_term() {
 	local \
 		sjtc_lib_name=sched_job_term_cgroup \
-		sjtc_out_var="${1}" sjtc_reaped='' sjtc_seeds sjtc_p sjtc_prev
+		sjtc_out_var="${1}" sjtc_reaped sjtc_seeds sjtc_p sjtc_prev
 
 	shift 2>/dev/null
 
 	# Retry previously unverified removals first, then kill
 	sjtc_prev="${SCH_JT_PENDING}"
 	SCH_JT_PENDING=
+	export -n "${sjtc_out_var}="
+
 	# shellcheck disable=SC2086
 	for sjtc_p in ${sjtc_prev}; do
 		sch_jt_cg_try_rm sjtc_reaped "${sjtc_p}"
+		sch_append "${sjtc_out_var}" "${sjtc_reaped}"
 	done
 
-	sch_jt_seeds sjtc_seeds "${sjtc_lib_name}" "${@}"
+	sch_jt_get_valid_pids sjtc_seeds "${sjtc_lib_name}" "${@}"
 	# shellcheck disable=SC2086
 	for sjtc_p in ${sjtc_seeds}; do
 		sch_jt_cg_kill_job sjtc_reaped "${sjtc_p}"
+		sch_append "${sjtc_out_var}" "${sjtc_reaped}"
 	done
 
-	export -n "${sjtc_out_var}=${sjtc_reaped}"
+	:
 }
 
 # 'cleanup' body: sweep all remaining job cgroups, retry unverified removals and
@@ -399,7 +406,9 @@ sch_jt_cg_term() {
 sch_jt_cg_cleanup() {
 	local \
 		sjtc_lib_name=sched_job_term_cgroup \
-		sjtc_out_var="${1}" sjtc_reaped='' sjtc_p sjtc_prev sjtc_try sjtc_had_f
+		sjtc_out_var="${1}" sjtc_reaped sjtc_p sjtc_prev sjtc_try sjtc_had_f
+
+	export -n "${sjtc_out_var}="
 
 	# Sweep all remaining job cgroups - including those of completed jobs that left processes behind:
 	#   nothing a job spawned survives the run.
@@ -412,7 +421,10 @@ sch_jt_cg_cleanup() {
 		for sjtc_p in "${@}"; do
 			[ -d "${sjtc_p}" ] || continue
 			sjtc_p="${sjtc_p##*/job_}"
-			sch_is_uint "${sjtc_p}" && sch_jt_cg_kill_job sjtc_reaped "${sjtc_p}"
+			sch_is_uint "${sjtc_p}" && {
+				sch_jt_cg_kill_job sjtc_reaped "${sjtc_p}"
+				sch_append "${sjtc_out_var}" "${sjtc_reaped}"
+			}
 		done
 	}
 
@@ -425,6 +437,7 @@ sch_jt_cg_cleanup() {
 		# shellcheck disable=SC2086
 		for sjtc_p in ${sjtc_prev}; do
 			sch_jt_cg_try_rm sjtc_reaped "${sjtc_p}"
+			sch_append "${sjtc_out_var}" "${sjtc_reaped}"
 		done
 		[ -n "${SCH_JT_PENDING}" ] || break
 		[ "${sjtc_try}" = 3 ] || sleep 1
@@ -435,7 +448,7 @@ sch_jt_cg_cleanup() {
 	}
 	SCH_JT_BASE=
 
-	export -n "${sjtc_out_var}=${sjtc_reaped}"
+	:
 }
 
 # Job termination callback (see the protocol contract in REFERENCE.md):
@@ -532,28 +545,40 @@ sch_jt_probe_cgroup() {
 #   by assigning JOB_TERM_CB=sched_job_term_<mech>.
 # 'auto' tries cgroup -> children -> ppid.
 # On failure - the mechanism is unusable here, or the argument is outside the closed set -
-#   JOB_TERM_CB is assigned an empty value, so a failed selection never leaves a stale
-#   callback armed. Emits no messages.
+#   JOB_TERM_CB is assigned an empty value, so a failed selection never leaves a stale callback armed.
+#   Prints errors unless run with '-q'.
+# 0 (optional): '-q' for quiet mode (no errors)
 # 1: cgroup|children|ppid|auto
 # Return codes: 0 - selected; 1 - not selected
 sched_use_job_term() {
-	local sjt_mech="${1}" sjt_rv=0
+	local sjt_q
+	[ "${1}" = '-q' ] && { sjt_q=1; shift; }
+	local sjt_mech="${1}" sjt_arg="${1}"
+
+	export -n JOB_TERM_CB=
 
 	case "${sjt_mech}" in
 		auto)
 			if sch_jt_probe_cgroup; then sjt_mech=cgroup
 			elif sch_jt_probe_children; then sjt_mech=children
 			elif sch_jt_probe_ppid; then sjt_mech=ppid
-			else sjt_rv=1
+			else false
 			fi
 		;;
-		cgroup) sch_jt_probe_cgroup || sjt_rv=1 ;;
-		children) sch_jt_probe_children || sjt_rv=1 ;;
-		ppid) sch_jt_probe_ppid || sjt_rv=1 ;;
-		*) sjt_rv=1
-	esac 2>/dev/null
-
-	[ "${sjt_rv}" = 0 ] || { JOB_TERM_CB=; return 1; }
+		cgroup) sch_jt_probe_cgroup ;;
+		children) sch_jt_probe_children ;;
+		ppid) sch_jt_probe_ppid ;;
+		*) false
+	esac 2>/dev/null ||
+	{
+		[ -n "${sjt_q}" ] && return 1
+		if [ "${sjt_arg}" = auto ]; then
+			sch_fail_msg "Failed to find a functional job termination mechanism for this system."
+		else
+			sch_fail_msg "Job termination mechanism '${sjt_arg}' is unavailable."
+		fi
+		return 1
+	}
 
 	JOB_TERM_CB="sched_job_term_${sjt_mech}"
 }
