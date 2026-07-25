@@ -107,7 +107,7 @@ sched_job_term_ppid() {
 			break
 		}
 		sch_append spp_all "${spp_found}"
-		sch_rm_trailing spp_all " "
+		sch_tr_trailing spp_all " "
 		[ "${spp_all}" = "${spp_prev}" ] && break
 		spp_prev="${spp_all}"
 	done

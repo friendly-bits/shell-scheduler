@@ -66,7 +66,7 @@ sch_tc_init() {
 	if [ -n "${SCHED_CGROUP_BASE}" ]; then
 		# Specified by the user
 		stc_cand="${SCHED_CGROUP_BASE}"
-		sch_rm_trailing stc_cand "/"
+		sch_tr_trailing stc_cand "/"
 		sch_tc_mk_base "${stc_cand}" || {
 			sch_fail_msg "${stc_lib_name}: cannot create a cgroup under '${SCHED_CGROUP_BASE}'."
 			return 1
@@ -81,7 +81,7 @@ sch_tc_init() {
 		done 2>/dev/null < /proc/self/cgroup
 
 		stc_cand="${stc_mnt}${stc_own}"
-		sch_rm_trailing stc_cand "/"
+		sch_tr_trailing stc_cand "/"
 
 		sch_tc_mk_base "${stc_cand}" ||
 		sch_tc_mk_base "${stc_mnt}" || {

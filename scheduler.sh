@@ -43,8 +43,8 @@ sch_rm_elem() {
 		sre_l=" ${sre_l} "
 		local sre_s=" ${sre_e} "
 		sre_l="${sre_l%%"${sre_s}"*} ${sre_l#*"${sre_s}"}"
-		sch_rm_trailing sre_l " "
-		sch_rm_leading sre_l " "
+		sch_tr_trailing sre_l " "
+		sch_tr_leading sre_l " "
 	}
 
 	export -n "${sre_out_var}=${sre_l}"
@@ -86,7 +86,7 @@ sch_get_uptime_cs() {
 		return 1
 	}
 	cs="${s:-0}${cs:-00}"
-	sch_rm_leading cs "0"
+	sch_tr_leading cs "0"
 	export -n "${1}=${cs:-0}"
 }
 
@@ -102,21 +102,21 @@ sch_is_cmd() {
 	command -v "${1}" 1>/dev/null 2>&1
 }
 
+sch_tr_leading() {
+	sch_check_name "var" "${1}" &&
+	eval "${1}=\"\${${1}#\"\${${1}%%[!\"\${2}\"]*}\"}\""
+}
+
+sch_tr_trailing() {
+	sch_check_name "var" "${1}" &&
+	eval "${1}=\"\${${1}%\"\${${1}##*[!\"\${2}\"]}\"}\""
+}
+
 sch_had_f() {
 	case "${-}" in
 		*f*) return 0 ;;
 		*) return 1
 	esac
-}
-
-sch_rm_leading() {
-	sch_check_name "var" "${1}" || return 1
-	eval "${1}=\"\${${1}#\"\${${1}%%[!\"\${2}\"]*}\"}\""
-}
-
-sch_rm_trailing() {
-	sch_check_name "var" "${1}" || return 1
-	eval "${1}=\"\${${1}%\"\${${1}##*[!\"\${2}\"]}\"}\""
 }
 
 # Get PID of current shell process
@@ -550,7 +550,7 @@ schedule_jobs() {
 		[ -z "${val}" ] && [ -z "${3}" ] && return 0
 		sch_is_uint "${val}" && [ "${val}" -ge 1 ] ||
 			{ sch_fail_msg "Invalid value '${val}' of env var SCHED_${1#SCH_}."; return 1; }
-		sch_rm_leading val "0"
+		sch_tr_leading val "0"
 		export -n "${1}=${val}"
 	}
 
@@ -617,7 +617,7 @@ schedule_jobs() {
 	sch_normalize_uint SCH_IDLE_TIMEOUT_S "${SCHED_IDLE_TIMEOUT_S:-300}" &&
 	sch_normalize_uint SCH_JOB_TIMEOUT_S "${SCHED_JOB_TIMEOUT_S}" || exit 1
 
-	sch_rm_trailing sch_dir "/"
+	sch_tr_trailing sch_dir "/"
 
 	[ -n "${sch_dir}" ] ||
 		{ sch_fail_msg "Invalid value '${SCHED_DIR}' of env var SCHED_DIR."; exit 1; }
@@ -869,7 +869,7 @@ job_set_timeout() {
 		sch_fail_msg "${sch_me}: invalid timeout value '${sch_val}' for job '${sch_job_id}'."
 		return 1
 	}
-	sch_rm_leading sch_val "0"
+	sch_tr_leading sch_val "0"
 	# Not SCH_JOB_TIMEOUT_<id>: that would collide with the internal
 	# ${SCH_JOB_TIMEOUT_S} copy of ${SCHED_JOB_TIMEOUT_S} for a job named 'S'
 	export -n "SCH_TIMEOUT_JOB_${sch_job_id}=${sch_val}"

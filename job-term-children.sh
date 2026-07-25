@@ -111,7 +111,7 @@ sched_job_term_children() {
 			break
 		}
 		sch_append stch_all "${stch_found}"
-		sch_rm_trailing stch_all " "
+		sch_tr_trailing stch_all " "
 		[ "${stch_all}" = "${stch_prev}" ] && break
 		stch_prev="${stch_all}"
 	done
