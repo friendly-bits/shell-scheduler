@@ -80,8 +80,8 @@ finalize_dl()
 	printf '\n'
 
 
-	# This example implements job termination via one of the helper libraries (selected automatically).
-	# Depending on which library was selected, ${running_pids} may be empty string or not.
+	# This example implements job termination via the helper library (mechanism selected automatically).
+	# Depending on which mechanism was selected, ${running_pids} may be empty string or not.
 	# In most cases, as long as automatic job termination is enabled,
 	#   non-empty ${running_pids} can be safely ignored.
 	printf '%s\n' "PIDs of jobs which might have escaped termination: ${running_pids:-<none>}"
@@ -94,13 +94,11 @@ finalize_dl()
 SCHEDULER_LIB="${SCHEDULER_LIB:-./scheduler.sh}"
 . "${SCHEDULER_LIB}"
 
-# --- Source job termination helper libraries ---
-. ./job-term-ppid.sh
-. ./job-term-children.sh
-. ./job-term-cgroup.sh
+# --- Source the job termination helper library ---
+. ./job-term.sh
 
 # --- Automatically select best available job termination mechanism, assign callback value to ${JOB_TERM_CB} ---
-sched_job_term_select JOB_TERM_CB || { echo "No compatible job termination mechanisms are available." >&2; exit 1; }
+sched_use_job_term auto || exit 1
 echo "Automatically selected JOB_TERM_CB: ${JOB_TERM_CB}"
 
 # --- Params assignment ---
@@ -196,20 +194,18 @@ trap '
 
 ### Cleaning up job's processes
 
-The scheduler tracks the PIDs of the jobs (in this case, instances of the shell function `download_list()`, each running in a separate subshell). If your **job execution callback** invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler terminates before all jobs have completed, the subshell in which the callback lives, as well as any external binaries it called, will keep running as orphaned processes. The example script implements termination of any expired and unfinished jobs via one of the job termination libraries included with the project. First, the script sources all three libraries:
+The scheduler tracks PIDs of the jobs (in this case, instances of the shell function `download_list()`, each running in a separate subshell). If your **job execution callback** invokes an external binary (like `wget` or `curl`), that binary runs in a child process of the job's subshell. If the scheduler terminates before all jobs have completed, the subshell in which the callback lives, as well as any external binaries it called, will keep running as orphaned processes. The example script implements termination of any expired and unfinished jobs via the job termination library included with the project. First, the script sources the library:
 
 ```
-# Source job termination helper libraries
-. ./job-term-ppid.sh
-. ./job-term-children.sh
-. ./job-term-cgroup.sh
+# Source the job termination helper library
+. ./job-term.sh
 ```
 
-Then the script calls the helper `sched_job_term_select` to automatically select the best available job termination mechanism:
+Then the script calls `sched_use_job_term auto` to automatically select the best available job termination mechanism (`sched_use_job_term` emits errors on failure, so the script only has to exit):
 
 ```
 # Automatically select best available job termination mechanism, assign callback value to ${JOB_TERM_CB}
-sched_job_term_select JOB_TERM_CB || { echo "No compatible job termination mechanisms are available." >&2; exit 1; }
+sched_use_job_term auto || exit 1
 ```
 
 All the rest is done automatically: if any jobs need to be terminated, the scheduler will call the **job termination callback** and the callback will terminate any descendant processes.

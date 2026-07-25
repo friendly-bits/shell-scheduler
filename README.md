@@ -34,7 +34,7 @@ This library is designed to solve the following problems:
 
 shell-scheduler comes in two variants: full (`scheduler.sh`) and mini (`scheduler-mini.sh`). The differences are listed below:
 
-- **Job termination**: the full variant delegates to pluggable helper libraries (cgroup, `/proc` children-walk, `/proc` PPID-walk); the mini variant comes with the `/proc` PPID-walk job termination mechanism built in, and removes code supporting the cgroup mechanism, as well as automatic job termination mechanism selector.
+- **Job termination**: the full variant delegates to a pluggable helper library (`job-term.sh`) which implements three selectable job termination mechanisms (cgroup, `/proc` children-walk, `/proc` PPID-walk); the mini variant comes with the `/proc` PPID-walk mechanism built in, does not support the job termination callback protocol implemented in the helper library or the other two mechanisms.
 - **Per-job parameters**: the full variant exports registered params to jobs only when you opt in with `SCHED_AUTO_PARAMS=1`; the mini variant always exports them.
 - **Code comments**: the mini version removes a lot of them to reduce the size.
 
@@ -225,7 +225,7 @@ The above information, along with the below example, should be enough for most b
 - **[Signal handling](REFERENCE.md#signal-handling)**
 - **[Job termination mechanisms](REFERENCE.md#job-termination-mechanisms)**
 
-Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The three optional job termination helper libraries are documented in **[JOB-TERMINATION-LIBRARIES.md](JOB-TERMINATION-LIBRARIES.md)**.
+Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The optional job termination helper library and its three mechanisms are documented in **[JOB-TERMINATION-LIBRARY.md](JOB-TERMINATION-LIBRARY.md)**.
 
 ## Real-world examples
 
