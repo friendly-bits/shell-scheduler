@@ -28,14 +28,24 @@ esac
 
 . "${script_dir}/../${SCHEDULER_LIB}"
 
-# The full variant uses the standalone job-termination libraries; the mini
+# The full variant uses the standalone job-termination library; the mini
 #   variant has its own built-in mechanism (sched_job_term_mini).
 if [ -z "${SCHED_IS_MINI}" ]; then
-	. "${script_dir}/../job-term-cgroup.sh"
-	. "${script_dir}/../job-term-children.sh"
-	. "${script_dir}/../job-term-ppid.sh"
+	. "${script_dir}/../job-term.sh"
 	SCHED_TERM_CB_DEFAULT=sched_job_term_ppid
-	term_default_capable() { proc_ppid_supported; }
+
+	# Probe a job termination mechanism, quietly and without the ${JOB_TERM_CB}
+	#   side effect of sched_use_job_term (tests set ${JOB_TERM_CB} per run)
+	# 1: cgroup|children|ppid|auto
+	jt_mech_capable() {
+		local prev_cb="${JOB_TERM_CB}" rv=0
+
+		sched_use_job_term -q "${1}" || rv=1
+		JOB_TERM_CB="${prev_cb}"
+		return "${rv}"
+	}
+
+	term_default_capable() { jt_mech_capable ppid; }
 else
 	SCHED_TERM_CB_DEFAULT=sched_job_term_mini
 	term_default_capable() { sch_is_cmd "${SCHED_AWK_CMD:-awk}" && [ -r /proc/self/stat ]; }

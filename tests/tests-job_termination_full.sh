@@ -5,9 +5,9 @@
 # tests-job_termination_full.sh
 
 # Category: job termination, full-variant only.
-#   Tests of the standalone termination libraries (cgroup, children, ppid) and
-#   the full JOB_TERM_CB protocol (init/setup/term <out_var>/cleanup, verified
-#   kills). The mini variant drops these; its own tests live in
+#   Tests of the standalone termination library's mechanisms (cgroup, children,
+#   ppid) and the full JOB_TERM_CB protocol (init/setup/term <out_var>/cleanup,
+#   verified kills). The mini variant drops these; its own tests live in
 #   tests-job_termination_mini.sh. Shared infrastructure (gates, do_job_term,
 #   cg_* helpers, _jt_*_scenario) is defined in tests-job_termination.sh.
 
@@ -15,13 +15,13 @@
 
 #
 # Full-only infrastructure: capability gates and cgroup-base helpers for the
-#   standalone termination libraries (cgroup, children).
+#   standalone library's cgroup and children mechanisms.
 #
 
-# Capability gate for the cgroup library, evaluated once per suite run
+# Capability gate for the cgroup mechanism, evaluated once per suite run
 cg_capable() {
 	[ -n "${CG_CAPABLE_CACHED}" ] || {
-		if cgroup_cleanup_supported; then
+		if jt_mech_capable cgroup; then
 			CG_CAPABLE_CACHED=yes
 		else
 			CG_CAPABLE_CACHED=no
@@ -32,10 +32,10 @@ cg_capable() {
 CG_CAPABLE_CACHED=
 CG_SKIP_REASON="cgroup termination unsupported here - run as root or via 'systemd-run --user --scope'"
 
-# Capability gate for the children library, evaluated once per suite run
+# Capability gate for the children mechanism, evaluated once per suite run
 children_capable() {
 	[ -n "${CHILDREN_CAPABLE_CACHED}" ] || {
-		if proc_children_supported; then
+		if jt_mech_capable children; then
 			CHILDREN_CAPABLE_CACHED=yes
 		else
 			CHILDREN_CAPABLE_CACHED=no
@@ -67,7 +67,7 @@ cg_mk_test_base() {
 
 	[ -n "${mnt}" ] || return 1
 	CG_TEST_BASE="${mnt}${own}"
-	sch_rm_trailing CG_TEST_BASE "/"
+	sch_tr_trailing CG_TEST_BASE "/"
 	CG_TEST_BASE="${CG_TEST_BASE}/schtest_${1:?}_$$"
 	rmdir "${CG_TEST_BASE}" 2>/dev/null
 	mkdir "${CG_TEST_BASE}" 2>/dev/null
@@ -84,10 +84,10 @@ cg_base_empty() {
 	:
 }
 
-# Verify cgroup_cleanup_supported(): consistent return code across calls,
-#   no output on success or failure paths, forced-failure via bad
-#   SCHED_CGROUP_BASE returns 1, and no stray messages through a user-set
-#   SCHED_FAIL_MSG_CB. Runs in any environment.
+# Verify sched_use_job_term cgroup: consistent return code across calls,
+#   ${JOB_TERM_CB} armed on success and cleared on failure, forced-failure via
+#   bad SCHED_CGROUP_BASE returns 1, '-q' silent on stderr and through a
+#   user-set SCHED_FAIL_MSG_CB, and one message without '-q'. Runs in any environment.
 test_job_termination_full_01() {
 	require_variant full || return 2
 
@@ -95,35 +95,45 @@ test_job_termination_full_01() {
 
 	local \
 		TEST_ID=job_termination_full_01 \
-		rv1 rv2 rv_forced out1 out_forced msg_cnt=0
+		JOB_TERM_CB \
+		rv1 rv2 rv_forced out1 out_forced out_loud cb1 cb_forced msg_cnt=0 want_cb=
 
 	local MSG_FILE="/tmp/sched.job_termination.msg.${TEST_ID}.$$"
 	rm -f "${MSG_FILE}"
 
-	print_test_header "${TEST_ID}" "cgroup_cleanup_supported(): consistency, silence, forced failure" "(no jobs)"
+	print_test_header "${TEST_ID}" "sched_use_job_term cgroup: consistency, JOB_TERM_CB, -q silence, forced failure" "(no jobs)"
 
-	out1=$(cgroup_cleanup_supported 2>&1)
+	out1=$(sched_use_job_term -q cgroup 2>&1)
 	rv1=${?}
-	cgroup_cleanup_supported >/dev/null 2>&1
+	sched_use_job_term -q cgroup >/dev/null 2>&1
 	rv2=${?}
+	cb1="${JOB_TERM_CB}"
+	[ "${rv2}" = 0 ] && want_cb=sched_job_term_cgroup
 
-	out_forced=$(SCHED_CGROUP_BASE=/nonexistent/schtest cgroup_cleanup_supported 2>&1)
+	out_forced=$(SCHED_CGROUP_BASE=/nonexistent/schtest sched_use_job_term -q cgroup 2>&1)
 	rv_forced=${?}
+	SCHED_CGROUP_BASE=/nonexistent/schtest sched_use_job_term -q cgroup >/dev/null 2>&1
+	cb_forced="${JOB_TERM_CB}"
 
-	# A user-set fail-msg callback must stay silent during the check
+	# Without -q the unavailable mechanism is reported, on one line
+	out_loud=$(SCHED_CGROUP_BASE=/nonexistent/schtest sched_use_job_term cgroup 2>&1)
+
+	# A user-set fail-msg callback must stay silent under -q, including on the failure path
 	SCHED_FAIL_MSG_CB=job_termination_full_01_fail_msg \
-		cgroup_cleanup_supported >/dev/null 2>&1
+		SCHED_CGROUP_BASE=/nonexistent/schtest sched_use_job_term -q cgroup >/dev/null 2>&1
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
 	rm -f "${MSG_FILE}"
 
 	if [ "${rv1}" = "${rv2}" ] && { [ "${rv1}" = 0 ] || [ "${rv1}" = 1 ]; } &&
 		[ -z "${out1}" ] && [ -z "${out_forced}" ] &&
-		[ "${rv_forced}" = 1 ] && [ "${msg_cnt}" = 0 ]
+		[ "${cb1}" = "${want_cb}" ] && [ -z "${cb_forced}" ] &&
+		[ "${rv_forced}" = 1 ] && [ "$(printf '%s' "${out_loud}" | wc -l)" = 0 ] &&
+		[ -n "${out_loud}" ] && [ "${msg_cnt}" = 0 ]
 	then
-		PASS "rv=${rv1} (consistent), forced rv=${rv_forced}, silent"
+		PASS "rv=${rv1} (consistent), JOB_TERM_CB='${cb1}', forced rv=${rv_forced}, -q silent, reports without -q"
 		return 0
 	else
-		FAIL "rv1=${rv1} rv2=${rv2} rv_forced=${rv_forced} (want 1), out1='${out1}', out_forced='${out_forced}', msg_cnt=${msg_cnt}"
+		FAIL "rv1=${rv1} rv2=${rv2} rv_forced=${rv_forced} (want 1), out1='${out1}', out_forced='${out_forced}', out_loud='${out_loud}', cb1='${cb1}' (want '${want_cb}'), cb_forced='${cb_forced}', msg_cnt=${msg_cnt}"
 		return 1
 	fi
 }
@@ -641,7 +651,7 @@ test_job_termination_full_11() {
 # 'init' must route around it to sched_<pid>.1 without disturbing the squat,
 #   and 'cleanup' must remove only this instance's own base.
 # Deterministically emulates the shared-base collision without containers or a real second process.
-# SCH_TC_BASE/SCH_TC_PENDING are shadowed locally so the in-process init/cleanup calls resolve them by dynamic
+# SCH_JT_BASE/SCH_JT_PENDING are shadowed locally so the in-process init/cleanup calls resolve them by dynamic
 #   scope and don't touch suite-global state.
 test_job_termination_full_12() {
 	require_variant full || return 2
@@ -649,7 +659,7 @@ test_job_termination_full_12() {
 	local \
 		TEST_ID=job_termination_full_12 \
 		CG_TEST_BASE \
-		SCH_TC_BASE SCH_TC_PENDING \
+		SCH_JT_BASE SCH_JT_PENDING \
 		checks_ok=1 p init_rv cleanup_rv reaped squat newbase
 
 	print_test_header "${TEST_ID}" "cgroup: base collision with a same-PID sibling is avoided; sibling untouched" "(no jobs)"
@@ -667,7 +677,7 @@ test_job_termination_full_12() {
 	mkdir "${squat}" 2>/dev/null && mkdir "${squat}/job_squat" 2>/dev/null ||
 		{ FAIL "cannot create squat cgroup"; jt_teardown "" "${CG_TEST_BASE}"; return 1; }
 
-	# init runs in THIS process, so SCH_TC_PID == our PID;
+	# init runs in THIS process, so the base is named after our PID;
 	#   SCHED_CGROUP_BASE forces the per-run base under CG_TEST_BASE, where .0 is already taken
 	SCHED_CGROUP_BASE="${CG_TEST_BASE}" sched_job_term_cgroup init
 	init_rv=$?
@@ -697,19 +707,24 @@ test_job_termination_full_12() {
 	fi
 }
 
-# ppid library: the proc_ppid_supported probe. Reports supported on a normal system,
-#   and reports unsupported when awk cannot be found.
+# ppid mechanism: the sched_use_job_term probe. Selects it on a normal system,
+#   and reports it unavailable when awk cannot be found.
 test_job_termination_full_13() {
 	require_variant full || return 2
 
-	local TEST_ID=job_termination_full_13 checks_ok=1
+	local TEST_ID=job_termination_full_13 JOB_TERM_CB checks_ok=1
 
-	print_test_header "${TEST_ID}" "ppid: proc_ppid_supported probe (supported here; fails without awk)" "(no jobs)"
+	print_test_header "${TEST_ID}" "ppid: sched_use_job_term probe (selected here; fails without awk)" "(no jobs)"
 
-	proc_ppid_supported ||
-		{ checks_ok=; echo "proc_ppid_supported returned non-zero on a normal system"; }
-	SCHED_AWK_CMD=/nonexistent/nope proc_ppid_supported &&
-		{ checks_ok=; echo "proc_ppid_supported reported supported with awk missing"; }
+	sched_use_job_term -q ppid ||
+		{ checks_ok=; echo "sched_use_job_term ppid returned non-zero on a normal system"; }
+	[ "${JOB_TERM_CB}" = sched_job_term_ppid ] ||
+		{ checks_ok=; echo "JOB_TERM_CB='${JOB_TERM_CB}' (want sched_job_term_ppid)"; }
+
+	SCHED_AWK_CMD=/nonexistent/nope sched_use_job_term -q ppid &&
+		{ checks_ok=; echo "sched_use_job_term ppid selected the mechanism with awk missing"; }
+	[ -z "${JOB_TERM_CB}" ] ||
+		{ checks_ok=; echo "JOB_TERM_CB='${JOB_TERM_CB}' after a failed selection (want empty)"; }
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "supported here, unsupported without awk"
@@ -728,5 +743,302 @@ test_job_termination_full_14() {
 	require_variant full || return 2
 
 	_jt_forkrace_scenario job_termination_full_14 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" forkrace_14
+}
+
+# Custom (user-defined) termination command: the core drives the whole documented
+#   subcommand sequence (test_11 covers the out-var report itself).
+# Asserts: 'init' once, first, no args; 'setup <job_id> <pid>' once per job, before
+#   any 'term'; 'term <out var> <pid>...' once, seeded with exactly the PIDs 'setup'
+#   was given; 'cleanup <out var>' once, last.
+# Runs in any environment.
+test_job_termination_full_15() {
+	require_variant full || return 2
+
+	# Records '<subcmd>|<args>'. 'setup' runs in the job process and the rest in the
+	#   scheduler process, so every invocation appends to the same file
+	job_termination_full_15_cb() {
+		local t15_sub="${1}"
+
+		shift 2>/dev/null
+		printf '%s|%s\n' "${t15_sub}" "${*}" >> "${REC_F:?}"
+
+		[ "${t15_sub}" = term ] || return 0
+		shift 2>/dev/null
+		kill -9 "${@}" 2>/dev/null
+		:
+	}
+
+	# Return 0 if ${1} is a usable shell variable name
+	job_termination_full_15_is_var() {
+		case "${1}" in
+			''|[0-9]*|*[!A-Za-z0-9_]*) return 1
+		esac
+	}
+
+	local \
+		TEST_ID=job_termination_full_15 \
+		sched_pid sched_rv checks_ok=1 \
+		rec sub args idx=0 \
+		init_cnt=0 setup_cnt=0 term_cnt=0 cleanup_cnt=0 \
+		init_idx=0 setup_idx=0 term_idx=0 cleanup_idx=0 \
+		setup_ids setup_pids term_out term_pids cleanup_args \
+		jobs='block_15a block_15b'
+
+	local \
+		PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
+		REC_F="/tmp/sched.job_termination.rec.${TEST_ID}.$$"
+	rm -f "${PIDS_F}" "${REC_F}"
+	: > "${PIDS_F}"
+
+	print_test_header "${TEST_ID}" "Custom termination command: core drives the documented subcommand sequence" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	DO_JOB_CB=do_job_term \
+	JOB_TERM_CB=job_termination_full_15_cb \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=6 \
+		schedule_jobs "${jobs}" &
+
+	sched_pid=${!}
+	sleep 1
+	kill -USR1 "${sched_pid}" 2>/dev/null
+	wait "${sched_pid}"
+	sched_rv=${?}
+
+	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+
+	[ -f "${REC_F}" ] ||
+		{ FAIL "callback was never invoked"; jt_teardown "${PIDS_F}" "" "${REC_F}"; return 1; }
+
+	while IFS= read -r rec; do
+		idx=$((idx + 1))
+		sub="${rec%%|*}"
+		args="${rec#*|}"
+
+		case "${sub}" in
+			init)
+				init_cnt=$((init_cnt + 1))
+				init_idx="${idx}"
+				[ -z "${args}" ] || { checks_ok=; echo "init got args '${args}' (want none)"; }
+			;;
+
+			setup)
+				setup_cnt=$((setup_cnt + 1))
+				setup_idx="${idx}"
+				# Exactly '<job_id> <pid>'
+				case "${args}" in
+					*' '*' '*|*' ') checks_ok=; echo "setup args '${args}' (want '<job_id> <pid>')" ;;
+					*' '*)
+						sch_append setup_ids "${args%% *}"
+						sch_append setup_pids "${args##* }"
+						is_uint "${args##* }" ||
+							{ checks_ok=; echo "setup PID '${args##* }' is not a PID"; }
+					;;
+					*) checks_ok=; echo "setup args '${args}' (want '<job_id> <pid>')"
+				esac
+			;;
+
+			term)
+				term_cnt=$((term_cnt + 1))
+				[ "${term_idx}" = 0 ] && term_idx="${idx}"
+				case "${args}" in
+					*' '*) term_out="${args%% *}"; sch_append term_pids "${args#* }" ;;
+					*) checks_ok=; echo "term args '${args}' (want '<out var> <pid>...')"
+				esac
+			;;
+
+			cleanup)
+				cleanup_cnt=$((cleanup_cnt + 1))
+				cleanup_idx="${idx}"
+				cleanup_args="${args}"
+			;;
+
+			*) checks_ok=; echo "unexpected subcommand '${sub}'"
+		esac
+	done < "${REC_F}"
+
+	[ "${init_cnt}" = 1 ] || { checks_ok=; echo "init invoked ${init_cnt} time(s) (want 1)"; }
+	[ "${init_idx}" = 1 ] || { checks_ok=; echo "init was invocation #${init_idx} (want the first)"; }
+
+	[ "${setup_cnt}" = 2 ] || { checks_ok=; echo "setup invoked ${setup_cnt} time(s) (want 2 - once per job)"; }
+	jt_same_set "${jobs}" "${setup_ids}" ||
+		{ checks_ok=; echo "setup job IDs '${setup_ids}' (want '${jobs}')"; }
+
+	if [ "${term_cnt}" = 1 ]; then
+		[ "${setup_idx}" -lt "${term_idx}" ] ||
+			{ checks_ok=; echo "a setup (#${setup_idx}) came after term (#${term_idx})"; }
+		job_termination_full_15_is_var "${term_out}" ||
+			{ checks_ok=; echo "term out var '${term_out}' is not a usable variable name"; }
+		jt_same_set "${setup_pids}" "${term_pids}" ||
+			{ checks_ok=; echo "term seeds '${term_pids}' (want the setup PIDs '${setup_pids}')"; }
+	else
+		checks_ok=; echo "term invoked ${term_cnt} time(s) (want 1)"
+	fi
+
+	[ "${cleanup_cnt}" = 1 ] || { checks_ok=; echo "cleanup invoked ${cleanup_cnt} time(s) (want 1)"; }
+	[ "${cleanup_idx}" = "${idx}" ] ||
+		{ checks_ok=; echo "cleanup was invocation #${cleanup_idx} of ${idx} (want the last)"; }
+	job_termination_full_15_is_var "${cleanup_args}" ||
+		{ checks_ok=; echo "cleanup args '${cleanup_args}' (want a single out var name)"; }
+
+	jt_teardown "${PIDS_F}" "" "${REC_F}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "init -> setup x2 -> term (seeded with the setup PIDs) -> cleanup"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
+
+# A custom termination command that fails: a non-zero return from 'term' or from
+#   'cleanup' is reported via SCHED_FAIL_MSG_CB - naming the subcommand and the code -
+#   but is not fatal: the run still ends with its own return code.
+# Runs in any environment.
+test_job_termination_full_16() {
+	require_variant full || return 2
+
+	job_termination_full_16_cb() {
+		case "${1}" in
+			term)
+				shift 2 2>/dev/null
+				kill -9 "${@}" 2>/dev/null
+				return 42
+			;;
+			cleanup) return 43
+		esac
+	}
+	job_termination_full_16_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
+
+	local \
+		TEST_ID=job_termination_full_16 \
+		sched_pid sched_rv checks_ok=1 term_msg_cnt=0 cleanup_msg_cnt=0 \
+		jobs='block_16a block_16b'
+
+	local \
+		PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
+		MSG_FILE="/tmp/sched.job_termination.msg.${TEST_ID}.$$"
+	rm -f "${PIDS_F}" "${MSG_FILE}"
+	: > "${PIDS_F}"
+
+	print_test_header "${TEST_ID}" "Custom termination command failing: reported per subcommand, not fatal" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=job_termination_full_16_fail_msg \
+	DO_JOB_CB=do_job_term \
+	JOB_TERM_CB=job_termination_full_16_cb \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=6 \
+		schedule_jobs "${jobs}" &
+
+	sched_pid=${!}
+	sleep 1
+	kill -USR1 "${sched_pid}" 2>/dev/null
+	wait "${sched_pid}"
+	sched_rv=${?}
+
+	# A failing term/cleanup must not change the scheduler's own return code
+	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+
+	[ -f "${MSG_FILE}" ] && {
+		term_msg_cnt=$(grep -c "job_termination_full_16_cb term' returned code 42." "${MSG_FILE}")
+		cleanup_msg_cnt=$(grep -c "job_termination_full_16_cb cleanup' returned code 43." "${MSG_FILE}")
+	}
+
+	[ "${term_msg_cnt}" = 1 ] ||
+		{ checks_ok=; echo "term failure reported ${term_msg_cnt} time(s) (want 1)"; }
+	[ "${cleanup_msg_cnt}" = 1 ] ||
+		{ checks_ok=; echo "cleanup failure reported ${cleanup_msg_cnt} time(s) (want 1)"; }
+	[ -n "${checks_ok}" ] || { [ -f "${MSG_FILE}" ] && cat "${MSG_FILE}"; }
+
+	jt_teardown "${PIDS_F}" "" "${MSG_FILE}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "rv=83, both failing subcommands reported with their codes"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}
+
+# A custom termination command reporting a mixed verified-kill list: the invalid
+#   tokens are reported via SCHED_FAIL_MSG_CB and skipped, while the valid PIDs in
+#   the same report are still honored - scrubbed from <running_pids>.
+# Runs in any environment.
+test_job_termination_full_17() {
+	require_variant full || return 2
+
+	job_termination_full_17_cb() {
+		local t17_out="${2}"
+
+		[ "${1}" = term ] || return 0
+		shift 2 2>/dev/null
+		kill -9 "${@}" 2>/dev/null
+		# Valid wrapper PIDs bracketed by junk the core must reject
+		export -n "${t17_out}=notapid ${*} 12x"
+	}
+	job_termination_full_17_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
+
+	local \
+		TEST_ID=job_termination_full_17 \
+		sched_pid sched_rv checks_ok=1 fin_pids \
+		bad_msg_cnt=0 notapid_cnt=0 num_cnt=0 \
+		jobs='block_17a block_17b'
+
+	local \
+		PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
+		FINALIZE_F="/tmp/sched.job_termination.fin.${TEST_ID}.$$" \
+		MSG_FILE="/tmp/sched.job_termination.msg.${TEST_ID}.$$"
+	rm -f "${PIDS_F}" "${FINALIZE_F}" "${MSG_FILE}"
+	: > "${PIDS_F}"
+
+	print_test_header "${TEST_ID}" "Custom termination command: invalid verified PIDs skipped, valid ones honored" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=job_termination_full_17_fail_msg \
+	SCHED_FINALIZE_CB=jt_finalize_rec \
+	DO_JOB_CB=do_job_term \
+	JOB_TERM_CB=job_termination_full_17_cb \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=6 \
+		schedule_jobs "${jobs}" &
+
+	sched_pid=${!}
+	sleep 1
+	kill -USR1 "${sched_pid}" 2>/dev/null
+	wait "${sched_pid}"
+	sched_rv=${?}
+
+	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+
+	[ -f "${MSG_FILE}" ] && {
+		bad_msg_cnt=$(grep -c "invalid verified PID" "${MSG_FILE}")
+		notapid_cnt=$(grep -c "invalid verified PID 'notapid'" "${MSG_FILE}")
+		num_cnt=$(grep -c "invalid verified PID '12x'" "${MSG_FILE}")
+	}
+
+	# One complaint per junk token, naming it - and no others
+	[ "${bad_msg_cnt}" = 2 ] ||
+		{ checks_ok=; echo "invalid-PID complaints: ${bad_msg_cnt} (want 2)"; }
+	[ "${notapid_cnt}" = 1 ] && [ "${num_cnt}" = 1 ] ||
+		{ checks_ok=; echo "complaints naming 'notapid'/'12x': ${notapid_cnt}/${num_cnt} (want 1/1)"; }
+	[ -n "${checks_ok}" ] || { [ -f "${MSG_FILE}" ] && cat "${MSG_FILE}"; }
+
+	# The valid PIDs in the same report were still honored
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] ||
+		{ checks_ok=; echo "running_pids '${fin_pids}' (want empty - valid PIDs honored)"; }
+
+	jt_teardown "${PIDS_F}" "" "${FINALIZE_F}" "${MSG_FILE}"
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "rv=83, both junk tokens named and skipped, valid PIDs still scrubbed"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
 }
 

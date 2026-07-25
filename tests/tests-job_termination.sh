@@ -10,7 +10,7 @@
 #   (full: sched_job_term_ppid; mini: sched_job_term_mini) and gate on
 #   term_default_capable. Full-only library tests live in
 #   tests-job_termination_full.sh; mini-only tests in tests-job_termination_mini.sh.
-#   The job-termination libraries are sourced by tests.sh (full variant only).
+#   The job-termination library is sourced by tests.sh (full variant only).
 
 # This file is sourced by tests.sh; it defines test_job_termination_NN functions
 #   plus the shared infrastructure used by all three job-termination files.
