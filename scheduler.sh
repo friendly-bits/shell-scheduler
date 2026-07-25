@@ -29,6 +29,7 @@ sch_is_included() {
 
 sch_append() {
 	sch_check_name "var" "${1}" || return 1
+	[ -n "${2}" ] || return 0
 	eval "${1}=\"\${${1}}\${${1}:+\" \"}\${2}\""
 }
 
