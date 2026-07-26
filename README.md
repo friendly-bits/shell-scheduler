@@ -35,7 +35,7 @@ This library is designed to solve the following problems:
 shell-scheduler comes in two variants: full (`scheduler.sh`) and mini (`scheduler-mini.sh`). The differences are listed below:
 
 - **Job termination**: the full variant delegates to a pluggable helper library (`job-term.sh`) which implements three selectable job termination mechanisms (cgroup, `/proc` children-walk, `/proc` PPID-walk); the mini variant comes with the `/proc` PPID-walk mechanism built in, does not support the job termination callback protocol implemented in the helper library or the other two mechanisms.
-- **Per-job parameters**: the full variant exports registered params to jobs only when you opt in with `SCHED_AUTO_PARAMS=1`; the mini variant always exports them.
+- **Per-job parameters**: the full variant exports registered params to jobs and to the job completion callback only when you opt in with `SCHED_AUTO_PARAMS=1`; the mini variant always exports them.
 - **Code comments**: the mini version removes a lot of them to reduce the size.
 
 Everything else is identical (callbacks, timeouts, per-job parameters and helpers) is identical. Pick mini if file size is important and the PPID-walk job termination mechanism is sufficient for your application; or if you prefer a single file. Pick full when you want to have all three job termination mechanisms available or gate parameter delivery to jobs.
@@ -189,7 +189,7 @@ The implementation is careful about **globbing**. Every place which might be sub
 ```sh
 # Save earlier noglob state
 local had_f
-sch_had_f && had_f=1
+sch_has_f && had_f=1
 
 # Disable globbing
 set -f
@@ -201,10 +201,10 @@ set -f
 [ -n "${had_f}" ] || set +f
 ```
 
-where `sch_had_f()` is:
+where `sch_has_f()` is:
 
 ```sh
-sch_had_f() {
+sch_has_f() {
 	case "${-}" in
 		*f*) return 0 ;;
 		*) return 1

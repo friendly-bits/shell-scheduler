@@ -129,6 +129,8 @@ It can be used to e.g. collect job results or handle failures.
 
 When the reason for calling `JOB_DONE_CB` is not a per-job time-out, `[job_pid]` is unset.
 
+With [automatic parameters](#automatic-parameters-sched_auto_params) enabled, the job's parameters are exported for the duration of this callback.
+
 When [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) are in use, a timed-out job is reported with job return code `124` and the job's PID as the third argument. The presence of that argument is what distinguishes a scheduler-synthesized timeout from a job that genuinely exited with code `124`.
 
 ### Scheduler completion callback (optional)
@@ -354,9 +356,11 @@ Without the `jobs_init` call, `job1` would still carry the `url` from the first 
 
 ### Automatic parameters (`SCHED_AUTO_PARAMS`)
 
-**(full variant only** - the mini variant always delivers registered params to jobs and ignores `SCHED_AUTO_PARAMS`.**)**
+**(full variant only** - the mini variant always delivers registered params to jobs and to the **job completion callback**, and ignores `SCHED_AUTO_PARAMS`.**)**
 
-If you want to make job-specific parameters immediately available to each job, you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and exported when initializing each job, and so will be immediately available to the job and any external commands it calls. Note that when using automatic parameters, you should not declare the variable as local and not reset its value in the **job execution callback**, because the value is assigned outside of the function implementing the callback.
+If you want to make job-specific parameters immediately available to each job (both in the **job execution callback** and in the **job completion callback**), you can set the environment variable `SCHED_AUTO_PARAMS` to `1`. Then every job-specific parameter you have set via `job_set_params` will be fetched and **exported** before either callback is invoked for that job, and so will be immediately available to the callback and to any external commands it calls. Note that when using automatic parameters, you should not declare the variable as local and not reset its value in either callback, because the value is assigned outside of the function implementing the callback.
+
+Parameters delivered this way never outlive the callback they were delivered to. The scheduler makes sure that variables it assigns for param delivery are scoped to callback: when the callback returns, they are gone, and any same-named variable that existed in the scheduler namespace beforehand is restored to its previous value. As a result, one job's parameters are isolated from another job's callback and do not shadow global variables.
 
 <details>
 <summary><strong>Example with `SCHED_AUTO_PARAMS=1`</strong></summary>
@@ -420,10 +424,9 @@ For job C, file is ''.
 <details>
 <summary><strong>Notes: naming rules, validation, and security</strong></summary>
 
-- When `SCHED_AUTO_PARAMS` is set to `1`, parameters are **exported** before the **job execution callback** is invoked, so corresponding variables are effectively available to the callback itself and to any commands it calls as environment variables.
 - Assigning and fetching parameters is internally implemented via indirection. In order to keep the implementation compatible with BusyBox ash, this indirection requires the use of `eval`. The scheduler implementation strictly validates strings passed to these `eval` calls both at assignment time (in `job_set_params()`) and when fetching values for each job at execution time. This prevents any possibility of command injection vulnerabilities in this mechanism.
 - Setting job-specific parameters via `job_set_params()` requires the **job ID** and each **param name** to contain only the following characters: `a-z`, `A-Z`, `0-9`, `_`. Param names, unlike variable names, **may** start with a digit and **may** coincide with otherwise-reserved names. `job_set_params()` treats param name as a **key** and the actual value is assigned to a variable with a different name. Retrieving a parameter, on the other hand, assigns it to a shell **variable**, so the *destination variable name* used with `job_get_params()` (either the same-named plain form, or `<var_name>` in the `<var_name>=<param_name>` form) must be a valid, non-reserved shell variable name: it must contain only `a-z`, `A-Z`, `0-9`, `_`, must not start with a digit (for compliance with the POSIX specification of valid variable names), must not start with `SCHED_`, `SCH_`, `sch_`, `_sch_`, and must not be a callback variable (`DO_JOB_CB`, `JOB_DONE_CB`) or the `IFS` variable. These prefixes and names are reserved for internal use. Job IDs, param names and destination variable names may each be at most 2020 characters long. When any of these requirements is not met, the corresponding helper prints an error, returns code 1, and does not set the parameter or variable.
-- With `SCHED_AUTO_PARAMS=1`, every registered parameter of a job is exported into a same-named variable before that job runs. All of that job's param names must therefore be valid, **non-reserved** shell variable names per the rules above (in particular, they must not start with a digit and must not use the reserved prefixes or names). If any registered parameter of a job violates these rules, that job fails during initialization: an error is reported, the **job execution callback** is never invoked, and the job completes with job return code `1` - the scheduler itself keeps running and handles the failure through the normal completion path, including invoking the **job completion callback** (`JOB_DONE_CB`) if defined. A parameter whose name is not a valid variable name can still be registered and retrieved explicitly via the `<var_name>=<param_name>` form of `job_get_params()`, but it can not be delivered through `SCHED_AUTO_PARAMS`.
+- With `SCHED_AUTO_PARAMS=1`, all param names previously set via `job_set_params` must be valid, **non-reserved** shell variable names per the rules above (in particular, they must not start with a digit and must not use the reserved prefixes or names). If any registered parameter of a job violates these rules, that job fails during initialization: an error is reported, the **job execution callback** is never invoked, and the job completes with job return code `1` - the scheduler itself keeps running and handles the failure through the normal completion path, including invoking the **job completion callback** (`JOB_DONE_CB`) if defined. The **job completion callback** complains about invalid params and does not try to fetch them but does not abort execution. A parameter whose name is not a valid variable name can still be registered and retrieved explicitly via the `<var_name>=<param_name>` form of `job_get_params()`, but it can not be delivered through `SCHED_AUTO_PARAMS`.
 
 </details>
 
@@ -443,7 +446,7 @@ The scheduler is configured entirely through environment variables. Required var
 | SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job starts or completions ( integer >= 1 ).                                        |
 | SCHED_JOB_TIMEOUT_S       |          |  unset  | Default per-job timeout in seconds ( integer >= 1 ); override per job via `job_set_timeout()`. See [TIMEKEEPING.md](TIMEKEEPING.md#per-job-timeouts). |
 | SCHED_DIR                 |          |  `/tmp` | Directory under which the scheduler creates a unique per-run subdirectory holding its job-communication FIFO; multiple scheduler instances can safely share one `SCHED_DIR`. Trailing `/` characters are ignored. |
-| SCHED_AUTO_PARAMS         |          |  unset  | **(full variant only)** Whether to export job-specific params when initializing each job ( 1 to enable, any other value to disable ). The mini variant always delivers registered params and ignores this. |
+| SCHED_AUTO_PARAMS         |          |  unset  | **(full variant only)** Whether to export job-specific params before invoking the job execution and job completion callbacks for each job ( 1 to enable, any other value to disable ). The mini variant always delivers registered params and ignores this. |
 | SCHED_CGROUP_BASE         |          |  unset  | **(full variant only)** Read by the `job-term.sh` library's cgroup mechanism, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
 
 Notes:

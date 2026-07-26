@@ -115,7 +115,7 @@ sch_jt_desc_children() {
 		sjtd_p sjtd_f sjtd_kid \
 		sjtd_out_var="${1}" sjtd_seeds="${2}"
 
-	sch_had_f && sjtd_had_f=1
+	sch_has_f && sjtd_had_f=1
 
 	sjtd_seen="${sjtd_seeds}"
 	sjtd_frontier="${sjtd_seeds}"
@@ -200,7 +200,7 @@ sch_jt_proc() {
 	sjtp_all="${sjtp_seeds}"
 	sjtp_prev=
 
-	sch_had_f && sjtp_had_f=1
+	sch_has_f && sjtp_had_f=1
 	set -f
 
 	for sjtp_try in 1 2 3; do
@@ -411,7 +411,7 @@ sch_jt_cg_cleanup() {
 	#   nothing a job spawned survives the run.
 	# The glob must expand regardless of the caller's noglob state (the application may run under set -f)
 	[ -n "${SCH_JT_BASE}" ] && {
-		sch_had_f && sjtc_had_f=1
+		sch_has_f && sjtc_had_f=1
 		set +f
 		set -- "${SCH_JT_BASE}"/job_*
 		[ -z "${sjtc_had_f}" ] || set -f
@@ -518,7 +518,7 @@ sch_jt_probe_children() {
 
 	# Resolve the glob with globbing on; an absent children file leaves the pattern literal,
 	#   so a live glob is the presence test
-	sch_had_f && sjt_had_f=1
+	sch_has_f && sjt_had_f=1
 	set +f
 	set -- /proc/self/task/*/children
 	[ -n "${sjt_had_f}" ] && set -f

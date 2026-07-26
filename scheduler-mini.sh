@@ -96,7 +96,7 @@ sch_tr_trailing() {
 	eval "${1}=\"\${${1}%\"\${${1}##*[!\"\${2}\"]}\"}\""
 }
 
-sch_had_f() {
+sch_has_f() {
 	case "${-}" in
 		*f*) return 0 ;;
 		*) return 1
@@ -144,6 +144,18 @@ sch_check_name() {
 
 	sch_fail_msg "${3}${3:+": "}${1}${1:+ }'${2}' is empty string or contains incompatible characters, or is too long."
 	return 1
+}
+
+# Validate user-supplied var name
+# 1: name
+# 2: caller name
+sch_check_var_name() {
+	sch_check_name "var" "${1}" "${2}" || return 1
+	case "${1}" in
+		sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|JOB_TERM_CB|IFS)
+			sch_fail_msg "${2}: var name '${1}' is reserved for internal use."
+			return 1
+	esac
 }
 
 sch_finalize() {
@@ -207,6 +219,44 @@ sch_start_job() {
 	exit "${?}"
 }
 
+# Invoke JOB_DONE_CB, export params when ${SCHED_AUTO_PARAMS} is on
+# Params are local to this function, they do not persist
+# 1: callback command
+# 2: job ID
+# Extra args: passed to the callback as-is
+sch_run_done_cb() {
+	local sch_me=sch_run_done_cb \
+		sch_had_f \
+		sch_p \
+		sch_names \
+		sch_cb="${1}" \
+		sch_dc_id="${2}"
+
+	shift
+
+	[ "${SCHED_AUTO_PARAMS}" = 1 ] && {
+		eval "sch_names=\"\${SCH_JOB_PARAMS_${sch_dc_id}}\""
+
+		sch_has_f && sch_had_f=1
+		set -f
+
+		# 'local' with invalid name aborts busybox ash
+		for sch_p in ${sch_names}; do
+			sch_check_var_name "${sch_p}" "${sch_me}" || { sch_names=; break; }
+		done
+
+		[ -z "${sch_names}" ] || {
+			#shellcheck disable=SC2086
+			local ${sch_names}
+			job_get_params -export "${sch_dc_id}" sch_all
+		}
+
+		[ -n "${sch_had_f}" ] || set +f
+	}
+
+	"${sch_cb}" "${@}"
+}
+
 process_done_record() {
 	local \
 		sch_cs \
@@ -236,7 +286,7 @@ process_done_record() {
 	[ -e "${sch_ipc_fifo}" ] ||
 		sch_finalize 1 "FIFO file '${sch_ipc_fifo}' does not exist."
 
-	sch_had_f && sch_had_f=1
+	sch_has_f && sch_had_f=1
 
 	sch_read_t_cs="${SCH_REMAIN_TIME_CS}"
 
@@ -312,7 +362,7 @@ process_done_record() {
 			sch_get_uptime_cs SCH_LAST_PROGRESS_TIME_CS || sch_finalize 1
 
 			[ -z "${sch_job_done_cb}" ] ||
-			"${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
+			sch_run_done_cb "${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
 				sch_finalize ${?}
 		else
 			# Unknown PID
@@ -366,7 +416,7 @@ process_done_record() {
 			[ -n "${JOB_TERM_CB}" ] && sch_term_run "${sch_pid}"
 
 			[ -z "${sch_job_done_cb}" ] ||
-			"${sch_job_done_cb}" "${sch_id}" 124 "${sch_pid}" ||
+			sch_run_done_cb "${sch_job_done_cb}" "${sch_id}" 124 "${sch_pid}" ||
 				sch_finalize ${?}
 		done
 		[ -n "${sch_had_f}" ] || set +f
@@ -430,7 +480,7 @@ sch_term_run() {
 sch_get_descendants_mini() {
 	local sjt_had_f sjt_rv sjt_seeds="${1}"
 
-	sch_had_f && sjt_had_f=1
+	sch_has_f && sjt_had_f=1
 	set +f
 
 	cat /proc/[0-9]*/stat 2>/dev/null | {
@@ -490,7 +540,7 @@ sched_job_term_mini() {
 	sjt_all="${sjt_seeds}"
 	sjt_prev=
 
-	sch_had_f && sjt_had_f=1
+	sch_has_f && sjt_had_f=1
 	set -f
 
 	for sjt_try in 1 2 3; do
@@ -598,7 +648,7 @@ schedule_jobs() {
 	# !!! Any additional arguments are passed as-is to user-defined ${DO_JOB_CB} via sch_start_job()
 
 	# Register noglob state
-	sch_had_f && SCH_HAD_F=1
+	sch_has_f && SCH_HAD_F=1
 
 	[ -n "${SCHED_AUTO_JOB_TERM}" ] && JOB_TERM_CB=sched_job_term_mini
 
@@ -729,7 +779,7 @@ jobs_init() {
 		sch_job_id \
 		sch_rv=0
 
-	sch_had_f && sch_had_f=1
+	sch_has_f && sch_had_f=1
 	set -f
 
 	#shellcheck disable=SC2048
@@ -815,7 +865,7 @@ job_get_params() {
 		eval "sch_job_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
 		[ -n "${sch_job_params}" ] || return 0
 
-		sch_had_f && sch_had_f=1
+		sch_has_f && sch_had_f=1
 		set -f
 		set -- ${sch_job_params}
 		[ -n "${sch_had_f}" ] || set +f
@@ -831,12 +881,7 @@ job_get_params() {
 		esac
 
 		sch_check_name "param" "${sch_param}" "${sch_me}" &&
-		sch_check_name "var" "${sch_var}" "${sch_me}" || return 1
-		case "${sch_var}" in
-			sch_*|_sch_*|SCH_*|SCHED_*|DO_JOB_CB|JOB_DONE_CB|JOB_TERM_CB|IFS)
-				sch_fail_msg "${sch_me}: var name '${sch_var}' is reserved for internal use."
-				return 1
-		esac
+		sch_check_var_name "${sch_var}" "${sch_me}" || return 1
 
 		eval "${sch_export}${sch_var}=\"\${SCH_JOB_PARAM_${#sch_job_id}_${sch_job_id}_${sch_param}}\""
 	done
