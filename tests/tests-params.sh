@@ -1692,3 +1692,322 @@ test_params_33() {
 		return 1
 	fi
 }
+
+# SCHED_AUTO_PARAMS=1 delivers a job's params to JOB_DONE_CB without a job_get_params() call.
+# SCHED_MAX_JOBS=1 makes job_a's callback run first, so job_b - which has no such param -
+#   shows whether the delivery left anything behind in the scheduler.
+test_params_34() {
+	params_34_do_job() { return 0; }
+
+	params_34_done() {
+		local out
+		case "${1}" in
+			"${job_id_a}") out="${A_FILE:?}" ;;
+			"${job_id_b}") out="${B_FILE:?}" ;;
+			*) return 1 ;;
+		esac
+		printf '%s\n' "${P34PARAM-<unset>}" > "${out}"
+		return 0
+	}
+
+	local \
+		TEST_ID=params_34 \
+		sched_rv \
+		seen_a \
+		seen_b \
+		P34PARAM=outer_value
+
+	local \
+		A_FILE="/tmp/sched.params.donecb_a.${TEST_ID}.$$" \
+		B_FILE="/tmp/sched.params.donecb_b.${TEST_ID}.$$" \
+		job_id_a="${TEST_ID}_job_a" \
+		job_id_b="${TEST_ID}_job_b"
+
+	rm -f "${A_FILE}" "${B_FILE}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_AUTO_PARAMS=1 delivers params to JOB_DONE_CB" "${job_id_a} ${job_id_b}"
+
+	# job_b deliberately gets no params: its callback must see the scheduler's own value
+	job_set_params "${job_id_a}" "P34PARAM=from_${job_id_a}"
+
+	SCHED_AUTO_PARAMS=1 \
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=params_34_done \
+	DO_JOB_CB=params_34_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id_a} ${job_id_b}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_first_line seen_a "${A_FILE}"
+	read_first_line seen_b "${B_FILE}"
+	rm -f "${A_FILE}" "${B_FILE}"
+
+	if [ "${sched_rv}" = 0 ] &&
+		[ "${seen_a}" = "from_${job_id_a}" ] &&
+		[ "${seen_b}" = outer_value ]
+	then
+		PASS "a='${seen_a}', b='${seen_b}'"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, a='${seen_a}' (expected 'from_${job_id_a}'), b='${seen_b}' (expected 'outer_value')"
+		return 1
+	fi
+}
+
+# Params delivered to JOB_DONE_CB are exported, so an external command run by the
+#   callback sees them; once the callback returns they are out of the environment again
+#   (job_b, which has no params).
+test_params_35() {
+	params_35_do_job() { return 0; }
+
+	params_35_done() {
+		local out
+		case "${1}" in
+			"${job_id_a}") out="${A_FILE:?}" ;;
+			"${job_id_b}") out="${B_FILE:?}" ;;
+			*) return 1 ;;
+		esac
+		sh -c 'printf "%s\n" "${P35EXT-<unset>}"' > "${out}"
+		return 0
+	}
+
+	local \
+		TEST_ID=params_35 \
+		sched_rv \
+		seen_a \
+		seen_b
+
+	local \
+		A_FILE="/tmp/sched.params.donecb_env_a.${TEST_ID}.$$" \
+		B_FILE="/tmp/sched.params.donecb_env_b.${TEST_ID}.$$" \
+		job_id_a="${TEST_ID}_job_a" \
+		job_id_b="${TEST_ID}_job_b"
+
+	rm -f "${A_FILE}" "${B_FILE}"
+
+	print_test_header "${TEST_ID:?}" "JOB_DONE_CB params reach an external command, then leave the environment" "${job_id_a} ${job_id_b}"
+
+	job_set_params "${job_id_a}" "P35EXT=from_env_done"
+
+	SCHED_AUTO_PARAMS=1 \
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=params_35_done \
+	DO_JOB_CB=params_35_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id_a} ${job_id_b}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_first_line seen_a "${A_FILE}"
+	read_first_line seen_b "${B_FILE}"
+	rm -f "${A_FILE}" "${B_FILE}"
+
+	if [ "${sched_rv}" = 0 ] &&
+		[ "${seen_a}" = from_env_done ] &&
+		[ "${seen_b}" = '<unset>' ]
+	then
+		PASS "child saw a='${seen_a}', b='${seen_b}'"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, a='${seen_a}' (expected 'from_env_done'), b='${seen_b}' (expected '<unset>')"
+		return 1
+	fi
+}
+
+# A timed-out job's JOB_DONE_CB (rv 124, three-argument form) gets its params too.
+test_params_36() {
+	params_36_done() {
+		printf '%s|%s|%s\n' "${2}" "${3}" "${P36PARAM-<unset>}" > "${OUT_FILE:?}"
+		return 0
+	}
+
+	local \
+		TEST_ID=params_36 \
+		sched_rv \
+		seen \
+		rest \
+		rv_part \
+		pid_part \
+		param_part \
+		job_id=hang_p36
+
+	local OUT_FILE="/tmp/sched.params.donecb_timeout.${TEST_ID}.$$"
+	rm -f "${OUT_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Timed-out job's JOB_DONE_CB gets the job's params" "${job_id}"
+
+	job_set_params "${job_id}" "P36PARAM=from_timed_out_job"
+	job_set_timeout "${job_id}" 1 || { FAIL "job_set_timeout failed"; return 1; }
+
+	SCHED_AUTO_PARAMS=1 \
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=params_36_done \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=6 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_first_line seen "${OUT_FILE}"
+	rm -f "${OUT_FILE}"
+
+	rv_part="${seen%%|*}"
+	rest="${seen#*|}"
+	pid_part="${rest%%|*}"
+	param_part="${rest#*|}"
+
+	if [ "${sched_rv}" = 0 ] &&
+		[ "${rv_part}" = 124 ] &&
+		is_uint "${pid_part}" &&
+		[ "${param_part}" = from_timed_out_job ]
+	then
+		PASS "rv=${rv_part}, pid=${pid_part}, P36PARAM='${param_part}'"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, record='${seen}' (expected '124|<pid>|from_timed_out_job')"
+		return 1
+	fi
+}
+
+# A job with a param name that is not a valid variable name gets no automatic params
+#   in either callback: the job fails at init (rv 1, DO_JOB_CB never runs) and its
+#   JOB_DONE_CB still runs, with the job's valid params also withheld.
+# One message per delivery attempt: one from the job, one from the scheduler.
+test_params_37() {
+	params_37_do_job() { printf 'ran\n' > "${RAN_FILE:?}"; return 0; }
+
+	params_37_done() {
+		printf '%s|%s\n' "${2}" "${P37GOOD-<unset>}" > "${OUT_FILE:?}"
+		return 0
+	}
+
+	params_37_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+
+	local \
+		TEST_ID=params_37 \
+		sched_rv \
+		seen \
+		msg_cnt \
+		job_id=params_37_job
+
+	local \
+		OUT_FILE="/tmp/sched.params.donecb_badname.${TEST_ID}.$$" \
+		RAN_FILE="/tmp/sched.params.donecb_badname_ran.${TEST_ID}.$$" \
+		MSG_FILE="/tmp/sched.params.donecb_badname_msg.${TEST_ID}.$$"
+
+	rm -f "${OUT_FILE}" "${RAN_FILE}" "${MSG_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Non-identifier param name: no auto-params in either callback" "${job_id}"
+
+	job_set_params "${job_id}" "1bad37=x" "P37GOOD=good"
+
+	SCHED_AUTO_PARAMS=1 \
+	SCHED_FAIL_MSG_CB=params_37_fail_msg \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=params_37_done \
+	DO_JOB_CB=params_37_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_first_line seen "${OUT_FILE}"
+
+	msg_cnt=0
+	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
+
+	if [ "${sched_rv}" = 0 ] &&
+		[ ! -f "${RAN_FILE}" ] &&
+		[ "${seen}" = '1|<unset>' ] &&
+		[ "${msg_cnt}" = 2 ]
+	then
+		rm -f "${OUT_FILE}" "${RAN_FILE}" "${MSG_FILE}"
+		PASS "record='${seen}', messages=${msg_cnt}"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, do_job_ran=$([ -f "${RAN_FILE}" ] && echo yes || echo no), record='${seen}' (expected '1|<unset>'), msg_cnt=${msg_cnt} (expected 2)"
+		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
+		rm -f "${OUT_FILE}" "${RAN_FILE}" "${MSG_FILE}"
+		return 1
+	fi
+}
+
+# A value assigned to a param variable inside JOB_DONE_CB is discarded when the callback
+#   returns: the next job's callback, which has no such param, sees the name unset.
+test_params_38() {
+	params_38_do_job() { return 0; }
+
+	params_38_done() {
+		local out
+		case "${1}" in
+			"${job_id_a}") out="${A_FILE:?}" ;;
+			"${job_id_b}") out="${B_FILE:?}" ;;
+			*) return 1 ;;
+		esac
+		printf '%s\n' "${P38PARAM-<unset>}" > "${out}"
+		P38PARAM=clobbered_in_done_cb
+		return 0
+	}
+
+	local \
+		TEST_ID=params_38 \
+		sched_rv \
+		seen_a \
+		seen_b
+
+	local \
+		A_FILE="/tmp/sched.params.donecb_clobber_a.${TEST_ID}.$$" \
+		B_FILE="/tmp/sched.params.donecb_clobber_b.${TEST_ID}.$$" \
+		job_id_a="${TEST_ID}_job_a" \
+		job_id_b="${TEST_ID}_job_b"
+
+	rm -f "${A_FILE}" "${B_FILE}"
+
+	print_test_header "${TEST_ID:?}" "JOB_DONE_CB's own writes to a param variable do not persist" "${job_id_a} ${job_id_b}"
+
+	job_set_params "${job_id_a}" "P38PARAM=from_a"
+
+	SCHED_AUTO_PARAMS=1 \
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=params_38_done \
+	DO_JOB_CB=params_38_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id_a} ${job_id_b}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_first_line seen_a "${A_FILE}"
+	read_first_line seen_b "${B_FILE}"
+	rm -f "${A_FILE}" "${B_FILE}"
+
+	if [ "${sched_rv}" = 0 ] &&
+		[ "${seen_a}" = from_a ] &&
+		[ "${seen_b}" = '<unset>' ]
+	then
+		PASS "a='${seen_a}', b='${seen_b}'"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, a='${seen_a}' (expected 'from_a'), b='${seen_b}' (expected '<unset>')"
+		return 1
+	fi
+}
