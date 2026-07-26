@@ -21,10 +21,10 @@ Complete technical reference for the `shell-scheduler` library. If you're just g
 To start the scheduler:
 
 ```sh
-schedule_jobs "<job_id_list>" [arg1 [arg2 ...]] &
+schedule_jobs "<job_ids>" [arg1 [arg2 ...]] &
 ```
 
-- `<job_id_list>` : a string containing one or more job IDs separated by any combination of spaces, tabs and newlines (prefer spaces for simplicity). A valid Job IDs: is non-empty, contains only the characters `a-z`, `A-Z`, `0-9`, `_`, is at most 2020 characters long. `schedule_jobs()` validates the list upfront and fails (return code `1`, nothing dispatched) on any invalid or duplicate ID.
+- `<job_ids>` : a string containing one or more job IDs separated by any combination of spaces, tabs and newlines (prefer spaces for simplicity). A valid Job ID: only contains characters `[a-zA-Z0-9_]` and is no longer than 2020 characters (arbitrary number with a large safety margin). `schedule_jobs()` validates the list upfront and fails on any invalid or duplicate ID.
 - `arg1 [arg2 ...]` : optional additional arguments. Passed as-is to every invocation of the **job execution callback** (`DO_JOB_CB`) after the job ID.
 
 As a general rule, run the scheduler in a background process: `schedule_jobs <job_ids> & ... wait ${!}`. Alternatively, for certain use cases, running it in a foreground subshell may be preferable. Below spoiler provides more information.
@@ -32,9 +32,19 @@ As a general rule, run the scheduler in a background process: `schedule_jobs <jo
 <details>
 <summary><strong>Background vs foreground subshell considerations</summary></strong>
 
-`schedule_jobs()` is designed to run in a child process of your script: either in the background: `schedule_jobs <job_ids> &`; or in a foreground subshell: `( schedule_jobs <job_ids> )`. The scheduler always terminates via the `exit` command. Called plainly (not in the background or subshell), your script will exit when scheduler exits; this also clobbers your `USR1`/`INT`/`TERM` traps and file descriptor `3`. So in general avoid that.
+`schedule_jobs()` is designed to run in a child process of your script: either in the background:
+```
+schedule_jobs <job_ids> &
+```
 
-Both forms support the entire feature set - dispatch, concurrency, timeouts, callbacks, outcome reporting all live inside the scheduler process and behave identically. The difference is what your script can do while the batch runs, and how signals reach the scheduler:
+or in a foreground subshell:
+```
+( schedule_jobs <job_ids> )
+```
+
+The scheduler always terminates via the `exit` command. If the scheduler is called not inside a subshell, your script will exit when scheduler exits. This also clobbers your `USR1`/`INT`/`TERM` traps and file descriptor `3`. So in general avoid that.
+
+Both forms support the entire feature set: dispatch, concurrency, timeouts, callbacks, outcome reporting. The difference is what your script can do while the batch runs, and how signals reach the scheduler:
 
 ```sh
 # Background: asynchronous - your script keeps control while the batch runs
@@ -51,8 +61,8 @@ rv=$?
 rv=$?
 ```
 
-- **Background (`& ... wait`)** - use when the application must stay in control while jobs run: doing concurrent work, supervising progress, or cancelling the batch on demand. Because your script keeps running (and `wait` is interruptible by its traps), it can react to terminal or service signals and translate them into a graceful scheduler cancellation with `kill -USR1 "${sched_pid}"` - see [Signal handling](#signal-handling). Note that a backgrounded scheduler may not see `Ctrl-C` itself, so this signal-forwarding pattern is also what connects `Ctrl-C` to the scheduler's cleanup path. This is the pattern used throughout this documentation and the accompanying examples.
-- **Foreground subshell (`( ... )`)** - use for the simple synchronous case: run the batch, then continue with its return code. `Ctrl-C` handling gets simpler: the subshell runs in the terminal's foreground process group, so `SIGINT` reaches the scheduler directly and triggers its normal cleanup path (return code `84`, termination callback invoked). The trade-offs: your script is blocked until the scheduler exits - it cannot do concurrent work, and its own traps will not run until then - and there is no scheduler PID at hand, so the batch cannot be cancelled from the application side.
+- **Background subshell: `schedule_jobs & ... wait`** - use when the application must stay in control while jobs run: doing concurrent work, supervising progress, or cancelling the batch on demand. Because your script keeps running (and `wait` is interruptible by its traps), it can react to terminal or service signals and translate them into a graceful scheduler cancellation with `kill -USR1 "${sched_pid}"` - see [Signal handling](#signal-handling). Note that a backgrounded scheduler may not see `Ctrl-C` itself, so this signal-forwarding pattern is also what connects `Ctrl-C` to the scheduler's cleanup path. This is the pattern used throughout this documentation and the accompanying examples.
+- **Foreground subshell: `( schedule_jobs )`** - use for the simple synchronous case: run the batch, then continue with its return code. `Ctrl-C` handling gets simpler: the subshell runs in the terminal's foreground process group, so `SIGINT` reaches the scheduler directly and triggers its normal cleanup path (return code `84`, termination callback invoked). The trade-offs are: your script is blocked until the scheduler exits (can not do concurrent work); your script's own traps will not fire while the scheduler is running; the batch cannot be cancelled from the application side because there is no PID at hand.
 
 In both modes, a signal delivered only to your application's PID (e.g. `kill -TERM <app_pid>`, as opposed to `Ctrl-C`, which signals the whole process group) leaves the scheduler and its jobs running as orphans. Only the background form lets you close that gap, by forwarding the signal as shown in the [EXAMPLE-HAGEZI-FETCH.md](EXAMPLE-HAGEZI-FETCH.md).
 
@@ -107,7 +117,7 @@ This callback runs in a separate background process. Its exit code is considered
 
 ### Job completion callback (optional)
 
-Defined by the value of **`${JOB_DONE_CB}`**. Invoked by the scheduler for each job after receiving its completion record:
+Defined by the value of **`${JOB_DONE_CB}`**. Invoked by the scheduler for each job after receiving its completion record this way:
 
 ```sh
 ${JOB_DONE_CB} <job_id> <job_return_code> [job_pid]
@@ -137,23 +147,23 @@ ${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_j
 - `<ok_job_ids>`: job IDs whose **job execution callback** (`DO_JOB_CB`) returned code `0`.
 - `<fail_job_ids>`: job IDs whose **job execution callback** returned a non-zero code.
 - `<undispatched_job_ids>`: job IDs that were never started at all. Under normal operation this is an empty string; it becomes non-empty when the scheduler exits before it has dispatched every job ID from the original list.
-- `<expired_job_ids>`: job IDs abandoned via a [per-job timeout](TIMEKEEPING.md#per-job-timeouts). Empty unless per-job timeouts are in use. Unlike a failed job, an expired job's process may still be running at this point - and unless your code kills it, may even complete later (with a [job termination callback](#job-termination-callback-job_term_cb) configured, the scheduler kills it at expiry time instead). The PIDs of expired jobs which the scheduler never got a completion record from (including after expiration time) will be included in the list of `<running_pids>` - except those whose kill was verified by the termination callback.
-- `<unfinished_job_ids>`: dispatched jobs whose [per-job timeout](TIMEKEEPING.md#per-job-timeouts) did not expire, but which had not yet completed when the scheduler exited early - because of a signal, a fatal error, a timeout (global or idle), or a non-zero return code from `JOB_DONE_CB`. Under normal operation this is an empty string. Note that the scheduler exiting does not by itself terminate these jobs' processes - see [Job termination mechanisms](#job-termination-mechanisms).
+- `<expired_job_ids>`: IDs of jobs which had hit the **per-job timeout**. Empty unless per-job timeouts are in use. Unlike a failed job, an expired job's process may still be running, and unless killed by your code or by the **job termination callback**, may even complete later. PIDs of expired jobs which the scheduler never got a completion record from (including after expiration time) and whose kill was not verified by the **job termination callback** will be included in the list of `<running_pids>` passed to the **scheduler completion callback**.
+- `<unfinished_job_ids>`: dispatched jobs whose **per-job timeout** did not expire, but which had not yet completed when the scheduler exited early (e.g. because of a signal, fatal error or timeout). Under normal operation this is an empty string.
 
 (all above lists are space-separated)
 
 If this callback returns a non-zero code while `<scheduler_return_code>` is `0`, the scheduler exits with the callback's return code instead. Otherwise, the scheduler's return code is unchanged.
 
 **Notes**:
-- every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of `<ok_job_ids>`, `<fail_job_ids>`, `<unfinished_job_ids>`, `<undispatched_job_ids>`, `<expired_job_ids>`. This makes them a convenient basis for final bookkeeping, logging, or cleanup in the **scheduler completion callback**, without having to separately track job status yourself.
+- Every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of the above lists passed as arguments to the **scheduler completion callback**. This allows to easily implement final bookkeeping, logging or cleanup.
 - The scheduler does not terminate expired and unfinished jobs on its own. See [Job termination callback](#job-termination-callback-job_term_cb).
-- If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" job IDs.
+- If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" category lists.
 
 <details>
 <summary><strong>Example: concatenate unsuccessful job IDs</strong></summary>
 
 ```
-all_failed_ids=
+all_failed_lists=
 for fail_list in "${fail_job_ids}" "${unfinished_job_ids}" "${undispatched_job_ids}" "${expired_job_ids}"; do
     [ -n "${fail_list}" ] && all_failed_lists="${all_failed_lists}${all_failed_lists: }${fail_list}"
 done
@@ -162,9 +172,9 @@ done
 </details>
 
 <details>
-<summary><strong>Example: inspecting final job status</strong></summary>
+<summary><strong>Example: reporting final summary of job statuses</strong></summary>
 
-The example below defines a **scheduler completion callback** that unconditionally reports on every outcome category, regardless of whether a given category ended up empty. It does not manufacture any failure or timeout scenario; job `C` simply returns a non-zero code on its own, like any job might in practice.
+The example below defines a **scheduler completion callback** that unconditionally reports on every outcome category, regardless of whether a given category ended up empty. In this example, job `C` always returns a non-zero code and is therefore classified as "failed".
 
 ```sh
 #!/bin/sh
@@ -209,7 +219,7 @@ Undispatched: <none>
 Timed out:    <none>
 ```
 
-Since all five jobs run to completion in this example, `<unfinished_job_ids>`, `<undispatched_job_ids>` and `<expired_job_ids>` are all empty - see the [Timeouts](#timeouts) and [Signal handling](#signal-handling) sections below for cases where the first two are populated, and [per-job timeouts](TIMEKEEPING.md#per-job-timeouts) for the third.
+Since all five jobs run to completion in this example, lists `<unfinished_job_ids>`, `<undispatched_job_ids>` and `<expired_job_ids>` are empty.
 
 </details>
 
@@ -246,21 +256,21 @@ If this callback is not defined, error messages are written to standard error.
 
 ## Job parameters
 
-Any extra arguments passed to `schedule_jobs()` (after the list of job IDs in the first argument) are forwarded unchanged to every job and are therefore shared by all jobs, available as positional parameters inside the **job execution callback** (`DO_JOB_CB`).
+Any extra arguments passed to `schedule_jobs` (after the list of job IDs in the first argument) are forwarded unchanged to every job and are therefore shared by all jobs, available as positional parameters inside the **job execution callback** (`DO_JOB_CB`).
 
-Assigning **per-job parameters** can be done via a dedicated helper: `job_set_params()`. Syntax:
+Assigning **per-job parameters** can be done via a dedicated helper: `job_set_params`. Syntax:
 
 ```sh
 job_set_params <job_ID> <param_name_1>="<value_1>" <param_name_2>="<value_2>" ...
 ```
 
-To retrieve values of previously set params, use the helper `job_get_params()`:
+To retrieve values of previously set params, use the helper `job_get_params`:
 
 ```sh
 job_get_params <job_ID> <param_name_1> <param_name_2> ...
 ```
 
-`job_get_params` will assign the value for each specified parameter to a same-named variable.
+This will assign the value for each specified parameter to a same-named variable.
 
 This helper works in every callback and in your application script.
 
@@ -276,9 +286,9 @@ echo "filename is '${filename}', url is '${url}'"
 </details>
 
 <details>
-<summary><strong>Fetching into differently-named variables, and non-identifier param names</strong></summary>
+<summary><strong>Fetching into differently-named variables</strong></summary>
 
-Each requested parameter can also be fetched into a **differently-named variable** by using the `<var_name>=<param_name>` form. This may come in useful in some cases when you want to use the param value without assigning it to the variable which matches the param name. E.g.:
+Each requested parameter can also be fetched into a **differently-named variable** by using the `<var_name>=<param_name>` (aliased) form. This may come in useful in cases when you want to use the param value without assigning it to the variable which matches the param name. E.g.:
 
 ```sh
 local url prev_url
@@ -289,7 +299,7 @@ job_get_params "job_1" "prev_url=url"
 echo "prev url is '$prev_url', current url is '$url'"
 ```
 
-When the parameter name is not itself a valid shell variable name (for example when it starts with a digit), you have to fetch the param value this way, because in that case it can not be assigned to a same-named variable:
+When the parameter name is not a valid shell variable name (for example when it starts with a digit), or when same-named variable is reserved by the scheduler for internal use, this is the only way to fetch value:
 
 ```sh
 local out_file
@@ -297,9 +307,9 @@ job_get_params "job_1" out_file=2ndfile
 echo "value of param '2ndfile' is '${out_file}'"
 ```
 
-The plain and aliased forms may be mixed freely in a single call, e.g. `job_get_params "job_1" filename out_file=2ndfile url` - assigns corresponding values to variables `${filename}`, `${url}` and `${out_file}`.
+The plain and aliased forms may be mixed in a single call, e.g.: `job_get_params "job_1" filename out_file=2ndfile url` assigns corresponding values to variables `${filename}`, `${url}` and `${out_file}`.
 
-If you want to **export** the variables set by `job_get_params`, then prepend the `-export` flag to the command:
+If you want to **export** the variables set by `job_get_params`, prepend the `-export` flag to the command:
 
 ```sh
 job_get_params -export "job1" filename url
@@ -315,9 +325,9 @@ Per-job parameters and timeouts are stored in process-global variables that have
 jobs_init "<job_id_list>"
 ```
 
-Each argument is a whitespace-separated list of job IDs (spaces, tabs or newlines), mirroring the list accepted by `schedule_jobs()`; you may also spread IDs across several arguments. So `jobs_init "${my_job_ids}"`, `jobs_init A B C`, and combinations such as `jobs_init "a b" c` all work. Pass lists **quoted** - `jobs_init` splits them internally with globbing disabled, so the caller does not have to.
+Where `<job_id_list>` is a string containing whitespace-separated list of job IDs to reset.
 
-For each job ID given, `jobs_init` clears everything configured for that job: the parameter list and every stored parameter value (set by `job_set_params`), and the per-job timeout (set by `job_set_timeout`). Afterwards a `job_get_params` for that job returns nothing, and the job falls back to the default per-job timeout (`${SCHED_JOB_TIMEOUT_S}`).
+For each job ID given, `jobs_init` clears everything configured for that job: the parameter list, every stored parameter value (set by `job_set_params`), and the per-job timeout (set by `job_set_timeout`). Afterwards the job falls back to the default per-job timeout (`${SCHED_JOB_TIMEOUT_S}`) if set, or to no per-job timeout if not set.
 
 As a general rule, it is a good idea to unconditionally call `jobs_init` before setting job-specific parameters and timeouts, especially when you run more than one batch in the same process, or reuse a job ID, and want a clean slate instead of inheriting the prior configuration:
 
@@ -331,7 +341,8 @@ job_set_timeout job1 60
 schedule_jobs "job1" &
 wait ${!}
 
-jobs_init job1
+jobs_init job1 # resets previously set parameters and individual per-job timout
+
 job_set_params job1 "url=https://example.com/b"
 # job_set_timeout() is not called this run, so per-job timeout is left unconfigured
 schedule_jobs "job1" &
