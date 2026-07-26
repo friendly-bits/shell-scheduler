@@ -89,8 +89,6 @@ cg_base_empty() {
 #   bad SCHED_CGROUP_BASE returns 1, '-q' silent on stderr and through a
 #   user-set SCHED_FAIL_MSG_CB, and one message without '-q'. Runs in any environment.
 test_job_termination_full_01() {
-	require_variant full || return 2
-
 	job_termination_full_01_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
 
 	local \
@@ -102,6 +100,8 @@ test_job_termination_full_01() {
 	rm -f "${MSG_FILE}"
 
 	print_test_header "${TEST_ID}" "sched_use_job_term cgroup: consistency, JOB_TERM_CB, -q silence, forced failure" "(no jobs)"
+
+	require_variant full || return 2
 
 	out1=$(sched_use_job_term -q cgroup 2>&1)
 	rv1=${?}
@@ -146,8 +146,6 @@ test_job_termination_full_01() {
 #   via SCHED_FAIL_MSG_CB, the finalize callback is not invoked.
 #   Runs in any environment.
 test_job_termination_full_02() {
-	require_variant full || return 2
-
 	job_termination_full_02_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
 
 	local \
@@ -161,6 +159,8 @@ test_job_termination_full_02() {
 	rm -f "${MSG_FILE}" "${MARK_F}" "${FINALIZE_F}"
 
 	print_test_header "${TEST_ID}" "Unusable termination command: clean abort before dispatch" "mark_02 mark_02b"
+
+	require_variant full || return 2
 
 	SCHED_FAIL_MSG_CB=job_termination_full_02_fail_msg \
 	SCHED_FINALIZE_CB=jt_finalize_rec \
@@ -207,8 +207,6 @@ test_job_termination_full_02() {
 #   both must be dead after the run, both jobs classified ok, running_pids
 #   empty, and the run must leave the base cgroup empty.
 test_job_termination_full_03() {
-	require_variant full || return 2
-
 	local \
 		TEST_ID=job_termination_full_03 \
 		CG_TEST_BASE \
@@ -216,6 +214,8 @@ test_job_termination_full_03() {
 		jobs='strag_03 instant_03'
 
 	print_test_header "${TEST_ID}" "cgroup: completed job's stragglers reaped by scheduler exit; base left empty" "${jobs}"
+
+	require_variant full || return 2
 
 	cg_capable || { SKIP "${CG_SKIP_REASON}"; return 2; }
 
@@ -274,8 +274,6 @@ test_job_termination_full_03() {
 #   the job is classified expired and its PID is scrubbed from running_pids
 #   (kill verified).
 test_job_termination_full_04() {
-	require_variant full || return 2
-
 	job_termination_full_04_done() {
 		local i pid alive=unknown
 
@@ -298,6 +296,8 @@ test_job_termination_full_04() {
 		sched_rv checks_ok=1 done_rec fin_pids fin_expired
 
 	print_test_header "${TEST_ID}" "cgroup: per-job timeout kills the job's process tree at expiry" "block_04"
+
+	require_variant full || return 2
 
 	cg_capable || { SKIP "${CG_SKIP_REASON}"; return 2; }
 
@@ -358,8 +358,6 @@ test_job_termination_full_04() {
 #   verified (running_pids empty), the jobs are classified unfinished, and
 #   the base cgroup is left empty.
 test_job_termination_full_05() {
-	require_variant full || return 2
-
 	local \
 		TEST_ID=job_termination_full_05 \
 		CG_TEST_BASE \
@@ -367,6 +365,8 @@ test_job_termination_full_05() {
 		jobs='block_05a block_05b'
 
 	print_test_header "${TEST_ID}" "cgroup: USR1 abort kills all running job trees (verified)" "${jobs}"
+
+	require_variant full || return 2
 
 	cg_capable || { SKIP "${CG_SKIP_REASON}"; return 2; }
 
@@ -422,14 +422,14 @@ test_job_termination_full_05() {
 # cgroup library: scheduler global timeout kills the running job tree, with
 #   the same guarantees as on USR1 and return code 82.
 test_job_termination_full_06() {
-	require_variant full || return 2
-
 	local \
 		TEST_ID=job_termination_full_06 \
 		CG_TEST_BASE \
 		sched_rv checks_ok=1 fin_pids fin_unfin
 
 	print_test_header "${TEST_ID}" "cgroup: scheduler global timeout kills the running job tree (verified)" "block_06"
+
+	require_variant full || return 2
 
 	cg_capable || { SKIP "${CG_SKIP_REASON}"; return 2; }
 
@@ -483,13 +483,13 @@ test_job_termination_full_06() {
 #   works with the base derived from the scheduler's own cgroup - stragglers
 #   of a completed job are reaped.
 test_job_termination_full_07() {
-	require_variant full || return 2
-
 	local \
 		TEST_ID=job_termination_full_07 \
 		sched_rv checks_ok=1 fin_pids fin_ok
 
 	print_test_header "${TEST_ID}" "cgroup: autodetected base (no SCHED_CGROUP_BASE): stragglers reaped" "strag_07"
+
+	require_variant full || return 2
 
 	cg_capable || { SKIP "${CG_SKIP_REASON}"; return 2; }
 
@@ -537,18 +537,14 @@ test_job_termination_full_07() {
 #   kills unverified, so the expired PID stays in running_pids.
 # SKIP where the children mechanism is unavailable.
 test_job_termination_full_08() {
-	require_variant full || return 2
-
-	_jt_timeout_scenario job_termination_full_08 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" block_08
+	_jt_timeout_scenario job_termination_full_08 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" block_08 full
 }
 
 # children library: USR1 abort kills all running job trees; jobs classified unfinished;
 #   both wrapper PIDs reported (kills unverified).
 # SKIP where the children mechanism is unavailable.
 test_job_termination_full_09() {
-	require_variant full || return 2
-
-	_jt_abort_scenario job_termination_full_09 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" 'block_09a block_09b'
+	_jt_abort_scenario job_termination_full_09 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" 'block_09a block_09b' full
 }
 
 # children library, documented limitation:
@@ -557,9 +553,7 @@ test_job_termination_full_09() {
 # The recorded stragglers must survive the run; the test then kills them.
 # Runs in any environment.
 test_job_termination_full_10() {
-	require_variant full || return 2
-
-	_jt_strag_scenario job_termination_full_10 sched_job_term_children strag_10
+	_jt_strag_scenario job_termination_full_10 sched_job_term_children strag_10 full
 }
 
 # Custom (user-defined) termination command exercising the out-var report
@@ -568,8 +562,6 @@ test_job_termination_full_10() {
 #   running_pids must come out empty and no "invalid verified PID" complaints must be raised.
 # Runs in any environment.
 test_job_termination_full_11() {
-	require_variant full || return 2
-
 	job_termination_full_11_cb() {
 		local t12_sub="${1}" t12_out_var="${2}"
 
@@ -602,6 +594,8 @@ test_job_termination_full_11() {
 	: > "${PIDS_F}"
 
 	print_test_header "${TEST_ID}" "Custom termination command: out-var report immune to stdout noise" "${jobs}"
+
+	require_variant full || return 2
 
 	SCHED_FAIL_MSG_CB=job_termination_full_11_fail_msg \
 	SCHED_FINALIZE_CB=jt_finalize_rec \
@@ -654,8 +648,6 @@ test_job_termination_full_11() {
 # SCH_JT_BASE/SCH_JT_PENDING are shadowed locally so the in-process init/cleanup calls resolve them by dynamic
 #   scope and don't touch suite-global state.
 test_job_termination_full_12() {
-	require_variant full || return 2
-
 	local \
 		TEST_ID=job_termination_full_12 \
 		CG_TEST_BASE \
@@ -663,6 +655,8 @@ test_job_termination_full_12() {
 		checks_ok=1 p init_rv cleanup_rv reaped squat newbase
 
 	print_test_header "${TEST_ID}" "cgroup: base collision with a same-PID sibling is avoided; sibling untouched" "(no jobs)"
+
+	require_variant full || return 2
 
 	cg_capable || { SKIP "${CG_SKIP_REASON}"; return 2; }
 
@@ -710,11 +704,11 @@ test_job_termination_full_12() {
 # ppid mechanism: the sched_use_job_term probe. Selects it on a normal system,
 #   and reports it unavailable when awk cannot be found.
 test_job_termination_full_13() {
-	require_variant full || return 2
-
 	local TEST_ID=job_termination_full_13 JOB_TERM_CB checks_ok=1
 
 	print_test_header "${TEST_ID}" "ppid: sched_use_job_term probe (selected here; fails without awk)" "(no jobs)"
+
+	require_variant full || return 2
 
 	sched_use_job_term -q ppid ||
 		{ checks_ok=; echo "sched_use_job_term ppid returned non-zero on a normal system"; }
@@ -740,9 +734,7 @@ test_job_termination_full_13() {
 #   SIGSTOP pass has frozen the wrapper, so they are absent from the first scan.
 # SKIP where the children mechanism is unavailable.
 test_job_termination_full_14() {
-	require_variant full || return 2
-
-	_jt_forkrace_scenario job_termination_full_14 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" forkrace_14
+	_jt_forkrace_scenario job_termination_full_14 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" forkrace_14 full
 }
 
 # Custom (user-defined) termination command: the core drives the whole documented
@@ -752,8 +744,6 @@ test_job_termination_full_14() {
 #   was given; 'cleanup <out var>' once, last.
 # Runs in any environment.
 test_job_termination_full_15() {
-	require_variant full || return 2
-
 	# Records '<subcmd>|<args>'. 'setup' runs in the job process and the rest in the
 	#   scheduler process, so every invocation appends to the same file
 	job_termination_full_15_cb() {
@@ -791,6 +781,8 @@ test_job_termination_full_15() {
 	: > "${PIDS_F}"
 
 	print_test_header "${TEST_ID}" "Custom termination command: core drives the documented subcommand sequence" "${jobs}"
+
+	require_variant full || return 2
 
 	SCHED_FAIL_MSG_CB=echo \
 	DO_JOB_CB=do_job_term \
@@ -898,8 +890,6 @@ test_job_termination_full_15() {
 #   but is not fatal: the run still ends with its own return code.
 # Runs in any environment.
 test_job_termination_full_16() {
-	require_variant full || return 2
-
 	job_termination_full_16_cb() {
 		case "${1}" in
 			term)
@@ -924,6 +914,8 @@ test_job_termination_full_16() {
 	: > "${PIDS_F}"
 
 	print_test_header "${TEST_ID}" "Custom termination command failing: reported per subcommand, not fatal" "${jobs}"
+
+	require_variant full || return 2
 
 	SCHED_FAIL_MSG_CB=job_termination_full_16_fail_msg \
 	DO_JOB_CB=do_job_term \
@@ -969,8 +961,6 @@ test_job_termination_full_16() {
 #   the same report are still honored - scrubbed from <running_pids>.
 # Runs in any environment.
 test_job_termination_full_17() {
-	require_variant full || return 2
-
 	job_termination_full_17_cb() {
 		local t17_out="${2}"
 
@@ -996,6 +986,8 @@ test_job_termination_full_17() {
 	: > "${PIDS_F}"
 
 	print_test_header "${TEST_ID}" "Custom termination command: invalid verified PIDs skipped, valid ones honored" "${jobs}"
+
+	require_variant full || return 2
 
 	SCHED_FAIL_MSG_CB=job_termination_full_17_fail_msg \
 	SCHED_FINALIZE_CB=jt_finalize_rec \

@@ -190,6 +190,7 @@ jt_finalize_get() {
 # 3: capability gate fn
 # 4: skip reason
 # 5: job id (a block_* id, so do_job_term blocks on a recorded child)
+# 6: required variant (full|mini), optional - empty means "runs under either"
 _jt_timeout_scenario() {
 	# On the expiry notification (rv 124), wait for the job's recorded child to die,
 	#   then record whether it was already dead when the callback ran
@@ -210,6 +211,7 @@ _jt_timeout_scenario() {
 
 	local \
 		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_job="${5}" \
+		jt_variant="${6}" \
 		sched_rv checks_ok=1 done_rec done_pid fin_pids fin_expired
 
 	local \
@@ -219,6 +221,8 @@ _jt_timeout_scenario() {
 	rm -f "${PIDS_F}" "${FINALIZE_F}" "${DONE_F}"
 
 	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: per-job timeout kills the job's process tree at expiry (unverified)" "${jt_job}"
+
+	[ -z "${jt_variant}" ] || require_variant "${jt_variant}" || return 2
 
 	"${jt_gate}" || { SKIP "${jt_skip}"; return 2; }
 
@@ -277,9 +281,11 @@ _jt_timeout_scenario() {
 # 3: gate fn
 # 4: skip reason
 # 5: space-separated block_* ids
+# 6: required variant (full|mini), optional - empty means "runs under either"
 _jt_abort_scenario() {
 	local \
 		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_jobs="${5}" \
+		jt_variant="${6}" \
 		sched_pid sched_rv checks_ok=1 fin_pids fin_unfin pid_cnt=0 job_cnt=0 p
 
 	local \
@@ -290,6 +296,8 @@ _jt_abort_scenario() {
 	for p in ${jt_jobs}; do job_cnt=$((job_cnt + 1)); done
 
 	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: USR1 abort kills all running job trees (unverified)" "${jt_jobs}"
+
+	[ -z "${jt_variant}" ] || require_variant "${jt_variant}" || return 2
 
 	"${jt_gate}" || { SKIP "${jt_skip}"; return 2; }
 
@@ -342,9 +350,10 @@ _jt_abort_scenario() {
 # 1: test id
 # 2: callback
 # 3: job id (a strag_* id)
+# 4: required variant (full|mini), optional - empty means "runs under either"
 _jt_strag_scenario() {
 	local \
-		TEST_ID="${1}" jt_cb="${2}" jt_job="${3}" \
+		TEST_ID="${1}" jt_cb="${2}" jt_job="${3}" jt_variant="${4}" \
 		sched_rv checks_ok=1 alive_cnt=0 pid
 
 	local PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
@@ -352,6 +361,8 @@ _jt_strag_scenario() {
 	: > "${PIDS_F}"
 
 	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: completed-job stragglers are NOT reaped (documented limitation)" "${jt_job}"
+
+	[ -z "${jt_variant}" ] || require_variant "${jt_variant}" || return 2
 
 	SCHED_FAIL_MSG_CB=echo \
 	JOB_DONE_CB=done_handler \
@@ -394,15 +405,19 @@ _jt_strag_scenario() {
 # 3: capability gate fn
 # 4: skip reason
 # 5: job id (a forkrace_* id)
+# 6: required variant (full|mini), optional - empty means "runs under either"
 _jt_forkrace_scenario() {
 	local \
 		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_job="${5}" \
+		jt_variant="${6}" \
 		sched_pid sched_rv checks_ok=1 pid_cnt=0
 
 	local PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
 	rm -f "${PIDS_F}"
 
 	print_test_header "${TEST_ID}" "${jt_cb#sched_job_term_}: abort kills processes forked between discovery scans" "${jt_job}"
+
+	[ -z "${jt_variant}" ] || require_variant "${jt_variant}" || return 2
 
 	"${jt_gate}" || { SKIP "${jt_skip}"; return 2; }
 

@@ -15,8 +15,6 @@
 #   SCHED_AUTO_PARAMS: when unset and for values other than '1' (which the full
 #   variant treats as "off"), the param must still arrive as an exported var.
 test_config_mini_01() {
-	require_variant mini || return 2
-
 	config_mini_01_do_job() {
 		if [ -n "${cfgm_param+x}" ]
 		then
@@ -68,6 +66,8 @@ test_config_mini_01() {
 	rm -f "${AP_RESULT_FILE}"
 
 	print_test_header "${TEST_ID:?}" "mini: registered params auto-delivered regardless of SCHED_AUTO_PARAMS" "${job_id}"
+
+	require_variant mini || return 2
 
 	job_set_params "${job_id}" cfgm_param=hello ||
 		{ FAIL "job_set_params failed"; return 1; }

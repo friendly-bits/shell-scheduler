@@ -16,8 +16,6 @@
 #   a USR1 abort of a running job must invoke the callback with a PID as $1
 #   (never a 'term'/'setup'/... subcommand word, as the full protocol would).
 test_job_termination_mini_01() {
-	require_variant mini || return 2
-
 	mini_01_cb() {
 		printf 'argc=%s arg1=%s\n' "${#}" "${1}" >> "${REC_FILE:?}"
 		kill -KILL "${@}" 2>/dev/null
@@ -33,6 +31,8 @@ test_job_termination_mini_01() {
 	rm -f "${REC_FILE}"
 
 	print_test_header "${TEST_ID}" "mini: JOB_TERM_CB invoked as 'CB <pid>...' (simplified protocol)" "${job_id}"
+
+	require_variant mini || return 2
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -78,8 +78,6 @@ test_job_termination_mini_01() {
 # sched_job_term_mini ignores invalid (non-uint) PID args with a warning and
 #   still kills the valid seed. Direct helper call - no scheduler run.
 test_job_termination_mini_02() {
-	require_variant mini || return 2
-
 	local \
 		TEST_ID=job_termination_mini_02 \
 		checks_ok=1 victim msg_cnt=0
@@ -90,6 +88,8 @@ test_job_termination_mini_02() {
 	mini_02_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
 
 	print_test_header "${TEST_ID}" "mini: sched_job_term_mini warns on invalid PID, kills valid seed" "(no jobs)"
+
+	require_variant mini || return 2
 
 	sleep 30 &
 	victim=${!}
@@ -117,8 +117,6 @@ test_job_termination_mini_02() {
 # With the /proc scan disabled (awk missing), sched_job_term_mini reports the
 #   scan failure but still kills the seed PIDs. Direct helper call - no scheduler run.
 test_job_termination_mini_03() {
-	require_variant mini || return 2
-
 	local \
 		TEST_ID=job_termination_mini_03 \
 		checks_ok=1 victim msg_cnt=0
@@ -129,6 +127,8 @@ test_job_termination_mini_03() {
 	mini_03_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
 
 	print_test_header "${TEST_ID}" "mini: sched_job_term_mini kills seeds even when /proc scan fails" "(no jobs)"
+
+	require_variant mini || return 2
 
 	sleep 30 &
 	victim=${!}

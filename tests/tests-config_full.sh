@@ -15,8 +15,6 @@
 #   other values (including '01', which a numeric comparison would accept)
 #   must leave registered params undelivered, with the scheduler running normally.
 test_config_full_01() {
-	require_variant full || return 2
-
 	config_full_01_do_job() {
 		if [ -n "${cfg10_param+x}" ]
 		then
@@ -40,6 +38,8 @@ test_config_full_01() {
 	rm -f "${AP_RESULT_FILE}"
 
 	print_test_header "${TEST_ID:?}" "SCHED_AUTO_PARAMS values other than '1' disable param auto-delivery" "${job_id}"
+
+	require_variant full || return 2
 
 	job_set_params "${job_id}" cfg10_param=hello ||
 		{ FAIL "job_set_params failed"; return 1; }
