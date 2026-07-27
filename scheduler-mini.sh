@@ -440,9 +440,9 @@ refresh_remain_time() {
 	gt_idle_remain_time_cs=$(( SCH_IDLE_TIMEOUT_S*100 - (gt_cur_time_cs-SCH_LAST_PROGRESS_TIME_CS) ))
 
 	if [ ! "${SCH_REMAIN_TIME_CS}" -gt 0 ]; then
-		sch_finalize "${SCH_RV_GLOBAL_TIMEOUT}" "Processing timeout (${SCH_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
+		sch_finalize "${SCH_RV_GLOBAL_TIMEOUT}" "Processing timeout (${SCH_TIMEOUT_S} s) for scheduler (PID: ${SCHED_PID})."
 	elif [ ! "${gt_idle_remain_time_cs}" -gt 0 ]; then
-		sch_finalize "${SCH_RV_IDLE_TIMEOUT}" "Idle timeout (${SCH_IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCH_PID})."
+		sch_finalize "${SCH_RV_IDLE_TIMEOUT}" "Idle timeout (${SCH_IDLE_TIMEOUT_S} s) for scheduler (PID: ${SCHED_PID})."
 	fi
 
 	if [ "${gt_idle_remain_time_cs}" -lt "${SCH_REMAIN_TIME_CS}" ]; then
@@ -609,7 +609,7 @@ schedule_jobs() {
 
 	local \
 		IFS=" "$'\t'$'\n' \
-		SCH_PID \
+		SCHED_PID \
 		SCH_REMAIN_TIME_CS \
 		SCH_INIT_UPTIME_CS \
 		sch_id \
@@ -688,7 +688,7 @@ schedule_jobs() {
 	# Main logic
 
 	sch_get_uptime_cs SCH_INIT_UPTIME_CS &&
-	sch_get_cur_pid SCH_PID ||
+	sch_get_cur_pid SCHED_PID ||
 		exit 1
 
 	SCH_LAST_PROGRESS_TIME_CS="${SCH_INIT_UPTIME_CS}"
@@ -698,7 +698,7 @@ schedule_jobs() {
 
 	sch_run_n=0
 	while :; do
-		sch_run_dir="${sch_dir}/sched_${SCH_PID}.${sch_run_n}"
+		sch_run_dir="${sch_dir}/sched_${SCHED_PID}.${sch_run_n}"
 		mkdir "${sch_run_dir}" 2>/dev/null && break
 		sch_run_n=$((sch_run_n + 1))
 		[ "${sch_run_n}" -lt 16 ] ||
