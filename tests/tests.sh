@@ -10,7 +10,7 @@
 # 'run <category>' - run all tests in the given category
 # 'run <category> <space_separated_list_of_numbers>' - e.g. 'run params 1 3 5'
 # 'run <category> <test_num_start>-<test_num_end>' - run tests in a range, e.g. 'run scheduler_termination 3-6'
-# Categories: dispatch, core, scheduler_termination, config, config_full, config_mini, params, misc, outcome, timeout, job_termination, job_termination_full, job_termination_mini, security
+# Categories: dispatch, core, scheduler_termination, sched_env, params, params_full, params_mini, misc, outcome, timeout, job_termination, job_termination_full, job_termination_mini, security
 #
 # Variant selection (env var SCHEDULER_VARIANT): 'full' (default, scheduler.sh) or
 #   'mini' (scheduler-mini.sh). The *_full / *_mini categories hold tests specific
@@ -211,6 +211,108 @@ finalize_handler() {
 	return 0
 }
 
+#
+# Auto-delivered param probes, shared by the params_full / params_mini categories.
+# Callers set ${AP_PARAM_VAR} (param variable name), ${AP_JOB_FILE}, ${AP_DONE_FILE}.
+# The param variable itself must be left undeclared by the caller, or an
+#   'unset' expectation can never be observed.
+#
+
+# Append 'set:<value>' or 'unset' for the param variable to a file.
+# 1: output file
+# 2: param variable name
+ap_record() {
+	local apr_set apr_val
+
+	eval "apr_set=\${${2:?}+x}; apr_val=\${${2}}"
+
+	if [ -n "${apr_set}" ]
+	then
+		printf 'set:%s\n' "${apr_val}" >> "${1:?}"
+	else
+		printf 'unset\n' >> "${1:?}"
+	fi
+}
+
+ap_probe_job()  { ap_record "${AP_JOB_FILE:?}" "${AP_PARAM_VAR:?}"; }
+ap_probe_done() { ap_record "${AP_DONE_FILE:?}" "${AP_PARAM_VAR:?}"; }
+
+# Run one scheduler pass per SCHED_AUTO_PARAMS value and check what both the job
+#   and the completion callback saw. Prints the result line.
+# 1: job ID
+# 2: expected record - 'unset' or 'set:<value>'
+# 3: SCHED_AUTO_PARAMS values to run, or the literal '__UNSET__' to leave it unset
+ap_run_variants() {
+	local \
+		apv_job_id="${1:?}" \
+		apv_want="${2:?}" \
+		apv_vals="${3:?}" \
+		apv_val \
+		apv_rv \
+		apv_total=0 \
+		apv_rv_ok=0 \
+		apv_job_lines=0 \
+		apv_job_ok=0 \
+		apv_done_lines=0 \
+		apv_done_ok=0
+
+	rm -f "${AP_JOB_FILE:?}" "${AP_DONE_FILE:?}"
+
+	for apv_val in ${apv_vals}; do
+		apv_total=$((apv_total + 1))
+
+		if [ "${apv_val}" = __UNSET__ ]; then
+			SCHED_FAIL_MSG_CB=echo \
+			SCHED_FINALIZE_CB=finalize_handler \
+			JOB_DONE_CB=ap_probe_done \
+			DO_JOB_CB=ap_probe_job \
+			SCHED_MAX_JOBS=1 \
+			SCHED_TIMEOUT_S=3 \
+			SCHED_IDLE_TIMEOUT_S=2 \
+				schedule_jobs "${apv_job_id}" &
+		else
+			SCHED_FAIL_MSG_CB=echo \
+			SCHED_FINALIZE_CB=finalize_handler \
+			JOB_DONE_CB=ap_probe_done \
+			DO_JOB_CB=ap_probe_job \
+			SCHED_MAX_JOBS=1 \
+			SCHED_TIMEOUT_S=3 \
+			SCHED_IDLE_TIMEOUT_S=2 \
+			SCHED_AUTO_PARAMS="${apv_val}" \
+				schedule_jobs "${apv_job_id}" &
+		fi
+
+		wait "$!"
+		apv_rv=$?
+
+		[ "${apv_rv}" = 0 ] && apv_rv_ok=$((apv_rv_ok + 1))
+	done
+
+	if [ -f "${AP_JOB_FILE}" ]; then
+		apv_job_lines=$(wc -l < "${AP_JOB_FILE}")
+		apv_job_ok=$(grep -cxF "${apv_want}" "${AP_JOB_FILE}")
+	fi
+	if [ -f "${AP_DONE_FILE}" ]; then
+		apv_done_lines=$(wc -l < "${AP_DONE_FILE}")
+		apv_done_ok=$(grep -cxF "${apv_want}" "${AP_DONE_FILE}")
+	fi
+
+	rm -f "${AP_JOB_FILE}" "${AP_DONE_FILE}"
+
+	if [ "${apv_rv_ok}" = "${apv_total}" ] &&
+		[ "${apv_job_lines}" = "${apv_total}" ] &&
+		[ "${apv_job_ok}" = "${apv_total}" ] &&
+		[ "${apv_done_lines}" = "${apv_total}" ] &&
+		[ "${apv_done_ok}" = "${apv_total}" ]
+	then
+		PASS "runs=${apv_total}, DO_JOB_CB and JOB_DONE_CB both saw '${apv_want}'"
+		return 0
+	fi
+
+	FAIL "rv_ok=${apv_rv_ok}/${apv_total}, want '${apv_want}': job lines=${apv_job_lines} match=${apv_job_ok}, done lines=${apv_done_lines} match=${apv_done_ok}"
+	return 1
+}
+
 do_job_default() {
 	local self_pid job_name="${1%%_*}"
 
@@ -297,7 +399,7 @@ run_generic_test() {
 . "${script_dir}/tests-dispatch.sh"
 . "${script_dir}/tests-core.sh"
 . "${script_dir}/tests-scheduler_termination.sh"
-. "${script_dir}/tests-config.sh"
+. "${script_dir}/tests-sched_env.sh"
 . "${script_dir}/tests-params.sh"
 . "${script_dir}/tests-misc.sh"
 . "${script_dir}/tests-outcome.sh"
@@ -306,15 +408,15 @@ run_generic_test() {
 . "${script_dir}/tests-job_termination_full.sh"
 . "${script_dir}/tests-job_termination_mini.sh"
 . "${script_dir}/tests-security.sh"
-. "${script_dir}/tests-config_full.sh"
-. "${script_dir}/tests-config_mini.sh"
+. "${script_dir}/tests-params_full.sh"
+. "${script_dir}/tests-params_mini.sh"
 
 
 #
 # Category registry
 #
 
-TEST_CATEGORIES="dispatch core scheduler_termination config config_full config_mini params misc outcome timeout job_termination job_termination_full job_termination_mini security"
+TEST_CATEGORIES="dispatch core scheduler_termination sched_env params params_full params_mini misc outcome timeout job_termination job_termination_full job_termination_mini security"
 
 is_valid_cat() {
 	case " ${TEST_CATEGORIES} " in

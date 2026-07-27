@@ -2,7 +2,11 @@
 # shellcheck disable=SC3043,SC3045,SC3001,SC3060,SC3003,SC2329
 # shellcheck source=/dev/null
 
-# Category: Job Parameters API (job_set_params / job_get_params)
+# tests-params.sh
+
+# Category: Job Parameters API (job_set_params / job_get_params) and param
+#   delivery to callbacks, including whatever gates that delivery.
+#   Variant-specific delivery rules live in tests-params_full.sh / tests-params_mini.sh.
 # This file is sourced by tests.sh; it defines test_N functions only.
 
 #

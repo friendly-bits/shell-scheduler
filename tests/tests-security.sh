@@ -438,7 +438,7 @@ test_security_05() {
 # Verify a callback env var whose value is injection-shaped is rejected and never executed.
 # sch_check_cb() reads the value with eval "val=${CB}" (parameter expansion only, no command substitution)
 #   and passes it to command -v as a single quoted word, so an embedded $(...)/`...` is never run.
-# Distinct from test_config_02, which uses a benign non-existent command with no marker.
+# Distinct from test_sched_env_02, which uses a benign non-existent command with no marker.
 test_security_06() {
 	security_06_touch_inject() { touch "${INJECT_FILE:?}"; }
 	security_06_do_job() { return 0; }
