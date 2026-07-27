@@ -219,7 +219,7 @@ sch_start_job() {
 	exit "${?}"
 }
 
-# Invoke JOB_DONE_CB, export params when ${SCHED_AUTO_PARAMS} is on
+# Invoke JOB_DONE_CB, export params unconditionally
 # Params are local to this function, they do not persist
 # 1: callback command
 # 2: job ID
@@ -234,25 +234,23 @@ sch_run_done_cb() {
 
 	shift
 
-	[ "${SCHED_AUTO_PARAMS}" = 1 ] && {
-		eval "sch_names=\"\${SCH_JOB_PARAMS_${sch_dc_id}}\""
+	eval "sch_names=\"\${SCH_JOB_PARAMS_${sch_dc_id}}\""
 
-		sch_has_f && sch_had_f=1
-		set -f
+	sch_has_f && sch_had_f=1
+	set -f
 
-		# 'local' with invalid name aborts busybox ash
-		for sch_p in ${sch_names}; do
-			sch_check_var_name "${sch_p}" "${sch_me}" || { sch_names=; break; }
-		done
+	# 'local' with invalid name aborts busybox ash
+	for sch_p in ${sch_names}; do
+		sch_check_var_name "${sch_p}" "${sch_me}" || { sch_names=; break; }
+	done
 
-		[ -z "${sch_names}" ] || {
-			#shellcheck disable=SC2086
-			local ${sch_names}
-			job_get_params -export "${sch_dc_id}" sch_all
-		}
-
-		[ -n "${sch_had_f}" ] || set +f
+	[ -z "${sch_names}" ] || {
+		#shellcheck disable=SC2086
+		local ${sch_names}
+		job_get_params -export "${sch_dc_id}" sch_all
 	}
+
+	[ -n "${sch_had_f}" ] || set +f
 
 	"${sch_cb}" "${@}"
 }
