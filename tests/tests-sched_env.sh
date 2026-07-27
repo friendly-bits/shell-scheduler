@@ -448,3 +448,83 @@ test_sched_env_09() {
 		return 1
 	fi
 }
+
+# Verify SCHED_ID validation: a malformed namespace fails the run before dispatch,
+#   a valid one (including unset and empty) is accepted.
+test_sched_env_10() {
+	sched_env_10_do_job() { printf 'started\n' > "${JOB_STARTED_FILE:?}"; return 0; }
+	sched_env_10_fail_msg() { printf '%s\n' "$*" >> "${FAIL_MSG_FILE:?}"; }
+
+	# 1: SCHED_ID value, 2: expected scheduler rv, 3: 1 if the job must have started
+	sched_env_10_run() {
+		local sched_rv
+
+		rm -f "${JOB_STARTED_FILE}"
+		total_cnt=$((total_cnt + 1))
+
+		SCHED_ID="${1}" \
+		SCHED_FAIL_MSG_CB=sched_env_10_fail_msg \
+		SCHED_FINALIZE_CB=finalize_handler \
+		DO_JOB_CB=sched_env_10_do_job \
+		SCHED_MAX_JOBS=1 \
+		SCHED_TIMEOUT_S=5 \
+		SCHED_IDLE_TIMEOUT_S=5 \
+			schedule_jobs "${JOB_ID}" &
+
+		wait "$!"
+		sched_rv=$?
+
+		if [ "${sched_rv}" = "${2}" ] &&
+			{ { [ "${3}" = 1 ] && [ -f "${JOB_STARTED_FILE}" ]; } ||
+			  { [ "${3}" != 1 ] && [ ! -f "${JOB_STARTED_FILE}" ]; }; }
+		then
+			pass_cnt=$((pass_cnt + 1))
+		else
+			printf "SCHED_ID='%s': rv=%s (want %s), started=%s (want %s)\n" \
+				"${1}" "${sched_rv}" "${2}" \
+				"$([ -f "${JOB_STARTED_FILE}" ] && echo yes || echo no)" "${3}" >&2
+		fi
+
+		rm -f "${JOB_STARTED_FILE}"
+	}
+
+	local \
+		TEST_ID=sched_env_10 \
+		pass_cnt=0 total_cnt=0 bad_cnt=0 msg_cnt=0 \
+		bad long_id
+
+	local \
+		JOB_ID=sched_env_10_job \
+		FAIL_MSG_FILE="/tmp/sched.schedid.msg.${TEST_ID:?}.$$" \
+		JOB_STARTED_FILE="/tmp/sched.schedid.job.${TEST_ID:?}.$$"
+
+	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_ID validation" "${JOB_ID}"
+
+	mk_name_of_len long_id 2021 "${TEST_ID}" ||
+		{ FAIL "mk_name_of_len failed"; return 1; }
+
+	# The command-substitution value doubles as an injection check: executing it
+	#   would create ${JOB_STARTED_FILE}, which the "job must not start" leg catches
+	for bad in 'a b' 'a-b' 'a.b' 'a/b' '$(sched_env_10_do_job)' "${long_id}"; do
+		bad_cnt=$((bad_cnt + 1))
+		sched_env_10_run "${bad}" 1 0
+	done
+
+	# Empty (no namespace) and well-formed values are accepted
+	sched_env_10_run '' 0 1
+	sched_env_10_run "${TEST_ID}_ns" 0 1
+
+	[ -f "${FAIL_MSG_FILE}" ] && msg_cnt=$(wc -l < "${FAIL_MSG_FILE}")
+	rm -f "${FAIL_MSG_FILE}" "${JOB_STARTED_FILE}"
+
+	if [ "${pass_cnt}" = "${total_cnt}" ] && [ "${msg_cnt}" = "${bad_cnt}" ]
+	then
+		PASS "${pass_cnt}/${total_cnt}, messages=${msg_cnt}"
+		return 0
+	else
+		FAIL "${pass_cnt}/${total_cnt}, messages=${msg_cnt} (want ${bad_cnt})"
+		return 1
+	fi
+}

@@ -2015,3 +2015,183 @@ test_params_38() {
 		return 1
 	fi
 }
+
+# Verify ${SCHED_ID} namescopes per-job params:
+#   one job ID holds independent values under different SCHED_ID values,
+#   and jobs_init clears only the current namespace.
+# Direct calls, no scheduler run.
+test_params_39() {
+	params_39_chk() {
+		total_cnt=$((total_cnt + 1))
+		if [ "${2}" = "${3}" ]; then
+			pass_cnt=$((pass_cnt + 1))
+		else
+			printf '%s: got %s, want %s\n' "${1}" "'${2}'" "'${3}'" >&2
+		fi
+	}
+
+	local \
+		TEST_ID=params_39 \
+		v_a v_b v_none \
+		pass_cnt=0 total_cnt=0 \
+		job_id=params_39_job
+
+	print_test_header "${TEST_ID:?}" "SCHED_ID namescopes params of one job ID" "(direct calls, no scheduler run)"
+
+	SCHED_ID=params_39_a job_set_params "${job_id}" "url=A" &&
+	SCHED_ID=params_39_b job_set_params "${job_id}" "url=B" &&
+	job_set_params "${job_id}" "url=NONE" ||
+		{ FAIL "job_set_params failed"; return 1; }
+
+	SCHED_ID=params_39_a job_get_params "${job_id}" "v_a=url"
+	SCHED_ID=params_39_b job_get_params "${job_id}" "v_b=url"
+	job_get_params "${job_id}" "v_none=url"
+
+	params_39_chk "ns a" "${v_a}" A
+	params_39_chk "ns b" "${v_b}" B
+	params_39_chk "unset ns" "${v_none}" NONE
+
+	# jobs_init in one namespace leaves the others untouched
+	SCHED_ID=params_39_a jobs_init "${job_id}" ||
+		{ FAIL "jobs_init failed"; return 1; }
+
+	v_a=stale; v_b=stale; v_none=stale
+	SCHED_ID=params_39_a job_get_params "${job_id}" "v_a=url"
+	SCHED_ID=params_39_b job_get_params "${job_id}" "v_b=url"
+	job_get_params "${job_id}" "v_none=url"
+
+	params_39_chk "ns a after jobs_init" "${v_a}" ''
+	params_39_chk "ns b after jobs_init" "${v_b}" B
+	params_39_chk "unset ns after jobs_init" "${v_none}" NONE
+
+	if [ "${pass_cnt}" = "${total_cnt}" ]; then
+		PASS "${pass_cnt}/${total_cnt}"
+		return 0
+	else
+		FAIL "${pass_cnt}/${total_cnt}"
+		return 1
+	fi
+}
+
+# Verify a job receives the params of the namespace in effect for the run:
+#   the same job ID carries different values in two namespaces, and each run delivers its own.
+test_params_40() {
+	params_40_do_job() {
+		local url
+		job_get_params "${1}" url || return 1
+		printf '%s\n' "${url}" > "${OUT_FILE:?}"
+	}
+
+	local \
+		TEST_ID=params_40 \
+		rv_a rv_none seen_a seen_none \
+		job_id=params_40_job
+
+	local OUT_FILE="/tmp/sched.params.schedid.${TEST_ID}.$$"
+
+	rm -f "${OUT_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Job gets params of the run's SCHED_ID namespace" "${job_id}"
+
+	SCHED_ID=params_40_a job_set_params "${job_id}" "url=FROM_A" &&
+	job_set_params "${job_id}" "url=FROM_UNSET" ||
+		{ FAIL "job_set_params failed"; return 1; }
+
+	SCHED_ID=params_40_a \
+	SCHED_FINALIZE_CB=finalize_handler \
+	DO_JOB_CB=params_40_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id}" &
+
+	wait "$!"
+	rv_a=$?
+	read_first_line seen_a "${OUT_FILE}"
+	rm -f "${OUT_FILE}"
+
+	SCHED_FINALIZE_CB=finalize_handler \
+	DO_JOB_CB=params_40_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${job_id}" &
+
+	wait "$!"
+	rv_none=$?
+	read_first_line seen_none "${OUT_FILE}"
+	rm -f "${OUT_FILE}"
+
+	if [ "${rv_a}" = 0 ] && [ "${rv_none}" = 0 ] &&
+		[ "${seen_a}" = FROM_A ] && [ "${seen_none}" = FROM_UNSET ]
+	then
+		PASS "ns a='${seen_a}', unset ns='${seen_none}'"
+		return 0
+	else
+		FAIL "rv_a=${rv_a}, rv_none=${rv_none}, a='${seen_a}' (want FROM_A), unset='${seen_none}' (want FROM_UNSET)"
+		return 1
+	fi
+}
+
+# Verify job_set_timeout is namescoped:
+#   a per-job timeout set under one SCHED_ID does not apply to a run under another.
+test_params_41() {
+	params_41_finalize() {
+		printf '%s\n' "${7}" > "${EXPIRED_FILE:?}"
+		local pid
+		for pid in ${2}; do kill "${pid}" 2>/dev/null; done
+		return 0
+	}
+
+	local \
+		TEST_ID=params_41 \
+		rv_a rv_b expired_a expired_b \
+		job_id=hang_params_41
+
+	local EXPIRED_FILE="/tmp/sched.params.schedid_to.${TEST_ID}.$$"
+
+	rm -f "${EXPIRED_FILE}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_ID namescopes per-job timeouts" "${job_id}"
+
+	SCHED_ID=params_41_a job_set_timeout "${job_id}" 1 ||
+		{ FAIL "job_set_timeout failed"; return 1; }
+
+	# Namespace holding the 1 s per-job timeout: job expires, scheduler completes
+	SCHED_ID=params_41_a \
+	SCHED_FINALIZE_CB=params_41_finalize \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=10 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+		schedule_jobs "${job_id}" &
+
+	wait "$!"
+	rv_a=$?
+	read_first_line expired_a "${EXPIRED_FILE}"
+	rm -f "${EXPIRED_FILE}"
+
+	# Other namespace: no per-job timeout, so the job runs until the scheduler times out
+	SCHED_ID=params_41_b \
+	SCHED_FINALIZE_CB=params_41_finalize \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=3 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+		schedule_jobs "${job_id}" &
+
+	wait "$!"
+	rv_b=$?
+	read_first_line expired_b "${EXPIRED_FILE}"
+	rm -f "${EXPIRED_FILE}"
+
+	if [ "${rv_a}" = 0 ] && [ "${expired_a}" = "${job_id}" ] &&
+		[ "${rv_b}" = 82 ] && [ -z "${expired_b}" ]
+	then
+		PASS "ns a: rv=${rv_a} expired='${expired_a}'; ns b: rv=${rv_b} expired=''"
+		return 0
+	else
+		FAIL "ns a: rv=${rv_a} (want 0) expired='${expired_a}' (want '${job_id}'); ns b: rv=${rv_b} (want 82) expired='${expired_b}' (want '')"
+		return 1
+	fi
+}

@@ -924,3 +924,152 @@ test_security_13() {
 		return 1
 	fi
 }
+
+# Verify the public helpers reject an injection-shaped ${SCHED_ID}
+#   before it reaches eval/export/unset, and never execute the embedded command.
+# Covers the namespace infix built into SCH_JOB_PARAMS_/SCH_JOB_PARAM_/SCH_TIMEOUT_JOB_ names.
+# Direct calls, no scheduler run.
+test_security_14() {
+	security_14_touch_inject() { touch "${INJECT_FILE:?}"; }
+	security_14_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+
+	# 1: SCHED_ID value
+	security_14_reject_all() {
+		local rv helper
+		for helper in \
+			"job_set_params ${JOB_ID} GOOD=v" \
+			"job_get_params ${JOB_ID} GOOD" \
+			"job_set_timeout ${JOB_ID} 5" \
+			"jobs_init ${JOB_ID}"
+		do
+			total_cnt=$((total_cnt + 1))
+			# shellcheck disable=SC2086
+			SCHED_ID="${1}" SCHED_FAIL_MSG_CB=security_14_fail_msg ${helper}
+			rv=$?
+			if [ "${rv}" != 0 ]; then
+				pass_cnt=$((pass_cnt + 1))
+			else
+				printf "accepted SCHED_ID='%s': %s\n" "${1}" "${helper}" >&2
+			fi
+		done
+	}
+
+	local \
+		TEST_ID=security_14 \
+		bad \
+		pass_cnt=0 total_cnt=0 msg_cnt
+
+	local \
+		JOB_ID=security_14_job \
+		MSG_FILE="/tmp/sched.sec.schedid.msg.${TEST_ID}.$$" \
+		INJECT_FILE="/tmp/sched.sec.schedid.inject.${TEST_ID}.$$"
+
+	rm -f "${MSG_FILE}" "${INJECT_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Helpers reject injection-shaped SCHED_ID, no execution" "(direct calls, no scheduler run)"
+
+	for bad in \
+		'$(security_14_touch_inject)' \
+		'`security_14_touch_inject`' \
+		'a;security_14_touch_inject'
+	do
+		security_14_reject_all "${bad}"
+	done
+
+	msg_cnt=0
+	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
+
+	if [ "${pass_cnt}" = "${total_cnt}" ] &&
+		[ "${msg_cnt}" = "${total_cnt}" ] &&
+		[ ! -e "${INJECT_FILE}" ]
+	then
+		rm -f "${MSG_FILE}" "${INJECT_FILE}"
+		PASS "${pass_cnt}/${total_cnt} rejected, no injection"
+		return 0
+	else
+		FAIL "${pass_cnt}/${total_cnt} rejected, msg_cnt=${msg_cnt}, injected=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)"
+		rm -f "${MSG_FILE}" "${INJECT_FILE}"
+		return 1
+	fi
+}
+
+# Verify the ${#SCHED_ID} length prefix in the internal param key keeps two
+#   (SCHED_ID, job_id, param) triplets that would otherwise concatenate identically apart.
+# SCHED_ID='...a'/job='1'/param='2_x' and SCHED_ID='...a_1'/job='2'/param='x'
+#   both form '..._a_1_1_2_x' without it.
+# Direct calls, no scheduler run.
+test_security_15() {
+	local TEST_ID=security_15
+	local \
+		g1 g2 \
+		ns1="${TEST_ID}_a" ns2="${TEST_ID}_a_1"
+
+	print_test_header "${TEST_ID:?}" "Param key namespace: length prefix prevents (SCHED_ID,job) collision" "(direct calls, no scheduler run)"
+
+	SCHED_ID="${ns1}" job_set_params 1 "2_x=VAL_ONE"
+	SCHED_ID="${ns2}" job_set_params 2 "x=VAL_TWO"
+
+	SCHED_ID="${ns1}" job_get_params 1 "g1=2_x"
+	SCHED_ID="${ns2}" job_get_params 2 "g2=x"
+
+	if [ "${g1}" = VAL_ONE ] && [ "${g2}" = VAL_TWO ]; then
+		PASS "g1='${g1}', g2='${g2}'"
+		return 0
+	else
+		FAIL "g1='${g1}' (want VAL_ONE), g2='${g2}' (want VAL_TWO)"
+		return 1
+	fi
+}
+
+# Verify a callback that overwrites ${SCHED_ID} mid-run with an injection payload
+#   cannot get it executed: the scheduler re-validates the namespace and aborts.
+test_security_16() {
+	security_16_touch_inject() { touch "${INJECT_FILE:?}"; }
+	security_16_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
+	security_16_do_job() { printf '%s\n' "${1}" >> "${RAN_FILE:?}"; return 0; }
+
+	# Runs in the scheduler process: no 'local', so the assignment leaks into it
+	security_16_tick() { SCHED_ID='$(security_16_touch_inject)'; return 0; }
+
+	local \
+		TEST_ID=security_16 \
+		sched_rv ran
+
+	local \
+		MSG_FILE="/tmp/sched.sec.schedid_run.msg.${TEST_ID}.$$" \
+		INJECT_FILE="/tmp/sched.sec.schedid_run.inject.${TEST_ID}.$$" \
+		RAN_FILE="/tmp/sched.sec.schedid_run.ran.${TEST_ID}.$$" \
+		jobs="security_16_j1 security_16_j2"
+
+	rm -f "${MSG_FILE}" "${INJECT_FILE}" "${RAN_FILE}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_ID overwritten by a callback mid-run is re-validated" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=security_16_fail_msg \
+	SCHED_FINALIZE_CB=finalize_handler \
+	SCHED_DISPATCH_TICK_CB=security_16_tick \
+	DO_JOB_CB=security_16_do_job \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	# Only the job dispatched before the callback ran may have started
+	ran=
+	[ -f "${RAN_FILE}" ] && ran="$(tr '\n' ' ' < "${RAN_FILE}")"
+
+	if [ "${sched_rv}" = 1 ] && [ "${ran}" = 'security_16_j1 ' ] && [ ! -e "${INJECT_FILE}" ]
+	then
+		rm -f "${MSG_FILE}" "${INJECT_FILE}" "${RAN_FILE}"
+		PASS "sched_rv=${sched_rv}, ran='${ran}', no injection"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv} (want 1), ran='${ran}' (want 'security_16_j1 '), injected=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)"
+		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
+		rm -f "${MSG_FILE}" "${INJECT_FILE}" "${RAN_FILE}"
+		return 1
+	fi
+}

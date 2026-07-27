@@ -151,6 +151,8 @@ To set **individual timeout for a job** (overriding `SCHED_JOB_TIMEOUT_S` for th
 job_set_timeout <job_id> <seconds>
 ```
 
+If your application needs to run more than one scheduler instance, see [Scheduler namespace](REFERENCE.md#scheduler-namespace-sched_id).
+
 -----
 
 **Note**: The scheduler is intended to run in a separate process. This may be a background process (with the `&` after `schedule_jobs`), or a foreground subshell, e.g.:
@@ -165,14 +167,15 @@ While technically you *can* run the scheduler in the same process as your applic
 The implementation uses `eval` in a few places to emulate associative arrays functionality. Expressions passed to `eval` are carefully constructed to avoid command injection vulnerabilities: variable names are vetted, and values are expanded via parameter expansion rather than interpolated into the code string, so they cannot be interpreted as code. E.g.:
 
 ```sh
-# Vet the value of ${sch_job_id}
+# Vet the ${SCHED_ID} namespace and the value of ${sch_job_id}
+sch_get_ns sch_ns "${sch_me}" || return 1
 sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
 ...
 # Get parameters list for job ${sch_job_id}
-eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
+eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_ns}${sch_job_id}}\""
 ```
 
-(`sch_check_name()` performs string safety validation)
+(`sch_get_ns()` and `sch_check_name()` perform string safety validation)
 
 This follows the [recommendation](https://www.shellcheck.net/wiki/SC2082) by shellcheck for getting values via indirection on POSIX shells.
 

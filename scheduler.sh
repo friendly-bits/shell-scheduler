@@ -8,6 +8,7 @@
 # SCHED_JOB_TIMEOUT_S
 # SCHED_DIR
 # SCHED_AUTO_PARAMS
+# SCHED_ID
 
 # Env vars specifying callbacks (see REFERENCE.md):
 # DO_JOB_CB
@@ -142,12 +143,11 @@ sch_get_cur_pid() {
 }
 
 sch_check_name() {
-	# A job ID reaches this check both bare and wrapped in the internal
-	#   'SCH_JOB_PARAMS_<job ID>' var name, so a var gets the base budget
-	#   plus that prefix - otherwise the same ID would pass one and fail the other
-	local scn_pfx=SCH_JOB_PARAMS_ scn_max_len=2020
+	# A job ID reaches this check both bare and wrapped in the internal 'SCH_JOB_PARAMS_<namespace><job ID>' var name,
+	#   so a var gets the base budget plus that prefix - otherwise the same ID would pass one and fail the other
+	local scn_pfx="SCH_JOB_PARAMS_${#SCHED_ID}_${SCHED_ID}_" scn_max_len=2020
 
-	[ "${1}" != var ] || scn_max_len=$((scn_max_len + ${#scn_pfx}))
+	[ "${1}" = var ] && scn_max_len=$((scn_max_len + ${#scn_pfx}))
 
 	[ "${#2}" -le "${scn_max_len}" ] &&
 	case "${2}" in
@@ -177,6 +177,22 @@ sch_check_var_name() {
 			sch_fail_msg "${2}: var name '${1}' is reserved for internal use."
 			return 1
 	esac
+}
+
+# Resolve the ${SCHED_ID} namespace infix '<len of SCHED_ID>_<SCHED_ID>_' for internal per-job var names
+# Unset ${SCHED_ID} is valid and produces '0__'
+#
+# The length prefix is what keeps the namespace apart from the job ID: both are
+#   [a-zA-Z0-9_], so plain concatenation would let SCHED_ID='a'+job '1_x'
+#   collide with SCHED_ID='a_1'+job 'x'
+#
+# 1: out var name
+# 2: caller name
+sch_get_ns() {
+	export -n "${1:?}="
+	[ -z "${SCHED_ID}" ] ||
+		sch_check_name "SCHED_ID" "${SCHED_ID}" "${2}" || return 1
+	export -n "${1}=${#SCHED_ID}_${SCHED_ID}_"
 }
 
 sch_finalize() {
@@ -271,13 +287,15 @@ sch_run_done_cb() {
 		sch_had_f \
 		sch_p \
 		sch_names \
+		sch_ns \
 		sch_cb="${1}" \
 		sch_dc_id="${2}"
 
 	shift
 
 	[ "${SCHED_AUTO_PARAMS}" = 1 ] && {
-		eval "sch_names=\"\${SCH_JOB_PARAMS_${sch_dc_id}}\""
+		sch_get_ns sch_ns "${sch_me}" || return 1
+		eval "sch_names=\"\${SCH_JOB_PARAMS_${sch_ns}${sch_dc_id}}\""
 
 		sch_has_f && sch_had_f=1
 		set -f
@@ -622,6 +640,7 @@ schedule_jobs() {
 		sch_seen_ids \
 		sch_pid \
 		sch_job_to \
+		sch_ns \
 		sch_dl_now_cs \
 		SCH_RUNNING_JOBS_CNT=0 \
 		sch_ipc_fifo \
@@ -669,6 +688,9 @@ schedule_jobs() {
 	sch_normalize_uint SCH_TIMEOUT_S "${SCHED_TIMEOUT_S:-900}" &&
 	sch_normalize_uint SCH_IDLE_TIMEOUT_S "${SCHED_IDLE_TIMEOUT_S:-300}" &&
 	sch_normalize_uint SCH_JOB_TIMEOUT_S "${SCHED_JOB_TIMEOUT_S}" || exit 1
+
+	# Check namespace
+	sch_get_ns sch_ns "schedule_jobs" || exit 1
 
 	sch_tr_trailing sch_dir "/"
 
@@ -741,6 +763,9 @@ schedule_jobs() {
 		[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
 		refresh_remain_time
 
+		# Callback may have changed sch_ns or SCHED_ID - recompute sch_ns before fork
+		sch_get_ns sch_ns "schedule_jobs" || sch_finalize 1
+
 		SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT + 1))
 
 		sch_start_job "${sch_id}" "${@}" &
@@ -754,7 +779,7 @@ schedule_jobs() {
 		SCH_LAST_PROGRESS_TIME_CS="${sch_dl_now_cs}"
 
 		# Register job's timeout deadline if it has one
-		eval "sch_job_to=\"\${SCH_TIMEOUT_JOB_${sch_id}:-\${SCH_JOB_TIMEOUT_S}}\""
+		eval "sch_job_to=\"\${SCH_TIMEOUT_JOB_${sch_ns}${sch_id}:-\${SCH_JOB_TIMEOUT_S}}\""
 
 		[ -n "${sch_job_to}" ] &&
 			sch_append SCH_DEADLINES "${sch_pid}:$((sch_dl_now_cs + sch_job_to*100)):${sch_id}"
@@ -790,7 +815,11 @@ jobs_init() {
 		sch_cur_params \
 		sch_param \
 		sch_job_id \
+		sch_ns \
 		sch_rv=0
+
+	# Resolved before any name is built: 'unset' with an invalid name aborts busybox ash
+	sch_get_ns sch_ns "jobs_init" || return 1
 
 	sch_has_f && sch_had_f=1
 	set -f
@@ -799,16 +828,16 @@ jobs_init() {
 	for sch_job_id in ${*}; do
 		sch_check_name "job ID" "${sch_job_id}" "jobs_init" ||
 			{ sch_rv=1; break; }
-		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
+		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_ns}${sch_job_id}}\""
 
 		for sch_param in ${sch_cur_params}; do
 			case "${sch_param}" in
 				''|*[!a-zA-Z0-9_]*) continue ;;
 			esac
-			unset "SCH_JOB_PARAM_${#sch_job_id}_${sch_job_id}_${sch_param}"
+			unset "SCH_JOB_PARAM_${sch_ns}${#sch_job_id}_${sch_job_id}_${sch_param}"
 		done
-		unset "SCH_JOB_PARAMS_${sch_job_id}" \
-			"SCH_TIMEOUT_JOB_${sch_job_id}"
+		unset "SCH_JOB_PARAMS_${sch_ns}${sch_job_id}" \
+			"SCH_TIMEOUT_JOB_${sch_ns}${sch_job_id}"
 	done
 
 	[ -n "${sch_had_f}" ] || set +f
@@ -824,10 +853,12 @@ job_set_params() {
 		sch_cur_params \
 		sch_pair \
 		sch_pair_seen \
+		sch_ns \
 		sch_job_id="${1}"
 
 	[ -n "${1+x}" ] && shift
 
+	sch_get_ns sch_ns "${sch_me}" || return 1
 	sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	for sch_pair; do
@@ -843,11 +874,11 @@ job_set_params() {
 		sch_val="${sch_pair#"${sch_param}="}"
 		sch_check_name "param" "${sch_param}" "${sch_me}" || return 1
 
-		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
+		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_ns}${sch_job_id}}\""
 		sch_is_included "${sch_param}" "${sch_cur_params}" ||
-		sch_append "SCH_JOB_PARAMS_${sch_job_id}" "${sch_param}" ||
+		sch_append "SCH_JOB_PARAMS_${sch_ns}${sch_job_id}" "${sch_param}" ||
 			return 1
-		export -n "SCH_JOB_PARAM_${#sch_job_id}_${sch_job_id}_${sch_param}=${sch_val}"
+		export -n "SCH_JOB_PARAM_${sch_ns}${#sch_job_id}_${sch_job_id}_${sch_param}=${sch_val}"
 	done
 
 	[ -n "${sch_pair_seen}" ] ||
@@ -869,13 +900,15 @@ job_get_params() {
 		sch_had_f \
 		sch_job_params \
 		sch_param_seen \
+		sch_ns \
 		sch_job_id="${1}"
 
 	[ -n "${1+x}" ] && shift
+	sch_get_ns sch_ns "${sch_me}" || return 1
 	sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	[ "${*}" = sch_all ] && {
-		eval "sch_job_params=\"\${SCH_JOB_PARAMS_${sch_job_id}}\""
+		eval "sch_job_params=\"\${SCH_JOB_PARAMS_${sch_ns}${sch_job_id}}\""
 		[ -n "${sch_job_params}" ] || return 0
 
 		sch_has_f && sch_had_f=1
@@ -896,7 +929,7 @@ job_get_params() {
 		sch_check_name "param" "${sch_param}" "${sch_me}" &&
 		sch_check_var_name "${sch_var}" "${sch_me}" || return 1
 
-		eval "${sch_export}${sch_var}=\"\${SCH_JOB_PARAM_${#sch_job_id}_${sch_job_id}_${sch_param}}\""
+		eval "${sch_export}${sch_var}=\"\${SCH_JOB_PARAM_${sch_ns}${#sch_job_id}_${sch_job_id}_${sch_param}}\""
 	done
 
 	[ -n "${sch_param_seen}" ] ||
@@ -909,8 +942,10 @@ job_get_params() {
 job_set_timeout() {
 	local sch_me=job_set_timeout \
 		sch_val="${2}" \
+		sch_ns \
 		sch_job_id="${1}"
 
+	sch_get_ns sch_ns "${sch_me}" || return 1
 	sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	sch_is_uint "${sch_val}" && [ "${sch_val}" -ge 1 ] || {
@@ -920,5 +955,5 @@ job_set_timeout() {
 	sch_tr_leading sch_val "0"
 	# Not SCH_JOB_TIMEOUT_<id>: that would collide with the internal
 	# ${SCH_JOB_TIMEOUT_S} copy of ${SCHED_JOB_TIMEOUT_S} for a job named 'S'
-	export -n "SCH_TIMEOUT_JOB_${sch_job_id}=${sch_val}"
+	export -n "SCH_TIMEOUT_JOB_${sch_ns}${sch_job_id}=${sch_val}"
 }

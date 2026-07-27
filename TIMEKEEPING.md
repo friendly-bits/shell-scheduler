@@ -65,6 +65,8 @@ job_set_timeout <job_id> <seconds>
 
 Timeout value must be integer >= 1. A per-job timeout may exceed `${SCHED_TIMEOUT_S}` but such deadline simply never fires (the global scheduler timeout fires first). When neither `${SCHED_JOB_TIMEOUT_S}` nor an individual timeout is set, the job will be allowed to run indefinitely.
 
+Like per-job parameters, an individual timeout is stored under the namespace selected by `${SCHED_ID}`, and applies only to runs performed with the same `${SCHED_ID}` - see [Scheduler namespace](REFERENCE.md#scheduler-namespace-sched_id).
+
 ### Notes
 
 1. **Expiry timing**: Per the [enforcement granularity rules](#how-the-scheduler-measures-time), expiry is never declared early and may be declared up to about one second late - later still if a synchronous callback blocks the scheduler at that moment.
