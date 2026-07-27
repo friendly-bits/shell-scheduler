@@ -236,8 +236,9 @@ test_security_03() {
 	}
 
 	security_03_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \

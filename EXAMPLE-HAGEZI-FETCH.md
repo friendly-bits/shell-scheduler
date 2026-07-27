@@ -86,7 +86,7 @@ finalize_dl()
 	#   non-empty ${running_pids} can be safely ignored.
 	printf '%s\n' "PIDs of jobs which might have escaped termination: ${running_pids:-<none>}"
 
-	return 0
+	return "${rv}"
 }
 
 

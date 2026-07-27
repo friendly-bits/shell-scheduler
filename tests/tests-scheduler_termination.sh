@@ -39,11 +39,11 @@ test_scheduler_termination_02() {
 	scheduler_termination_02_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
-		finalize_handler "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}"
 
 		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
-		return 0
+		return "${rv}"
 	}
 
 	local \
@@ -96,6 +96,8 @@ test_scheduler_termination_03() {
 		fi
 
 		finalize_handler "${rv}" "${pids}"
+
+		return "${rv}"
 	}
 
 	local \
@@ -153,11 +155,11 @@ test_scheduler_termination_04() {
 	scheduler_termination_04_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
-		finalize_handler "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}"
 
 		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
-		return 0
+		return "${rv}"
 	}
 
 	local \
@@ -201,11 +203,11 @@ test_scheduler_termination_05() {
 	scheduler_termination_05_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
-		finalize_handler "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}"
 
 		printf '%s\n' "${rv}" > "${TIMEOUT_FILE:?}"
 
-		return 0
+		return "${rv}"
 	}
 
 	local \
@@ -288,6 +290,8 @@ test_scheduler_termination_07() {
 		fi
 
 		finalize_handler "${rv}" "${pids}"
+
+		return "${rv}"
 	}
 
 	local \
@@ -806,6 +810,8 @@ test_scheduler_termination_17() {
 
 		# Reuse the shared handler to kill the workers
 		finalize_handler "${rv}" "${pids}"
+
+		return "${rv}"
 	}
 
 	local \
@@ -869,6 +875,8 @@ test_scheduler_termination_18() {
 		printf '%s\n' "${6}" > "${UNDISPATCHED_FILE:?}"
 
 		finalize_handler "${1}" "${2}"
+
+		return "${1}"
 	}
 
 	# Return 0 if the id lists ${1} and ${2} are equal as sets

@@ -37,8 +37,9 @@ verify_id_set() {
 #   with no timeout/undispatched/unfinished jobs involved.
 test_outcome_01() {
 	outcome_01_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \
@@ -97,8 +98,9 @@ test_outcome_01() {
 #   while a still-running job at abort time lands in unfinished, not fail.
 test_outcome_02() {
 	outcome_02_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \
@@ -165,8 +167,9 @@ test_outcome_03() {
 	}
 
 	outcome_03_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \
@@ -223,8 +226,9 @@ test_outcome_03() {
 #   the still-running job lands in unfinished.
 test_outcome_04() {
 	outcome_04_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \
@@ -283,8 +287,9 @@ test_outcome_04() {
 #   the malformed job itself is unfinished.
 test_outcome_05() {
 	outcome_05_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \
@@ -348,8 +353,9 @@ test_outcome_06() {
 	}
 
 	outcome_06_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \
@@ -421,8 +427,9 @@ test_outcome_06() {
 # Verify an empty job list yields all five sets empty.
 test_outcome_07() {
 	outcome_07_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \
@@ -477,8 +484,9 @@ test_outcome_07() {
 #   not which bucket each ID lands in (test_outcome_06 checks specific membership).
 test_outcome_08() {
 	outcome_08_finalize_handler() {
-		finalize_handler "${1}" "${2}" || return $?
+		finalize_handler "${1}" "${2}"
 		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
+		return "${1}"
 	}
 
 	local \

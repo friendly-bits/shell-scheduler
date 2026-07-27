@@ -23,7 +23,7 @@ Timeout *enforcement* is coarser than the accounting resolution:
 
 The global timeout (`${SCHED_TIMEOUT_S}`) limits the total time the scheduler is allowed to run. It starts when the scheduler begins execution and continues to run regardless of how many jobs are currently executing or waiting to be started.
 
-If the global timeout is reached, the scheduler reports an error, invokes the **scheduler completion callback** (if defined), and exits with return code `82`.
+If the global timeout is reached, the scheduler reports an error, invokes the **scheduler completion callback** (if defined), and exits with return code `82` - unless the callback returns a different code.
 
 | Variable                  | Default | Description                                           |
 | ------------------------- | :-----: | ----------------------------------------------------- |
@@ -35,7 +35,7 @@ The idle timeout (`${SCHED_IDLE_TIMEOUT_S}`) limits the maximum time the schedul
 
 This timeout is useful for detecting situations where no progress is being made, for example because one or more jobs became stuck.
 
-If the idle timeout is reached, the scheduler reports an error, invokes the **scheduler completion callback** (if defined), and exits with return code `81`.
+If the idle timeout is reached, the scheduler reports an error, invokes the **scheduler completion callback** (if defined), and exits with return code `81` - unless the callback returns a different code.
 
 Both timeout values are validated as non-zero unsigned decimal integers; leading zeros are stripped (never interpreted as octal).
 

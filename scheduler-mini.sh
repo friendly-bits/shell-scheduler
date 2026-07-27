@@ -170,7 +170,7 @@ sch_get_ns() {
 }
 
 sch_finalize() {
-	local sch_cb_rv sch_unfinished_ids sch_exp_e \
+	local sch_unfinished_ids sch_exp_e \
 		IFS=" "$'\t'$'\n' \
 		sch_rv="${1}"
 
@@ -198,12 +198,10 @@ sch_finalize() {
 			sch_append sch_unfinished_ids "${sch_id}"
 	done
 
-	[ -z "${SCHED_FINALIZE_CB}" ] ||
-		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${SCH_FAIL_IDS}" "${sch_unfinished_ids}" "${SCH_UNDISPATCHED_IDS}" "${SCH_EXPIRED_IDS}" ||
-		{
-			sch_cb_rv=${?}
-			[ "${sch_rv}" = 0 ] && sch_rv="${sch_cb_rv}"
-		}
+	[ -n "${SCHED_FINALIZE_CB}" ] && {
+		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${SCH_FAIL_IDS}" "${sch_unfinished_ids}" "${SCH_UNDISPATCHED_IDS}" "${SCH_EXPIRED_IDS}"
+		sch_rv=${?}
+	}
 
 	exit "${sch_rv}"
 }

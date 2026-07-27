@@ -200,7 +200,7 @@ test_dispatch_04() {
 	test_dispatch_04_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
-		finalize_handler "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}"
 
 		if [ -z "${pids}" ]
 		then
@@ -209,7 +209,7 @@ test_dispatch_04() {
 			printf 'nonempty\n' > "${LARGE_FINALIZE_FILE:?}"
 		fi
 
-		return 0
+		return "${rv}"
 	}
 
 	local \
@@ -279,7 +279,7 @@ test_dispatch_05() {
 	test_dispatch_05_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
-		finalize_handler "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}"
 
 		if [ -z "${pids}" ]
 		then
@@ -288,7 +288,7 @@ test_dispatch_05() {
 			printf 'nonempty\n' > "${EMPTY_FINALIZE_FILE:?}"
 		fi
 
-		return 0
+		return "${rv}"
 	}
 
 	local \

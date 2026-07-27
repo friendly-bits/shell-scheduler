@@ -2140,7 +2140,7 @@ test_params_41() {
 		printf '%s\n' "${7}" > "${EXPIRED_FILE:?}"
 		local pid
 		for pid in ${2}; do kill "${pid}" 2>/dev/null; done
-		return 0
+		return "${1}"
 	}
 
 	local \

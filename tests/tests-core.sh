@@ -47,6 +47,7 @@ test_core_03() {
 	core_03_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "ok=$3" "unfin=$5" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local sched_rv checks_ok=1 \
@@ -179,7 +180,7 @@ test_core_05() {
 			*f*) printf 'noglob\n' ;;
 			*) printf 'glob\n' ;;
 		esac > "${finalize_glob_file}"
-		return 0
+		return "${1}"
 	}
 
 	local \
@@ -324,6 +325,7 @@ test_core_07() {
 	core_07_finalize() {
 		# $3 = ok ids, $4 = fail ids, $5 = unfinished ids
 		printf 'ok=[%s] fail=[%s] unfin=[%s]\n' "$3" "$4" "$5" > "${CORE07_REC:?}"
+		return "${1}"
 	}
 	# Extract the ok-bucket ids from a record file into <out var>
 	core_07_ok() {

@@ -166,6 +166,7 @@ jt_finalize_rec() {
 		"unfin=${5}" \
 		"undisp=${6}" \
 		"expired=${7}" > "${FINALIZE_F:?}"
+	return "${1}"
 }
 
 # Read field ${2} recorded by jt_finalize_rec from file ${3} into var ${1}

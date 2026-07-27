@@ -123,7 +123,7 @@ Defined by the value of **`${JOB_DONE_CB}`**. Invoked by the scheduler for each 
 ${JOB_DONE_CB} <job_id> <job_return_code> [job_pid]
 ```
 
-If this callback returns a non-zero code, the scheduler terminates immediately with the same return code (after invoking the **scheduler completion callback**).
+If this callback returns a non-zero code, the scheduler terminates immediately and propagates the same return code, subject to the **scheduler completion callback**'s override (see [Return codes](#return-codes)).
 
 It can be used to e.g. collect job results or handle failures.
 
@@ -154,9 +154,10 @@ ${SCHED_FINALIZE_CB} <scheduler_return_code> <running_pids> <ok_job_ids> <fail_j
 
 (all above lists are space-separated)
 
-If this callback returns a non-zero code while `<scheduler_return_code>` is `0`, the scheduler exits with the callback's return code instead. Otherwise, the scheduler's return code is unchanged.
+When this callback is implemented, its return code always becomes the scheduler's exit code.
 
 **Notes**:
+- Unconditionally returning `0` from this callback masks scheduler failures - timeouts, signal termination and fatal errors alike - leaving the caller unable to distinguish them.
 - Every job ID passed to `schedule_jobs()` is guaranteed to appear in **exactly one** of the above lists passed as arguments to the **scheduler completion callback**. This allows to easily implement final bookkeeping, logging or cleanup.
 - The scheduler does not terminate expired and unfinished jobs on its own. See [Job termination callback](#job-termination-callback-job_term_cb).
 - If your application only cares about success/failure outcomes, simply concatenate all "didn't complete successfully" category lists.
@@ -200,6 +201,8 @@ report_results() {
 	echo "Unfinished:   ${unfinished_ids:-<none>}"
 	echo "Undispatched: ${undispatched_ids:-<none>}"
 	echo "Timed out:    ${expired_ids:-<none>}"
+
+	return "${rv}"
 }
 
 DO_JOB_CB=do_job
@@ -477,7 +480,7 @@ Notes:
 
 ## Return codes
 
-`schedule_jobs()` returns one of the following exit codes:
+The following are the scheduler's own exit codes. `schedule_jobs()` exits with one of them when `SCHED_FINALIZE_CB` is defined; when it is defined, the return code is passed to the **scheduler completion callback** in first argument and the **scheduler completion callback**'s own return code sets the final exit code of the scheduler.
 
 | Return code | Meaning                                                            |
 | :---------: | ------------------------------------------------------------------ |
@@ -490,9 +493,9 @@ Notes:
 
 **Note**: The job execution callback (`DO_JOB_CB`) returns a **job** return code, not a scheduler return code. This value is reported to the job completion callback (`JOB_DONE_CB`) if one is defined.
 
-If the job completion callback (`JOB_DONE_CB`) returns a non-zero code, the scheduler terminates immediately and returns the same code (after invoking the scheduler completion callback, if defined).
+If the job completion callback (`JOB_DONE_CB`) returns a non-zero code, the scheduler terminates immediately and propagates the same code, subject to the **scheduler completion callback**'s override described below.
 
-The **scheduler completion callback** (`SCHED_FINALIZE_CB`) is always invoked before the scheduler exits, except when the scheduler failed with a fatal error during early initialization - in that case it exits with code `1` without starting any jobs and without invoking the callback. Normally the scheduler exits with the same return code that is passed to the **scheduler completion callback**. The only exception is when the scheduler itself would otherwise return `0` but the **scheduler completion callback** returns a non-zero code. In that case, the scheduler exits with the callback's return code instead.
+The **scheduler completion callback** (`SCHED_FINALIZE_CB`) is always invoked before the scheduler exits, except when the scheduler failed with a fatal error during early initialization - in that case it exits with code `1` without starting any jobs and without invoking the callback. Whenever this callback is defined, the scheduler exits with the callback's return code instead.
 
 ## Timeouts
 
@@ -505,7 +508,7 @@ Time measurement, timeout mechanisms, and reliable delays in callbacks are docum
 
 ## Signal handling
 
-The scheduler installs handlers for signals `USR1`, `INT`, `TERM`. When any of these signals is received, the scheduler stops processing, performs its internal cleanup, invokes the **scheduler completion callback** (if defined), and exits with return code `83` (for `USR1`) or `84` (for `INT` or `TERM`).
+The scheduler installs handlers for signals `USR1`, `INT`, `TERM`. When any of these signals is received, the scheduler stops processing, performs its internal cleanup, invokes the **scheduler completion callback** (if defined), and exits with return code `83` (for `USR1`) or `84` (for `INT` or `TERM`) - unless the callback returns a different code.
 
 ## Job termination mechanisms
 

@@ -208,7 +208,8 @@ finalize_handler() {
 		kill "${pid}" 2>/dev/null
 	done
 
-	return 0
+	# Pass the scheduler rv through
+	return "${finalize_rv}"
 }
 
 #

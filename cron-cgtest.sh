@@ -76,6 +76,7 @@ job_done() {
 
 finalize() {
 	log "finalize: rv=${1} running_pids='${2}' ok='${3}' fail='${4}' unfinished='${5}' undispatched='${6}' expired='${7}'"
+	return "${1}"
 }
 
 log "=== run start: uid=$(id -u), cgroup=$(cat /proc/self/cgroup 2>/dev/null) ==="

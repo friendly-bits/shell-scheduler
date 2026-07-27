@@ -79,7 +79,7 @@ run_combo() {
 matrix_fail_msg() { lock; printf '[scheduler] %s\n' "${*}"; unlock; }
 
 # SCHED_FINALIZE_CB: stash the matrix summary (printed in teardown, after all test blocks);
-#   fail unless all combos are ok.
+#   fail if any combo is not ok, else pass the scheduler's own rv through.
 matrix_finalize() {
 	local ok="${3}" fail="${4}" unfinished="${5}" undispatched="${6}" expired="${7}"
 	{
@@ -91,7 +91,8 @@ matrix_finalize() {
 		printf 'undispatched: %s\n' "${undispatched:-<none>}"
 		printf '%s\n' "${TEST_BLOCK_END}"
 	} >&8
-	[ -z "${fail}${unfinished}${undispatched}${expired}" ]
+	[ -n "${fail}${unfinished}${undispatched}${expired}" ] && return 1
+	return "${1}"
 }
 
 

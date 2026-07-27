@@ -14,12 +14,14 @@
 # Tests
 #
 
-# Verify a failing SCHED_FINALIZE_CB overrides rv=0 but not an existing scheduler error.
+# Verify the SCHED_FINALIZE_CB return value always becomes the scheduler exit code,
+#   including a zero return masking a scheduler error, and that the callback receives
+#   the scheduler's own rv as ${1}.
 test_sched_env_01() {
 	sched_env_01_finalize_handler() {
 		local rv="${1}" pids="${2}"
 
-		finalize_handler "${rv}" "${pids}" || return $?
+		finalize_handler "${rv}" "${pids}"
 
 		printf '%s\n' "${rv}" >> "${FINALIZE_RV_FILE}"
 
@@ -30,11 +32,13 @@ test_sched_env_01() {
 		TEST_ID=sched_env_01 \
 		rv_success \
 		rv_failure \
+		rv_masked \
 		recorded_rvs \
 		SCHED_ENV_01_FINALIZE_RV=97
 
-	print_test_header "${TEST_ID:?}" "Failure of SCHED_FINALIZE_CB" \
-		"success path and error path"
+	print_test_header "${TEST_ID:?}" \
+		"SCHED_FINALIZE_CB return value always becomes the scheduler exit code" \
+		"success path, error path and masked error path"
 
 	FINALIZE_RV_FILE="/tmp/sched.finalize.fail.${TEST_ID:?}.$$"
 
@@ -47,23 +51,35 @@ test_sched_env_01() {
 		JOB_DONE_CB=done_handler \
 		DO_JOB_CB=do_job_default
 
-	# Successful scheduler run: callback RV should become scheduler RV.
+	# Successful scheduler run: callback rv becomes scheduler rv, callback sees rv 0
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=3 \
 	SCHED_IDLE_TIMEOUT_S=2 \
-		schedule_jobs 'instant' &
+	SCHED_ENV_01_FINALIZE_RV=97 \
+		schedule_jobs 'instant_se01' &
 
 	wait "$!"
 	rv_success=$?
 
-	# Scheduler error: callback failure must not overwrite scheduler RV.
+	# Idle timeout: callback rv overrides the scheduler rv, callback sees rv 81
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=30 \
 	SCHED_IDLE_TIMEOUT_S=2 \
-		schedule_jobs 'hang' &
+	SCHED_ENV_01_FINALIZE_RV=97 \
+		schedule_jobs 'hang_se01a' &
 
 	wait "$!"
 	rv_failure=$?
+
+	# Idle timeout: a zero-returning callback masks the scheduler error
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=30 \
+	SCHED_IDLE_TIMEOUT_S=2 \
+	SCHED_ENV_01_FINALIZE_RV=0 \
+		schedule_jobs 'hang_se01b' &
+
+	wait "$!"
+	rv_masked=$?
 
 	recorded_rvs=
 	[ -f "${FINALIZE_RV_FILE}" ] &&
@@ -72,13 +88,14 @@ test_sched_env_01() {
 	rm -f "${FINALIZE_RV_FILE}"
 
 	if [ "${rv_success}" = "${SCHED_ENV_01_FINALIZE_RV}" ] &&
-		[ "${rv_failure}" = 81 ] &&
-		[ "${recorded_rvs}" = "0 81 " ]
+		[ "${rv_failure}" = "${SCHED_ENV_01_FINALIZE_RV}" ] &&
+		[ "${rv_masked}" = 0 ] &&
+		[ "${recorded_rvs}" = "0 81 81 " ]
 	then
-		PASS "success_rv=${rv_success}, failure_rv=${rv_failure}"
+		PASS "success_rv=${rv_success}, failure_rv=${rv_failure}, masked_rv=${rv_masked}"
 		return 0
 	else
-		FAIL "success_rv=${rv_success}, failure_rv=${rv_failure}, recorded=${recorded_rvs}"
+		FAIL "success_rv=${rv_success}, failure_rv=${rv_failure}, masked_rv=${rv_masked}, recorded=${recorded_rvs}"
 		return 1
 	fi
 }
@@ -527,4 +544,17 @@ test_sched_env_10() {
 		FAIL "${pass_cnt}/${total_cnt}, messages=${msg_cnt} (want ${bad_cnt})"
 		return 1
 	fi
+}
+
+# Verify an empty SCHED_FINALIZE_CB leaves a non-zero scheduler return code intact.
+test_sched_env_11() {
+	SCHED_FINALIZE_CB='' \
+	JOB_DONE_CB=done_handler \
+	SCHED_TIMEOUT_S=30 \
+	TEST_ID=sched_env_11 \
+	TEST_NAME='Empty SCHED_FINALIZE_CB preserves the scheduler return code' \
+	TEST_JOBS='hang_se11' \
+	TEST_EXPECT_RV=81 \
+	TEST_SCHED_MAX_JOBS=1 \
+		run_generic_test
 }

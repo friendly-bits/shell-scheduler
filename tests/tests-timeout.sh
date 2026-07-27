@@ -128,6 +128,7 @@ test_timeout_02() {
 	timeout_02_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "pids=$2" "fail=$4" "unfin=$5" "expired=$7" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -193,6 +194,7 @@ test_timeout_03() {
 	timeout_03_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "pids=$2" "fail=$4" "unfin=$5" "expired=$7" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -254,6 +256,7 @@ test_timeout_04() {
 	timeout_04_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "ok=$3" "fail=$4" "expired=$7" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -322,6 +325,7 @@ test_timeout_05() {
 	timeout_05_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "pids=$2" "fail=$4" "expired=$7" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -390,6 +394,7 @@ test_timeout_06() {
 	timeout_06_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "pids=$2" "ok=$3" "fail=$4" "expired=$7" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -451,6 +456,7 @@ test_timeout_07() {
 	timeout_07_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "ok=$3" "expired=$7" "undisp=$6" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -592,6 +598,7 @@ test_timeout_10() {
 	timeout_10_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "fail=$4" "unfin=$5" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -650,6 +657,7 @@ test_timeout_11() {
 	timeout_11_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "expired=$7" "unfin=$5" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -734,6 +742,7 @@ test_timeout_12() {
 	timeout_12_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "pids=$2" "expired=$7" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
@@ -795,6 +804,7 @@ test_timeout_13() {
 	timeout_13_finalize() {
 		finalize_handler "$1" "$2"
 		printf '%s\n' "unfin=$5" "undisp=$6" > "${FIN_FILE:?}"
+		return "${1}"
 	}
 
 	local \
