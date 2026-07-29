@@ -34,6 +34,23 @@ sch_rm_elem() {
 	export -n "${sre_out_var}=${sre_l}"
 }
 
+# Look up PID of a job in list of '<pid>:<job ID>' entries
+# 1: out var
+# 2: job ID
+# 3: cur list
+sch_pid_of_id() {
+	local spi_l=" ${3} " spi_p
+	export -n "${1:?}="
+
+	case "${spi_l}" in
+		*":${2} "*) ;;
+		*) return 1
+	esac
+
+	spi_p="${spi_l%%":${2} "*}"
+	export -n "${1}=${spi_p##* }"
+}
+
 sch_is_uint() {
 	local _v
 	for _v; do
@@ -75,8 +92,11 @@ sch_get_uptime_cs() {
 }
 
 sch_fail_msg() {
-	if [ -n "${SCHED_FAIL_MSG_CB}" ] && sch_is_cmd "${SCHED_FAIL_MSG_CB}"; then
-		"${SCHED_FAIL_MSG_CB}" "${@}"
+	if [ -z "${SCH_IN_FAIL_MSG_CB}" ] && [ -n "${SCHED_FAIL_MSG_CB}" ] && sch_is_cmd "${SCHED_FAIL_MSG_CB}"; then
+		local SCH_IN_FAIL_MSG_CB=1
+		( "${SCHED_FAIL_MSG_CB}" "${@}" )
+	elif [ -n "${SCH_IN_FAIL_MSG_CB}" ]; then
+		printf '%s\n' "${@}" "Warning: stopping infinite SCHED_FAIL_MSG_CB recursion." >&2
 	else
 		printf '%s\n' "${@}" >&2
 	fi
@@ -103,23 +123,31 @@ sch_has_f() {
 	esac
 }
 
-# Get PID of current shell process
-# 1 - var name for output
-sch_get_cur_pid() {
-	local __pid line
-	export -n "${1:?}="
+# Get reuse-proof identity '<pid>_<starttime>' of current shell process
+# 1: out-var
+sch_get_uid() {
+	local sgu_had_f sgu_pid sgu_start sgu_line \
+		IFS=" "$'\t'$'\n' \
+		sgu_out="${1:?}"
+	export -n "${sgu_out}="
 
-	while IFS= read -r line; do
-		case "${line}" in
-			Pid:*)
-				__pid="${line##*[!0-9]}"
-				break
-			;;
-		esac
-	done < /proc/self/status
+	IFS= read -r sgu_line 2>/dev/null < /proc/self/stat || sgu_line=
 
-	sch_is_uint "${__pid}" || { sch_fail_msg "Failed to get current PID."; return 1; }
-	export -n "${1}=${__pid}"
+	sgu_pid="${sgu_line%% *}"
+	# Strip 'pid (comm) ' greedily - comm may contain ') ' and spaces
+	sgu_line="${sgu_line##*") "}"
+
+	sch_has_f && sgu_had_f=1
+	set -f
+	set -- ${sgu_line}
+	[ -n "${sgu_had_f}" ] || set +f
+
+	# Start time is stat field 22; the strip leaves state (field 3) first
+	[ "${#}" -ge 20 ] && shift 19 && sgu_start="${1}"
+
+	sch_is_uint "${sgu_pid}" "${sgu_start}" ||
+		{ sch_fail_msg "Failed to get PID and start time from /proc/self/stat."; return 1; }
+	export -n "${sgu_out}=${sgu_pid}_${sgu_start}"
 }
 
 sch_check_name() {
@@ -157,6 +185,17 @@ sch_check_var_name() {
 	esac
 }
 
+# 1: caller
+sch_in_main_process() {
+	local sip_uid
+	sch_get_uid sip_uid &&
+	[ "${sip_uid}" = "${SCHED_UID}" ] &&
+	eval "[ -n \"\${SCH_STARTED_${sip_uid}}\" ]" &&
+		return 0
+	sch_fail_msg "${1}: SCHED_UID is not set or scheduler is not running in this process."
+	return 1
+}
+
 # Resolve the ${SCHED_ID} namespace infix '<len of SCHED_ID>_<SCHED_ID>_' for internal per-job var names
 # Unset ${SCHED_ID} is valid and produces '0__'
 #
@@ -170,9 +209,14 @@ sch_get_ns() {
 }
 
 sch_finalize() {
-	local sch_unfinished_ids sch_exp_e \
+	local sch_me=sch_finalize sch_unfinished_ids sch_exp_e sch_job_id sch_running_pids \
 		IFS=" "$'\t'$'\n' \
 		sch_rv="${1}"
+
+	sch_in_main_process "${sch_me}" ||
+		return "${sch_rv:-1}"
+
+	unset "SCH_STARTED_${SCHED_UID}"
 
 	trap ':' USR1 INT TERM
 
@@ -183,23 +227,28 @@ sch_finalize() {
 
 	if [ -n "${SCH_HAD_F}" ]; then set -f; else set +f; fi
 
-	[ -n "${JOB_TERM_CB}" ] &&
-	[ -n "${SCH_RUNNING_PIDS}" ] &&
-		sch_term_run ${SCH_RUNNING_PIDS}
+	# Collect pids of jobs still accounted as running
+	for sch_exp_e in ${SCH_RUNNING}; do
+		sch_append sch_running_pids "${sch_exp_e%%:*}"
+	done
 
-	# Add pids of timed-out jobs to <running_pids>
-	for sch_exp_e in ${SCH_EXPIRED}; do
-		sch_append SCH_RUNNING_PIDS "${sch_exp_e%%:*}"
+	[ -n "${JOB_TERM_CB}" ] &&
+	[ -n "${sch_running_pids}" ] &&
+		sch_term_run ${sch_running_pids}
+
+	# Add pids of timed-out and aborted jobs to <running_pids>
+	for sch_exp_e in ${SCH_UNREAPED}; do
+		sch_append sch_running_pids "${sch_exp_e%%:*}"
 	done
 
 	# Compute sch_unfinished_ids
-	for sch_id in ${SCH_JOB_IDS}; do
-		sch_is_included "${sch_id}" "${SCH_OK_IDS} ${SCH_UNDISPATCHED_IDS} ${SCH_FAIL_IDS} ${SCH_EXPIRED_IDS}" ||
-			sch_append sch_unfinished_ids "${sch_id}"
+	for sch_job_id in ${SCH_JOB_IDS}; do
+		sch_is_included "${sch_job_id}" "${SCH_OK_IDS} ${SCH_UNDISPATCHED_IDS} ${SCH_FAIL_IDS} ${SCH_EXPIRED_IDS} ${SCH_ABORTED_IDS}" ||
+			sch_append sch_unfinished_ids "${sch_job_id}"
 	done
 
 	[ -n "${SCHED_FINALIZE_CB}" ] && {
-		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${SCH_RUNNING_PIDS}" "${SCH_OK_IDS}" "${SCH_FAIL_IDS}" "${sch_unfinished_ids}" "${SCH_UNDISPATCHED_IDS}" "${SCH_EXPIRED_IDS}"
+		"${SCHED_FINALIZE_CB}" "${sch_rv}" "${sch_running_pids}" "${SCH_OK_IDS}" "${SCH_FAIL_IDS}" "${sch_unfinished_ids}" "${SCH_UNDISPATCHED_IDS}" "${SCH_EXPIRED_IDS}" "${SCH_ABORTED_IDS}"
 		sch_rv=${?}
 	}
 
@@ -208,7 +257,6 @@ sch_finalize() {
 
 sch_start_job() {
 	local \
-		sch_job_pid \
 		sch_job_rv \
 		sch_job_id="${1:?}"
 
@@ -216,11 +264,9 @@ sch_start_job() {
 
 	trap '
 		sch_job_rv=${?}
-		printf "%s %s %s\n" "${sch_job_pid}" "${sch_job_rv}" "${sch_job_id}" >&3 2>/dev/null
+		printf "%s %s\n" "${sch_job_rv}" "${sch_job_id}" >&3 2>/dev/null
 		exit "${sch_job_rv}"
 	' EXIT
-
-	sch_get_cur_pid sch_job_pid || exit 1
 
 	job_get_params -export "${sch_job_id}" sch_all || exit 1
 
@@ -273,16 +319,14 @@ process_done_record() {
 		sch_now_cs \
 		sch_dl_prev \
 		sch_expired \
-		sch_pid \
-		sch_id \
+		sch_job_pid \
+		sch_job_id \
 		\
-		sch_done_pid \
 		sch_done_rv \
 		sch_done_id \
 		sch_rec \
 		sch_rec_tail \
 		sch_rec_garbage \
-		sch_rec_verdict \
 		sch_read_t_cs \
 		sch_read_t_s \
 		\
@@ -305,8 +349,7 @@ process_done_record() {
 
 		set -f
 		for sch_e in ${SCH_DEADLINES}; do
-			sch_cs="${sch_e#*:}"
-			sch_cs="${sch_cs%%:*}"
+			sch_cs="${sch_e%%:*}"
 			[ -n "${sch_dl_min}" ] && [ "${sch_cs}" -ge "${sch_dl_min}" ] ||
 				sch_dl_min="${sch_cs}"
 		done
@@ -337,36 +380,38 @@ process_done_record() {
 	[ -n "${sch_rec}" ] && {
 		set -f
 		set -- ${sch_rec}
-		sch_done_pid=${1}
-		sch_done_rv=${2}
-		sch_done_id=${3}
-		shift 3
+		sch_done_rv=${1}
+		sch_done_id=${2}
+		shift 2
 		sch_rec_garbage="${*}"
 		[ -n "${sch_had_f}" ] || set +f
 	}
 
 	# Process the completion record if any
-	[ -n "${sch_done_pid}${sch_done_rv}${sch_done_id}" ] && {
+	[ -n "${sch_done_rv}${sch_done_id}" ] && {
 		[ -z "${sch_rec_garbage}" ] &&
-		sch_is_uint "${sch_done_pid}" "${sch_done_rv}" &&
+		sch_is_uint "${sch_done_rv}" &&
 		[ -n "${sch_done_id}" ] &&
 		sch_is_included "${sch_done_id}" "${SCH_JOB_IDS}" ||
-			sch_finalize 1 "Malformed completion record: either bad PID '${sch_done_pid}' or bad RV '${sch_done_rv}' or bad job ID '${sch_done_id}' or trailing garbage '${sch_rec_garbage}'."
+			sch_finalize 1 "Malformed completion record: either bad job ID '${sch_done_id}' or bad RV '${sch_done_rv}' or trailing garbage '${sch_rec_garbage}'."
 
-		if sch_is_included "${sch_done_pid}" "${SCH_RUNNING_PIDS}"; then
+		if sch_pid_of_id sch_job_pid "${sch_done_id}" "${SCH_UNREAPED}"; then
+			# Late record from a job already timed out or aborted - discard
+			sch_rm_elem SCH_UNREAPED "${sch_job_pid}:${sch_done_id}" "${SCH_UNREAPED}"
+		elif sch_pid_of_id sch_job_pid "${sch_done_id}" "${SCH_RUNNING}"; then
 			# Normal completion
-			sch_rm_elem SCH_RUNNING_PIDS "${sch_done_pid}" "${SCH_RUNNING_PIDS}"
+			sch_rm_elem SCH_RUNNING "${sch_job_pid}:${sch_done_id}" "${SCH_RUNNING}"
 			SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
 
 			# Remove the job's deadline entry, if it had one
 			[ -n "${SCH_DEADLINES}" ] &&
-				sch_deadline_rm_pid SCH_DEADLINES "${sch_done_pid}" "${SCH_DEADLINES}"
+				sch_deadline_rm_id SCH_DEADLINES "${sch_done_id}" "${SCH_DEADLINES}"
 
 			if [ "${sch_done_rv}" = 0 ]; then
 				sch_append SCH_OK_IDS "${sch_done_id}"
 			else
 				sch_append SCH_FAIL_IDS "${sch_done_id}"
-			fi || sch_finalize 1
+			fi
 
 			sch_get_uptime_cs SCH_LAST_PROGRESS_TIME_CS || sch_finalize 1
 
@@ -374,20 +419,7 @@ process_done_record() {
 			sch_run_done_cb "${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
 				sch_finalize ${?}
 		else
-			# Unknown PID
-			sch_rec_verdict=malformed
-			set -f
-			for sch_e in ${SCH_EXPIRED}; do
-				[ "${sch_e%%:*}" = "${sch_done_pid}" ] || continue
-				[ "${sch_e#*:*:}" = "${sch_done_id}" ] && sch_rec_verdict=discard
-				break
-			done
-			[ -n "${sch_had_f}" ] || set +f
-
-			[ "${sch_rec_verdict}" = discard ] ||
-				sch_finalize 1 "Unknown PID '${sch_done_pid}'."
-
-			sch_deadline_rm_pid SCH_EXPIRED "${sch_done_pid}" "${SCH_EXPIRED}"
+			sch_finalize 1 "Unexpected completion record for job ID '${sch_done_id}'."
 		fi
 	}
 
@@ -400,8 +432,7 @@ process_done_record() {
 		SCH_DEADLINES=
 		set -f
 		for sch_e in ${sch_dl_prev}; do
-			sch_cs="${sch_e#*:}"
-			sch_cs="${sch_cs%%:*}"
+			sch_cs="${sch_e%%:*}"
 			if [ "${sch_cs}" -le "${sch_now_cs}" ]; then
 				sch_append sch_expired "${sch_e}"
 			else
@@ -411,21 +442,20 @@ process_done_record() {
 
 		for sch_e in ${sch_expired}; do
 			[ -n "${sch_had_f}" ] || set +f
-			sch_pid="${sch_e%%:*}"
-			sch_id="${sch_e#*:*:}"
+			sch_job_id="${sch_e#*:}"
 
-			sch_rm_elem SCH_RUNNING_PIDS "${sch_pid}" "${SCH_RUNNING_PIDS}"
+			sch_pid_of_id sch_job_pid "${sch_job_id}" "${SCH_RUNNING}" || continue
+			sch_rm_elem SCH_RUNNING "${sch_job_pid}:${sch_job_id}" "${SCH_RUNNING}"
 			SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
-
-			sch_append SCH_EXPIRED_IDS "${sch_id}" &&
-			sch_append SCH_EXPIRED "${sch_e}" ||
-				sch_finalize 1
+			sch_append SCH_EXPIRED_IDS "${sch_job_id}"
+			sch_append SCH_UNREAPED "${sch_job_pid}:${sch_job_id}"
 
 			# Kill the timed-out job's whole process tree (wrapper included)
-			[ -n "${JOB_TERM_CB}" ] && sch_term_run "${sch_pid}"
+			[ -n "${JOB_TERM_CB}" ] &&
+				sch_term_run "${sch_job_pid}"
 
 			[ -z "${sch_job_done_cb}" ] ||
-			sch_run_done_cb "${sch_job_done_cb}" "${sch_id}" 124 "${sch_pid}" ||
+			sch_run_done_cb "${sch_job_done_cb}" "${sch_job_id}" 124 "${sch_job_pid}" ||
 				sch_finalize ${?}
 		done
 		[ -n "${sch_had_f}" ] || set +f
@@ -462,13 +492,20 @@ refresh_remain_time() {
 	:
 }
 
-sch_deadline_rm_pid() {
+# Remove a job's entry from a list of '<deadline>:<job ID>' entries
+# 1: out var
+# 2: job ID
+# 3: cur list
+sch_deadline_rm_id() {
 	local sdr_e=" ${3} "
-	sdr_e="${sdr_e#* "${2}":}"
-	sdr_e="${2}:${sdr_e%% *}"
 
-	sch_is_included "${sdr_e}" "${3}" ||
-		{ export -n "${1:?}=${3}"; return 1; }
+	case "${sdr_e}" in
+		*":${2} "*) ;;
+		*) export -n "${1:?}=${3}"; return 1
+	esac
+
+	sdr_e="${sdr_e%%":${2} "*}"
+	sdr_e="${sdr_e##* }:${2}"
 	sch_rm_elem "${1}" "${sdr_e}" "${3}"
 }
 
@@ -621,10 +658,11 @@ schedule_jobs() {
 	local \
 		IFS=" "$'\t'$'\n' \
 		SCHED_PID \
+		SCHED_UID \
 		SCH_REMAIN_TIME_CS \
 		SCH_INIT_UPTIME_CS \
-		sch_id \
-		sch_pid \
+		sch_job_id \
+		sch_job_pid \
 		sch_ns \
 		sch_seen_ids \
 		sch_job_to \
@@ -636,17 +674,21 @@ schedule_jobs() {
 		sch_dir="${SCHED_DIR:-/tmp}" \
 		\
 		SCH_HAD_F \
-		SCH_UNDISPATCHED_IDS \
-		SCH_OK_IDS \
-		SCH_FAIL_IDS \
-		SCH_RUNNING_PIDS \
+		SCH_IN_FAIL_MSG_CB \
+		SCH_RUNNING \
 		SCH_LAST_PROGRESS_TIME_CS \
 		SCH_MAX_JOBS \
 		SCH_TIMEOUT_S \
 		SCH_IDLE_TIMEOUT_S \
 		SCH_JOB_TIMEOUT_S \
 		SCH_DEADLINES \
-		SCH_EXPIRED \
+		SCH_UNREAPED \
+		\
+		SCH_PENDING_IDS \
+		SCH_ABORTED_IDS \
+		SCH_UNDISPATCHED_IDS \
+		SCH_OK_IDS \
+		SCH_FAIL_IDS \
 		SCH_EXPIRED_IDS \
 		\
 		SCH_JOB_IDS="${1?}"
@@ -676,35 +718,37 @@ schedule_jobs() {
 	sch_normalize_uint SCH_IDLE_TIMEOUT_S "${SCHED_IDLE_TIMEOUT_S:-300}" &&
 	sch_normalize_uint SCH_JOB_TIMEOUT_S "${SCHED_JOB_TIMEOUT_S}" || exit 1
 
-	# Check namespace
-	sch_get_ns sch_ns "schedule_jobs" || exit 1
-
 	sch_tr_trailing sch_dir "/"
 
 	[ -n "${sch_dir}" ] ||
 		{ sch_fail_msg "Invalid value '${SCHED_DIR}' of env var SCHED_DIR."; exit 1; }
+
+	# Check namespace; register scheduler start
+	sch_get_ns sch_ns "schedule_jobs" &&
+	sch_get_uptime_cs SCH_INIT_UPTIME_CS &&
+	sch_get_uid SCHED_UID ||
+		exit 1
+	SCHED_PID="${SCHED_UID%%_*}"
+	export -n "SCH_STARTED_${SCHED_UID}=1"
 
 	# Convert ${SCH_JOB_IDS} to space-separated list
 	sch_normalize_ids SCH_JOB_IDS "${SCH_JOB_IDS}" || exit 1
 
 	# Validate job IDs, check duplicates
 	set -f
-	for sch_id in ${SCH_JOB_IDS}; do
+	for sch_job_id in ${SCH_JOB_IDS}; do
 		[ -n "${SCH_HAD_F}" ] || set +f
-		sch_check_name "job ID" "${sch_id}" || exit 1
-		sch_is_included "${sch_id}" "${sch_seen_ids}" &&
-			{ sch_fail_msg "Duplicate Job ID '${sch_id}'."; exit 1; }
-		sch_append sch_seen_ids "${sch_id}"
+		sch_check_name "job ID" "${sch_job_id}" || exit 1
+		sch_is_included "${sch_job_id}" "${sch_seen_ids}" &&
+			{ sch_fail_msg "Duplicate Job ID '${sch_job_id}'."; exit 1; }
+		sch_append sch_seen_ids "${sch_job_id}"
 	done
 	[ -n "${SCH_HAD_F}" ] || set +f
 
 	SCH_UNDISPATCHED_IDS="${SCH_JOB_IDS}"
+	SCH_PENDING_IDS="${SCH_JOB_IDS}"
 
 	# Main logic
-
-	sch_get_uptime_cs SCH_INIT_UPTIME_CS &&
-	sch_get_cur_pid SCHED_PID ||
-		exit 1
 
 	SCH_LAST_PROGRESS_TIME_CS="${SCH_INIT_UPTIME_CS}"
 
@@ -713,7 +757,7 @@ schedule_jobs() {
 
 	sch_run_n=0
 	while :; do
-		sch_run_dir="${sch_dir}/sched_${SCHED_PID}.${sch_run_n}"
+		sch_run_dir="${sch_dir}/sched_${SCHED_UID}.${sch_run_n}"
 		mkdir "${sch_run_dir}" 2>/dev/null && break
 		sch_run_n=$((sch_run_n + 1))
 		[ "${sch_run_n}" -lt 16 ] ||
@@ -730,47 +774,53 @@ schedule_jobs() {
 
 	# Start jobs
 
-	for sch_id in ${SCH_JOB_IDS}; do
+	while [ -n "${SCH_PENDING_IDS}" ]; do
 		while [ "${SCH_RUNNING_JOBS_CNT}" -ge "${SCH_MAX_JOBS}" ]; do
 			[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
-			# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING_PIDS}; ${SCH_REMAIN_TIME_CS}; ${SCH_LAST_PROGRESS_TIME_CS}
+			# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}; ${SCH_REMAIN_TIME_CS}; ${SCH_LAST_PROGRESS_TIME_CS}
 			process_done_record \
 				"${sch_ipc_fifo}" \
 				"${JOB_DONE_CB}"
 		done
 		[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
+
+		sch_job_id="${SCH_PENDING_IDS%% *}"
+		[ -n "${sch_job_id}" ] || break
+
 		refresh_remain_time
 
-		# Callback may have changed sch_ns or SCHED_ID - recompute sch_ns before fork
+		# Callback may have broken the contract by changing sch_ns or SCHED_ID - recompute sch_ns before fork
 		sch_get_ns sch_ns "schedule_jobs" || sch_finalize 1
 
 		SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT + 1))
 
-		sch_start_job "${sch_id}" "${@}" &
-		sch_pid="${!}"
+		sch_start_job "${sch_job_id}" "${@}" &
+		sch_job_pid="${!}"
+		# Track the child first - on a signal, finalize can only kill what's listed here
+		sch_append SCH_RUNNING "${sch_job_pid}:${sch_job_id}"
 
-		sch_append SCH_RUNNING_PIDS "${sch_pid}" || sch_finalize 1
-		sch_rm_elem SCH_UNDISPATCHED_IDS "${sch_id}" "${SCH_UNDISPATCHED_IDS}"
+		sch_rm_elem SCH_PENDING_IDS "${sch_job_id}" "${SCH_PENDING_IDS}"
+		sch_rm_elem SCH_UNDISPATCHED_IDS "${sch_job_id}" "${SCH_UNDISPATCHED_IDS}"
 
 		# Reset the idle timeout at job start
 		sch_get_uptime_cs sch_dl_now_cs || sch_finalize 1
 		SCH_LAST_PROGRESS_TIME_CS="${sch_dl_now_cs}"
 
 		# Register job's timeout deadline if it has one
-		eval "sch_job_to=\"\${SCH_TIMEOUT_JOB_${sch_ns}${sch_id}:-\${SCH_JOB_TIMEOUT_S}}\""
+		eval "sch_job_to=\"\${SCH_TIMEOUT_JOB_${sch_ns}${sch_job_id}:-\${SCH_JOB_TIMEOUT_S}}\""
 
 		[ -n "${sch_job_to}" ] &&
-			sch_append SCH_DEADLINES "${sch_pid}:$((sch_dl_now_cs + sch_job_to*100)):${sch_id}"
+			sch_append SCH_DEADLINES "$((sch_dl_now_cs + sch_job_to*100)):${sch_job_id}"
 
 		[ -z "${SCHED_DISPATCH_TICK_CB}" ] ||
-			"${SCHED_DISPATCH_TICK_CB}" "${sch_id}"
+			"${SCHED_DISPATCH_TICK_CB}" "${sch_job_id}"
 	done
 
 	# Wait for running jobs
 	while [ "${SCH_RUNNING_JOBS_CNT}" -gt 0 ]
 	do
 		[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
-		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING_PIDS}; ${SCH_REMAIN_TIME_CS}; ${SCH_LAST_PROGRESS_TIME_CS}
+		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}; ${SCH_REMAIN_TIME_CS}; ${SCH_LAST_PROGRESS_TIME_CS}
 		process_done_record \
 			"${sch_ipc_fifo}" \
 			"${JOB_DONE_CB}"
@@ -923,7 +973,7 @@ job_set_timeout() {
 		sch_ns \
 		sch_job_id="${1}"
 
-	sch_get_ns sch_ns "${sch_me}" || return 1
+	sch_get_ns sch_ns "${sch_me}" &&
 	sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
 
 	sch_is_uint "${sch_val}" && [ "${sch_val}" -ge 1 ] || {
@@ -932,4 +982,34 @@ job_set_timeout() {
 	}
 	sch_tr_leading sch_val "0"
 	export -n "SCH_TIMEOUT_JOB_${sch_ns}${sch_job_id}=${sch_val}"
+}
+
+jobs_abort() {
+	local \
+		sch_me=jobs_abort \
+		IFS=" "$'\t'$'\n' \
+		sch_job_id sch_job_pid sch_kill_pids
+
+	# guard against calls from DO_JOB_CB, SCHED_FINALIZE_CB or outside the scheduler
+	sch_in_main_process "${sch_me}" || return 1
+
+	for sch_job_id in "${@}"; do
+		sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || continue
+		sch_is_included "${sch_job_id}" "${SCH_JOB_IDS}" || { sch_fail_msg "${sch_me}: unknown job ID '${sch_job_id}'."; continue; }
+		# Not dispatched yet: stays undispatched rather than aborted - outcome matters more than cause
+		if sch_is_included "${sch_job_id}" "${SCH_PENDING_IDS}"; then
+			sch_rm_elem SCH_PENDING_IDS "${sch_job_id}" "${SCH_PENDING_IDS}"
+		elif sch_pid_of_id sch_job_pid "${sch_job_id}" "${SCH_RUNNING}"; then
+			sch_rm_elem SCH_RUNNING "${sch_job_pid}:${sch_job_id}" "${SCH_RUNNING}"
+			[ -n "${SCH_DEADLINES}" ] &&
+				sch_deadline_rm_id SCH_DEADLINES "${sch_job_id}" "${SCH_DEADLINES}"
+			SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
+			sch_append SCH_UNREAPED "${sch_job_pid}:${sch_job_id}"
+			sch_append SCH_ABORTED_IDS "${sch_job_id}"
+			[ -n "${JOB_TERM_CB}" ] && sch_append sch_kill_pids "${sch_job_pid}"
+		fi
+	done
+	[ -n "${sch_kill_pids}" ] || return 0
+	sch_term_run ${sch_kill_pids}
+	:
 }

@@ -271,13 +271,15 @@ sch_jt_cg_mk_base() {
 sch_jt_cg_init() {
 	local \
 		sjtc_lib_name=sched_job_term_cgroup \
-		sjtc_mnt sjtc_own sjtc_line sjtc_fstype sjtc_cand sjtc_pid \
+		sjtc_mnt sjtc_own sjtc_line sjtc_fstype sjtc_cand sjtc_uid sjtc_pid \
 		sjtc_hint="need root or a delegated cgroup subtree, e.g. run via 'systemd-run --user --scope <cmd>'"
 
 	SCH_JT_BASE=
 	SCH_JT_PENDING=
 
-	sch_get_cur_pid sjtc_pid || return 1
+	# Cgroup base names stay PID-keyed; collisions are handled by the '.<n>' retry
+	sch_get_uid sjtc_uid || return 1
+	sjtc_pid="${sjtc_uid%%_*}"
 
 	# Locate the cgroup2 mountpoint
 	sjtc_mnt=
