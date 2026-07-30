@@ -24,7 +24,7 @@ test_outcome_01() {
 		jobs='instant_1 instant_2 fail'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "SCHED_FINALIZE_CB ok/fail sets on normal completion" "${jobs}"
 
@@ -40,12 +40,11 @@ test_outcome_01() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
-	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
-	read_first_line expired_raw "${FINALIZE_SETS_PREFIX}.expired"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	read_first_line --rm ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line --rm fail_raw "${FINALIZE_SETS_PREFIX}.fail"
+	read_first_line --rm unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
+	read_first_line --rm undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	read_first_line --rm expired_raw "${FINALIZE_SETS_PREFIX}.expired"
 
 	if [ "${sched_rv}" = 0 ] &&
 		verify_id_set exp_ok act_ok "instant_1 instant_2" "${ok_raw}" &&
@@ -79,7 +78,7 @@ test_outcome_02() {
 		jobs='instant_o02 fail hang'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "Fail set survives idle-timeout abort; running job is unfinished, not failed" "${jobs}"
 
@@ -95,11 +94,10 @@ test_outcome_02() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
-	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	read_first_line --rm ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line --rm fail_raw "${FINALIZE_SETS_PREFIX}.fail"
+	read_first_line --rm unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
+	read_first_line --rm undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
 
 	if [ "${sched_rv}" = 81 ] &&
 		verify_id_set exp_ok act_ok "instant_o02" "${ok_raw}" &&
@@ -145,7 +143,7 @@ test_outcome_03() {
 		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
 		SECOND_DISPATCHED_FILE="/tmp/sched.dispatch3.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${SECOND_DISPATCHED_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${SECOND_DISPATCHED_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Global timeout during initial dispatch: undispatched vs. unfinished" "${jobs}"
 
@@ -162,9 +160,8 @@ test_outcome_03() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
-	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	read_first_line --rm unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
+	read_first_line --rm undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
 
 	if [ "${sched_rv}" = 82 ] &&
 		[ ! -e "${SECOND_DISPATCHED_FILE}" ] &&
@@ -196,7 +193,7 @@ test_outcome_04() {
 		jobs='ok hang'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "SIGUSR1 abort: completed job stays ok, running job is unfinished" "${jobs}"
 
@@ -218,9 +215,8 @@ test_outcome_04() {
 	wait "${schedule_pid}"
 	sched_rv=$?
 
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	read_first_line --rm ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line --rm unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
 
 	if [ "${sched_rv}" = 83 ] &&
 		verify_id_set exp_ok act_ok "ok" "${ok_raw}" &&
@@ -250,7 +246,7 @@ test_outcome_05() {
 		jobs='ok malformed'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "Malformed-record abort preserves prior ok status" "${jobs}"
 
@@ -268,11 +264,10 @@ test_outcome_05() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
-	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	read_first_line --rm ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line --rm fail_raw "${FINALIZE_SETS_PREFIX}.fail"
+	read_first_line --rm unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
+	read_first_line --rm undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
 
 	if [ "${sched_rv}" = 1 ] &&
 		verify_id_set exp_ok act_ok "ok" "${ok_raw}" &&
@@ -312,7 +307,7 @@ test_outcome_06() {
 		jobs='ok1 fail hang_o06x hang2 hang1'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "ok/fail/unfinished/undispatched/expired partition the full job set" "${jobs}"
 
@@ -335,12 +330,11 @@ test_outcome_06() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
-	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
-	read_first_line expired_raw "${FINALIZE_SETS_PREFIX}.expired"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	read_first_line --rm ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line --rm fail_raw "${FINALIZE_SETS_PREFIX}.fail"
+	read_first_line --rm unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
+	read_first_line --rm undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	read_first_line --rm expired_raw "${FINALIZE_SETS_PREFIX}.expired"
 
 	# shellcheck disable=SC2086
 	set -- ${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw} ${expired_raw}
@@ -377,7 +371,7 @@ test_outcome_07() {
 		jobs='<none>'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "Empty job list yields all-empty ok/fail/unfinished/undispatched/expired sets" "${jobs}"
 
@@ -393,12 +387,11 @@ test_outcome_07() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
-	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
-	read_first_line expired_raw "${FINALIZE_SETS_PREFIX}.expired"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	read_first_line --rm ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line --rm fail_raw "${FINALIZE_SETS_PREFIX}.fail"
+	read_first_line --rm unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
+	read_first_line --rm undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	read_first_line --rm expired_raw "${FINALIZE_SETS_PREFIX}.expired"
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ -z "${ok_raw}" ] &&
@@ -431,7 +424,7 @@ test_outcome_08() {
 		jobs='ok_1 fail_1 hang_o09x hang_1 ok_2 ok_3'
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "Full job-ID list partitions across the five outcome buckets" "${jobs}"
 
@@ -458,12 +451,11 @@ test_outcome_08() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	read_first_line unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
-	read_first_line undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
-	read_first_line expired_raw "${FINALIZE_SETS_PREFIX}.expired"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	read_first_line --rm ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line --rm fail_raw "${FINALIZE_SETS_PREFIX}.fail"
+	read_first_line --rm unfinished_raw "${FINALIZE_SETS_PREFIX}.unfinished"
+	read_first_line --rm undispatched_raw "${FINALIZE_SETS_PREFIX}.undispatched"
+	read_first_line --rm expired_raw "${FINALIZE_SETS_PREFIX}.expired"
 
 	# Total tokens across all five buckets; exactly-once => equals the job count.
 	# shellcheck disable=SC2086
@@ -537,14 +529,14 @@ test_outcome_09() {
 		TEST_ID=outcome_09 \
 		sched_rv argc set8 nonempty8 arg8 \
 		checks_ok=1 \
-		ABORT_FIRED= \
+		ABORT_FIRED='' \
 		ABORT_ID=ok5_outcome09b \
 		plain_jobs='instant_outcome09' \
 		abort_jobs='ok1_outcome09 ok5_outcome09b'
 
 	local ARG_PROBE_PREFIX="/tmp/sched.finargs.${TEST_ID:?}.$$"
 
-	rm -f "${ARG_PROBE_PREFIX}".*
+	rm -f "${ARG_PROBE_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "SCHED_FINALIZE_CB gets exactly 8 arguments, the 8th being the aborted set" "${plain_jobs} / ${abort_jobs}"
 
@@ -562,7 +554,7 @@ test_outcome_09() {
 	sched_rv=$?
 
 	outcome_09_read
-	rm -f "${ARG_PROBE_PREFIX}".*
+	rm -f "${ARG_PROBE_PREFIX:?}".*
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "no-abort run: sched_rv=${sched_rv} (want 0)" >&2; }
@@ -582,7 +574,7 @@ test_outcome_09() {
 	sched_rv=$?
 
 	outcome_09_read
-	rm -f "${ARG_PROBE_PREFIX}".*
+	rm -f "${ARG_PROBE_PREFIX:?}".*
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "abort run: sched_rv=${sched_rv} (want 0)" >&2; }
@@ -611,7 +603,7 @@ test_outcome_10() {
 
 	local \
 		TEST_ID=outcome_10 \
-		sched_rv name empty_sets= \
+		sched_rv name empty_sets='' \
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_aborted act_aborted \
 		checks_ok=1 \
@@ -620,7 +612,7 @@ test_outcome_10() {
 
 	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	print_test_header "${TEST_ID:?}" "All six outcome sets partition the job list" "${jobs}"
 
@@ -647,7 +639,7 @@ test_outcome_10() {
 	sched_rv=$?
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
-	rm -f "${FINALIZE_SETS_PREFIX}".*
+	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	for name in ok fail unfinished undispatched expired aborted; do
 		eval "[ -n \"\${${name}_raw}\" ]" ||

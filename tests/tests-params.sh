@@ -49,8 +49,7 @@ test_params_01() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen "${OUT_FILE}"
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "bar123" ]
 	then
@@ -368,9 +367,8 @@ test_params_06() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen1 "${J1_FILE}"
-	read_first_line seen2 "${J2_FILE}"
-	rm -f "${J1_FILE}" "${J2_FILE}"
+	read_first_line --rm seen1 "${J1_FILE}"
+	read_first_line --rm seen2 "${J2_FILE}"
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${seen1}" = "only_${job_id_a}" ] &&
@@ -421,8 +419,7 @@ test_params_07() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen "${OUT_FILE}"
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "second" ] && [ -z "${error_seen}" ]
 	then
@@ -471,8 +468,7 @@ test_params_08() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen "${OUT_FILE}"
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "${expected}" ]
 	then
@@ -813,8 +809,7 @@ test_params_15() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen "${OUT_FILE}"
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = "seen_in_job_done_cb" ]
 	then
@@ -1344,8 +1339,7 @@ test_params_27() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen "${OUT_FILE}"
 
 	if [ "${sched_rv}" = 0 ] && [ "${seen}" = from_env ]
 	then
@@ -1576,18 +1570,16 @@ test_params_32() {
 		schedule_jobs "${job_id}" &
 	wait "$!"
 	sched_rv1=$?
-	read_first_line seen1 "${OUT_FILE}"
+	read_first_line --rm seen1 "${OUT_FILE}"
 
 	jobs_init "${job_id}"
-	rm -f "${OUT_FILE}"
 
 	SCHED_FAIL_MSG_CB=echo SCHED_FINALIZE_CB=finalize_handler JOB_DONE_CB=done_handler \
 	DO_JOB_CB=params_32_do_job SCHED_MAX_JOBS=1 SCHED_TIMEOUT_S=5 SCHED_IDLE_TIMEOUT_S=5 \
 		schedule_jobs "${job_id}" &
 	wait "$!"
 	sched_rv2=$?
-	read_first_line seen2 "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen2 "${OUT_FILE}"
 
 	if [ "${sched_rv1}" = 0 ] && [ "${sched_rv2}" = 0 ] &&
 		[ "${seen1}" = first ] && [ -z "${seen2}" ]
@@ -1747,9 +1739,8 @@ test_params_34() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen_a "${A_FILE}"
-	read_first_line seen_b "${B_FILE}"
-	rm -f "${A_FILE}" "${B_FILE}"
+	read_first_line --rm seen_a "${A_FILE}"
+	read_first_line --rm seen_b "${B_FILE}"
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${seen_a}" = "from_${job_id_a}" ] &&
@@ -1811,9 +1802,8 @@ test_params_35() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen_a "${A_FILE}"
-	read_first_line seen_b "${B_FILE}"
-	rm -f "${A_FILE}" "${B_FILE}"
+	read_first_line --rm seen_a "${A_FILE}"
+	read_first_line --rm seen_b "${B_FILE}"
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${seen_a}" = from_env_done ] &&
@@ -1865,8 +1855,7 @@ test_params_36() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen "${OUT_FILE}"
 
 	rv_part="${seen%%|*}"
 	rest="${seen#*|}"
@@ -1931,7 +1920,7 @@ test_params_37() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen "${OUT_FILE}"
+	read_first_line --rm seen "${OUT_FILE}"
 
 	msg_cnt=0
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(wc -l < "${MSG_FILE}")
@@ -2000,9 +1989,8 @@ test_params_38() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line seen_a "${A_FILE}"
-	read_first_line seen_b "${B_FILE}"
-	rm -f "${A_FILE}" "${B_FILE}"
+	read_first_line --rm seen_a "${A_FILE}"
+	read_first_line --rm seen_b "${B_FILE}"
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${seen_a}" = from_a ] &&
@@ -2107,8 +2095,7 @@ test_params_40() {
 
 	wait "$!"
 	rv_a=$?
-	read_first_line seen_a "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen_a "${OUT_FILE}"
 
 	SCHED_FINALIZE_CB=finalize_handler \
 	DO_JOB_CB=params_40_do_job \
@@ -2119,8 +2106,7 @@ test_params_40() {
 
 	wait "$!"
 	rv_none=$?
-	read_first_line seen_none "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm seen_none "${OUT_FILE}"
 
 	if [ "${rv_a}" = 0 ] && [ "${rv_none}" = 0 ] &&
 		[ "${seen_a}" = FROM_A ] && [ "${seen_none}" = FROM_UNSET ]
@@ -2168,8 +2154,7 @@ test_params_41() {
 
 	wait "$!"
 	rv_a=$?
-	read_first_line expired_a "${EXPIRED_FILE}"
-	rm -f "${EXPIRED_FILE}"
+	read_first_line --rm expired_a "${EXPIRED_FILE}"
 
 	# Other namespace: no per-job timeout, so the job runs until the scheduler times out
 	SCHED_ID=params_41_b \
@@ -2182,8 +2167,7 @@ test_params_41() {
 
 	wait "$!"
 	rv_b=$?
-	read_first_line expired_b "${EXPIRED_FILE}"
-	rm -f "${EXPIRED_FILE}"
+	read_first_line --rm expired_b "${EXPIRED_FILE}"
 
 	if [ "${rv_a}" = 0 ] && [ "${expired_a}" = "${job_id}" ] &&
 		[ "${rv_b}" = 82 ] && [ -z "${expired_b}" ]

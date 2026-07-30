@@ -69,8 +69,7 @@ test_scheduler_termination_02() {
 	wait "$!"
 	local sched_rv=$?
 
-	read_first_line timeout_rv "${TIMEOUT_FILE}"
-	rm -f "${TIMEOUT_FILE}"
+	read_first_line --rm timeout_rv "${TIMEOUT_FILE}"
 
 	if [ "${sched_rv}" = 82 ] &&
 		[ "${timeout_rv}" = 82 ]
@@ -133,10 +132,8 @@ test_scheduler_termination_03() {
 	wait "${schedule_pid}"
 	sched_rv=$?
 
-	read_first_line pids "${SIGUSR1_PIDS_FILE}"
-	read_first_line callback_rv "${SIGUSR1_RV_FILE}"
-
-	rm -f "${SIGUSR1_RV_FILE}" "${SIGUSR1_PIDS_FILE}"
+	read_first_line --rm pids "${SIGUSR1_PIDS_FILE}"
+	read_first_line --rm callback_rv "${SIGUSR1_RV_FILE}"
 
 	if [ "${sched_rv}" = 83 ] &&
 		[ "${callback_rv}" = 83 ] &&
@@ -184,8 +181,7 @@ test_scheduler_termination_04() {
 	wait "$!"
 	local sched_rv=$?
 
-	read_first_line timeout_rv "${TIMEOUT_FILE}"
-	rm -f "${TIMEOUT_FILE}"
+	read_first_line --rm timeout_rv "${TIMEOUT_FILE}"
 
 	if [ "${sched_rv}" = 81 ] &&
 		[ "${timeout_rv}" = 81 ]
@@ -232,8 +228,7 @@ test_scheduler_termination_05() {
 	wait "$!"
 	local sched_rv=$?
 
-	read_first_line timeout_rv "${TIMEOUT_FILE}"
-	rm -f "${TIMEOUT_FILE}"
+	read_first_line --rm timeout_rv "${TIMEOUT_FILE}"
 
 	if [ "${sched_rv}" = 82 ] &&
 		[ "${timeout_rv}" = 82 ]
@@ -302,11 +297,13 @@ test_scheduler_termination_07() {
 		callback_rv \
 		pids \
 		schedule_pid \
+		killer_pid \
 		all_ok=1
 
 	local \
 		SIG_RV_FILE="/tmp/sched.sigintterm.rv.${TEST_ID:?}.$$" \
-		SIG_PIDS_FILE="/tmp/sched.sigintterm.pids.${TEST_ID:?}.$$"
+		SIG_PIDS_FILE="/tmp/sched.sigintterm.pids.${TEST_ID:?}.$$" \
+		KILLER_PID_FILE="/tmp/sched.sigint.killer-pid.${TEST_ID:?}.$$"
 
 	local \
 		SCHED_FAIL_MSG_CB=echo \
@@ -335,34 +332,32 @@ test_scheduler_termination_07() {
 
 					wait "${schedule_pid}"
 				)
+				sched_rv=$?
 				;;
 			INT)
 				[ -t 0 ] ||
 				{ printf '%s\n' "SIG${sig}: ${SKIP_C} (output is not routed to TTY)"; continue; }
 
 				# Send INT signal to foreground scheduler process
+				rm -f "${KILLER_PID_FILE}"
 				(
 					local pid killer_pid
 
 					get_test_pid pid
-					(
-						sleep 1
-						kill "-${sig}" "$pid"
-					) &
-					killer_pid=${!}
-
-					trap 'kill "${killer_pid}" 2>/dev/null' EXIT
+					start_bg_killer killer_pid "${pid}" 1 INT
+					printf '%s\n' "${killer_pid}" > "${KILLER_PID_FILE}"
 
 					schedule_jobs 'hang_1 hang_2'
 				)
+				sched_rv=$?
+				read_first_line --rm killer_pid "${KILLER_PID_FILE}" &&
+					stop_bg_killer "${killer_pid}"
 		esac
 
-		sched_rv=$?
-
-		read_first_line pids "${SIG_PIDS_FILE}"
+		read_first_line --rm pids "${SIG_PIDS_FILE}"
 
 		if [ "${sched_rv}" = "${expect_rv}" ] &&
-			read_first_line callback_rv "${SIG_RV_FILE}" &&
+			read_first_line --rm callback_rv "${SIG_RV_FILE}" &&
 			[ "${callback_rv}" = "${expect_rv}" ] &&
 			[ -n "${pids}" ]
 		then
@@ -373,8 +368,6 @@ test_scheduler_termination_07() {
 				"${sig}" "${FAIL}" "${expect_rv}" "${sched_rv}" "${callback_rv}" "${pids}"
 		fi
 	done
-
-	rm -f "${SIG_RV_FILE}" "${SIG_PIDS_FILE}"
 
 	if [ "${all_ok}" = 1 ]
 	then
@@ -446,10 +439,12 @@ test_scheduler_termination_09() {
 		end_s \
 		elapsed \
 		schedule_pid \
+		killer_pid \
 		all_ok=1
 
 	# shellcheck disable=SC2034
 	local \
+		KILLER_PID_FILE="/tmp/sched.sigint.killer-pid.${TEST_ID:?}.$$" \
 		SCHED_FAIL_MSG_CB=echo \
 		SCHED_FINALIZE_CB=finalize_handler \
 		JOB_DONE_CB=done_handler \
@@ -481,28 +476,27 @@ test_scheduler_termination_09() {
 
 					wait "${schedule_pid}"
 				)
+				sched_rv=$?
 				;;
 			INT)
 				[ -t 0 ] ||
 					{ printf '%s\n' "SIG${sig}: ${SKIP_C} (output is not routed to TTY)"; continue; }
 				# Send INT signal to foreground scheduler process
+				rm -f "${KILLER_PID_FILE}"
 				(
 					local pid killer_pid
 
 					get_test_pid pid
-					(
-						sleep 1
-						kill "-${sig}" "${pid}"
-					) &
-					killer_pid=${!}
-
-					trap 'kill "${killer_pid}" 2>/dev/null' EXIT
+					start_bg_killer killer_pid "${pid}" 1 INT
+					printf '%s\n' "${killer_pid}" > "${KILLER_PID_FILE}"
 
 					schedule_jobs 'hang'
 				)
+				sched_rv=$?
+				read_first_line --rm killer_pid "${KILLER_PID_FILE}" &&
+					stop_bg_killer "${killer_pid}"
 		esac
 
-		sched_rv=$?
 		end_s=$(date +%s)
 
 		elapsed=$((end_s - start_s))
@@ -845,8 +839,7 @@ test_scheduler_termination_17() {
 	wait "${schedule_pid}"
 	sched_rv=$?
 
-	read_first_line out "${OUT_FILE}"
-	rm -f "${OUT_FILE}"
+	read_first_line --rm out "${OUT_FILE}"
 	# The test body's IFS is the default, so this split is reliable
 	set -- ${out}
 	fin_rv="${1}" pid_cnt="${2}" unf_cnt="${3}"
@@ -934,7 +927,7 @@ test_scheduler_termination_18() {
 	# Let any extra job dispatched at removal time record its start
 	sleep 1
 	started_cnt=$(sed '/^$/d' "${STARTED_F}" | wc -l)
-	read_first_line undispatched "${UNDISPATCHED_FILE}"
+	read_first_line --rm undispatched "${UNDISPATCHED_FILE}"
 
 	[ "${sched_rv}" = 1 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 1)"; }
 
@@ -947,7 +940,7 @@ test_scheduler_termination_18() {
 	grep -qF FIFO "${MSGS_F}" 2>/dev/null ||
 		{ checks_ok=; echo "no failure message mentioning the FIFO"; }
 
-	rm -f "${STARTED_F}" "${UNDISPATCHED_FILE}" "${MSGS_F}"
+	rm -f "${STARTED_F}" "${MSGS_F}"
 
 	if [ -n "${checks_ok}" ]
 	then

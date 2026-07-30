@@ -246,7 +246,7 @@ _jt_timeout_scenario() {
 
 	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
 
-	read_first_line done_rec "${DONE_F}"
+	read_first_line --rm done_rec "${DONE_F}"
 	done_pid="${done_rec#expired|${jt_job}|}"
 	done_pid="${done_pid%%|*}"
 	case "${done_rec}" in
@@ -265,7 +265,7 @@ _jt_timeout_scenario() {
 	jt_assert_dead "${PIDS_F}" ||
 		{ checks_ok=; echo "job child still alive: ${ALIVE_PIDS}"; }
 
-	jt_teardown "${PIDS_F}" "" "${FINALIZE_F}" "${DONE_F}"
+	jt_teardown "${PIDS_F}" "" "${FINALIZE_F}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "killed at expiry, expired='${fin_expired}', running_pids='${fin_pids}' (unverified)"

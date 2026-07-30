@@ -54,8 +54,8 @@ run_parallelism_test() {
 	wait "${scheduler_pid}"
 	sched_rv=$?
 
-	read_first_line max_active "${result_file}"
-	rm -f "${fifo}" "${result_file}"
+	read_first_line --rm max_active "${result_file}"
+	rm -f "${fifo}"
 
 	if [ "${sched_rv}" = 0 ] &&
 		is_uint "${max_active}" &&
@@ -216,7 +216,7 @@ test_dispatch_04() {
 	sched_rv=$?
 
 	finalize_state=
-	read_first_line finalize_state "${LARGE_FINALIZE_FILE}"
+	read_first_line --rm finalize_state "${LARGE_FINALIZE_FILE}"
 
 	if [ "${sched_rv}" = 0 ] &&
 		verify_recorded_set \
@@ -228,11 +228,11 @@ test_dispatch_04() {
 			"${jobs}" &&
 		[ "${finalize_state}" = empty ]
 	then
-		rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
+		rm -f "${DONE_COUNT_FILE}"
 		PASS "completed=${actual_done_cnt}"
 		return 0
 	else
-		rm -f "${DONE_COUNT_FILE}" "${LARGE_FINALIZE_FILE}"
+		rm -f "${DONE_COUNT_FILE}"
 		FAIL "sched_rv=${sched_rv}, finalize_state=${finalize_state}, expected_cnt=${expected_cnt}, actual_done_cnt=${actual_done_cnt}, actual_done_jobs=${actual_done_jobs}"
 		return 1
 	fi
@@ -295,9 +295,9 @@ test_dispatch_05() {
 		actual_done_cnt=$(wc -l < "${EMPTY_DONE_FILE}")
 	fi
 
-	read_first_line finalize_state "${EMPTY_FINALIZE_FILE}"
+	read_first_line --rm finalize_state "${EMPTY_FINALIZE_FILE}"
 
-	rm -f "${EMPTY_DONE_FILE}" "${EMPTY_FINALIZE_FILE}"
+	rm -f "${EMPTY_DONE_FILE}"
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${actual_done_cnt}" = 0 ] &&
@@ -371,8 +371,8 @@ test_dispatch_06() {
 
 	wait "${monitor_pid}"
 
-	read_first_line max_active "${result_file}"
-	rm -f "${fifo}" "${result_file}"
+	read_first_line --rm max_active "${result_file}"
+	rm -f "${fifo}"
 
 	if \
 		[ "${sched_rv}" = 0 ] &&

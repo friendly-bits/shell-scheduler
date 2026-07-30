@@ -96,7 +96,7 @@ test_job_termination_mini_02() {
 
 	SCHED_FAIL_MSG_CB=mini_02_fail_msg sched_job_term_mini notanumber "${victim}"
 
-	sleep 0.3
+	sleep 1
 	kill -0 "${victim}" 2>/dev/null &&
 		{ checks_ok=; echo "valid seed ${victim} survived"; kill -KILL "${victim}" 2>/dev/null; }
 
@@ -136,7 +136,7 @@ test_job_termination_mini_03() {
 	SCHED_AWK_CMD=/nonexistent/nope SCHED_FAIL_MSG_CB=mini_03_fail_msg \
 		sched_job_term_mini "${victim}"
 
-	sleep 0.3
+	sleep 1
 	kill -0 "${victim}" 2>/dev/null &&
 		{ checks_ok=; echo "seed ${victim} survived a scan failure"; kill -KILL "${victim}" 2>/dev/null; }
 

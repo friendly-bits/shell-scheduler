@@ -329,7 +329,7 @@ test_job_termination_full_04() {
 
 	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
 
-	read_first_line done_rec "${DONE_F}" &&
+	read_first_line --rm done_rec "${DONE_F}" &&
 	[ "${done_rec}" = "expired|block_04|dead_at_cb=yes" ] ||
 		{ checks_ok=; echo "done record '${done_rec}' (want 'expired|block_04|dead_at_cb=yes')"; }
 
@@ -343,7 +343,7 @@ test_job_termination_full_04() {
 
 	cg_base_empty "${CG_TEST_BASE}" || { checks_ok=; echo "base cgroup not empty"; }
 
-	jt_teardown "${PIDS_F}" "${CG_TEST_BASE}" "${FINALIZE_F}" "${DONE_F}"
+	jt_teardown "${PIDS_F}" "${CG_TEST_BASE}" "${FINALIZE_F}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "killed at expiry, expired='${fin_expired}', running_pids empty"

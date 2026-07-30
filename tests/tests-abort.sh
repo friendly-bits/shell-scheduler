@@ -91,7 +91,7 @@ pid_job() {
 # 1: out var
 # 2: job ID
 read_job_pid() {
-	read_first_line "${1:?}" "${PID_FILE_PREFIX:?}.${2:?}"
+	read_first_line --rm "${1:?}" "${PID_FILE_PREFIX:?}.${2:?}"
 }
 
 # DO_JOB_CB appending the job ID to ${START_FILE}, then running do_job_default.
@@ -111,12 +111,16 @@ mark_done_job() {
 }
 
 # Set the out var to the file's lines joined by single spaces, empty if absent.
+# 0 (optional): '--rm' to remove the file after reading
 # 1: out var
 # 2: file
 read_flat() {
+	local rf_rm
+	[ "${1}" = '--rm' ] && { rf_rm=1; shift; }
 	local rf_val=
 
 	[ -f "${2:?}" ] && rf_val="$(tr '\n' ' ' < "${2}")"
+	[ -n "${rf_rm}" ] && rm -f "${2}"
 
 	export -n "${1:?}=${rf_val}"
 }
@@ -162,8 +166,9 @@ print_msgs() {
 run_abort_term_scenario() {
 	local \
 		rats_term_cb="${1:?}" \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS="${2:?}" \
+		driver_job_id="${3:?}" \
 		ABORT_CALLS_FILE="/tmp/sched.abortcalls.${TEST_ID:?}.$$"
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* \
@@ -177,19 +182,19 @@ run_abort_term_scenario() {
 	SCHED_MAX_JOBS=2 \
 	SCHED_TIMEOUT_S=15 \
 	SCHED_IDLE_TIMEOUT_S=10 \
-		schedule_jobs "${2} ${3:?}" &
+		schedule_jobs "${ABORT_TARGETS} ${driver_job_id}" &
 
 	wait "$!"
 	sched_rv=$?
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat term_calls "${TERM_CALLS_FILE}"
-	read_first_line fin_pids "${FIN_PIDS_FILE}"
-	read_job_pid target_pid "${2}"
+	read_flat --rm term_calls "${TERM_CALLS_FILE}"
+	read_first_line --rm fin_pids "${FIN_PIDS_FILE}"
+	read_job_pid target_pid "${ABORT_TARGETS}"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${PID_FILE_PREFIX}".* \
-		"${FIN_PIDS_FILE}" "${TERM_CALLS_FILE}" "${MSG_FILE}" "${ABORT_CALLS_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* \
+		"${MSG_FILE}" "${ABORT_CALLS_FILE}"
 	:
 }
 
@@ -207,7 +212,7 @@ test_abort_01() {
 		exp_ok act_ok exp_aborted act_aborted \
 		abort_calls \
 		checks_ok=1 \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS=ok5_abort01 \
 		jobs='ok5_abort01 ok1_abort01b'
 
@@ -215,7 +220,7 @@ test_abort_01() {
 		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
 		ABORT_CALLS_FILE="/tmp/sched.abortcalls.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Running job aborted from JOB_DONE_CB lands in the aborted set" "${jobs}"
 
@@ -235,7 +240,7 @@ test_abort_01() {
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	abort_calls=
 	[ -f "${ABORT_CALLS_FILE}" ] && abort_calls="$(tr '\n' ' ' < "${ABORT_CALLS_FILE}")"
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}"
 
 	# The abort must have been driven by a real callback invocation, not by a
 	#   callback that never ran and an aborted set that was empty anyway
@@ -271,7 +276,7 @@ test_abort_02() {
 		exp_ok act_ok exp_undisp act_undisp exp_starts act_starts \
 		tick_calls starts \
 		checks_ok=1 \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS=instant_abort02b \
 		jobs='ok1_abort02 instant_abort02b instant_abort02c'
 
@@ -281,7 +286,7 @@ test_abort_02() {
 		START_FILE="/tmp/sched.starts.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${START_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${START_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "A job aborted while pending lands in undispatched, not aborted" "${jobs}"
 
@@ -301,8 +306,8 @@ test_abort_02() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat tick_calls "${ABORT_CALLS_FILE}"
-	read_flat starts "${START_FILE}"
+	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
+	read_flat --rm starts "${START_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -323,7 +328,7 @@ test_abort_02() {
 	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/expired must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${START_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, started='${starts}', undispatched='${undispatched_raw}'"
@@ -366,7 +371,7 @@ test_abort_03() {
 		RV_FILE="/tmp/sched.abortrv.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${RV_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${RV_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "One jobs_abort call mixing pending, running, completed, unknown and invalid IDs" "${jobs}"
 
@@ -386,8 +391,8 @@ test_abort_03() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat done_calls "${ABORT_CALLS_FILE}"
-	read_first_line abort_rv "${RV_FILE}"
+	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
+	read_first_line --rm abort_rv "${RV_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -412,7 +417,7 @@ test_abort_03() {
 	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/expired must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${RV_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, jobs_abort rv=${abort_rv}, msg_cnt=${msg_cnt}, aborted='${aborted_raw}', undispatched='${undispatched_raw}'"
@@ -454,7 +459,7 @@ test_abort_04() {
 		RV_FILE="/tmp/sched.abortrv.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${DONE_FILE}" "${RV_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${DONE_FILE}" "${RV_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "jobs_abort with no arguments returns 0 and changes nothing" "${jobs}"
 
@@ -472,8 +477,8 @@ test_abort_04() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat done_calls "${DONE_FILE}"
-	read_flat abort_rvs "${RV_FILE}"
+	read_flat --rm done_calls "${DONE_FILE}"
+	read_flat --rm abort_rvs "${RV_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -489,7 +494,7 @@ test_abort_04() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}${aborted_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/undispatched/expired/aborted must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${DONE_FILE}" "${RV_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, jobs_abort rvs='${abort_rvs}', ok='${ok_raw}'"
@@ -534,7 +539,7 @@ test_abort_05() {
 		RV_FILE="/tmp/sched.abortrv.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${RV_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${RV_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "A second abort of the same running job is a silent no-op" "${jobs}"
 
@@ -554,8 +559,8 @@ test_abort_05() {
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	count_items aborted_cnt "${aborted_raw}"
-	read_flat done_calls "${ABORT_CALLS_FILE}"
-	read_first_line abort_rvs "${RV_FILE}"
+	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
+	read_first_line --rm abort_rvs "${RV_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -576,7 +581,7 @@ test_abort_05() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${RV_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, abort rvs='${abort_rvs}', aborted='${aborted_raw}'"
@@ -612,7 +617,7 @@ test_abort_06() {
 		DONE_FILE="/tmp/sched.done.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${DONE_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${DONE_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Aborting an already completed job leaves it in the ok set" "${jobs}"
 
@@ -631,7 +636,7 @@ test_abort_06() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat done_calls "${DONE_FILE}"
+	read_flat --rm done_calls "${DONE_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -647,7 +652,7 @@ test_abort_06() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${DONE_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, ok='${ok_raw}', aborted='${aborted_raw}'"
@@ -670,7 +675,7 @@ test_abort_07() {
 		exp_ok act_ok exp_aborted act_aborted \
 		tick_calls \
 		checks_ok=1 \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS=ok5_abort07 \
 		jobs='ok5_abort07 instant_abort07'
 
@@ -678,7 +683,7 @@ test_abort_07() {
 		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
 		ABORT_CALLS_FILE="/tmp/sched.abortcalls.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Abort from SCHED_DISPATCH_TICK_CB frees the slot for the next pending job at once" "${jobs}"
 
@@ -703,7 +708,7 @@ test_abort_07() {
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	tick_calls=
 	[ -f "${ABORT_CALLS_FILE}" ] && tick_calls="$(tr '\n' ' ' < "${ABORT_CALLS_FILE}")"
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -766,7 +771,7 @@ test_abort_08() {
 		i=1 aborted_cnt \
 		checks_ok=1 \
 		max_jobs=3 \
-		jobs= \
+		jobs='' \
 		AB08_LIVE=
 
 	local \
@@ -779,7 +784,7 @@ test_abort_08() {
 		i=$((i + 1))
 	done
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${fifo}" "${result_file}" &&
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${fifo}" "${result_file}" &&
 	mkfifo "${fifo}" || { FAIL "failed to create FIFO '${fifo}'"; return 1; }
 
 	print_test_header "${TEST_ID:?}" "Repeated abort of a running job keeps concurrency within SCHED_MAX_JOBS" "20 jobs (ab08_1..ab08_20)"
@@ -809,8 +814,8 @@ test_abort_08() {
 	sched_rv=$?
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
-	read_first_line max_active "${result_file}"
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${fifo}" "${result_file}"
+	read_first_line --rm max_active "${result_file}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${fifo}"
 
 	count_items aborted_cnt "${aborted_raw}"
 
@@ -845,7 +850,7 @@ test_abort_09() {
 		exp_ok act_ok exp_undisp act_undisp exp_starts act_starts \
 		tick_calls starts \
 		checks_ok=1 \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS='instant_abort09b instant_abort09c instant_abort09d' \
 		jobs='ok1_abort09 instant_abort09b instant_abort09c instant_abort09d'
 
@@ -855,7 +860,7 @@ test_abort_09() {
 		START_FILE="/tmp/sched.starts.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${START_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${START_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Aborting every pending job from SCHED_DISPATCH_TICK_CB ends the dispatch loop" "${jobs}"
 
@@ -875,8 +880,8 @@ test_abort_09() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat tick_calls "${ABORT_CALLS_FILE}"
-	read_flat starts "${START_FILE}"
+	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
+	read_flat --rm starts "${START_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -898,7 +903,7 @@ test_abort_09() {
 	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/expired must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${START_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, started='${starts}', undispatched='${undispatched_raw}'"
@@ -920,7 +925,7 @@ test_abort_10() {
 		exp_ok act_ok exp_aborted act_aborted \
 		done_calls \
 		checks_ok=1 \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS='ok5_abort10b ok5_abort10c ok5_abort10d' \
 		jobs='instant_abort10 ok5_abort10b ok5_abort10c ok5_abort10d'
 
@@ -929,7 +934,7 @@ test_abort_10() {
 		ABORT_CALLS_FILE="/tmp/sched.abortcalls.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Aborting all remaining running jobs from JOB_DONE_CB exits at once with rv 0" "${jobs}"
 
@@ -953,7 +958,7 @@ test_abort_10() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat done_calls "${ABORT_CALLS_FILE}"
+	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -972,7 +977,7 @@ test_abort_10() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s, aborted='${aborted_raw}'"
@@ -995,7 +1000,7 @@ test_abort_11() {
 		exp_ok act_ok exp_aborted act_aborted exp_marks act_marks \
 		tick_calls done_calls marks \
 		checks_ok=1 \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS=ok2_abort11 \
 		jobs='ok2_abort11 ok5_abort11b'
 
@@ -1006,7 +1011,7 @@ test_abort_11() {
 		MARK_FILE="/tmp/sched.marks.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${DONE_FILE}" "${MARK_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${DONE_FILE}" "${MARK_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Without JOB_TERM_CB an aborted job is not killed and its record is discarded" "${jobs}"
 
@@ -1027,9 +1032,9 @@ test_abort_11() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat tick_calls "${ABORT_CALLS_FILE}"
-	read_flat done_calls "${DONE_FILE}"
-	read_flat marks "${MARK_FILE}"
+	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
+	read_flat --rm done_calls "${DONE_FILE}"
+	read_flat --rm marks "${MARK_FILE}"
 
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
@@ -1051,7 +1056,7 @@ test_abort_11() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${DONE_FILE}" "${MARK_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, marks='${marks}', aborted='${aborted_raw}'"
@@ -1080,7 +1085,7 @@ test_abort_12() {
 		exp_aborted act_aborted exp_ok act_ok exp_unfin act_unfin \
 		tick_calls \
 		checks_ok=1 \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS=ok2_abort12 \
 		SPOOF_DONE_ID=ok2_abort12 \
 		SPOOF_FROM_ID=instant_abort12b \
@@ -1092,7 +1097,7 @@ test_abort_12() {
 		ABORT_CALLS_FILE="/tmp/sched.abortcalls.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "A forged record for an aborted job consumes its discard token" "${jobs}"
 
@@ -1134,7 +1139,7 @@ test_abort_12() {
 	[ -z "${fail_raw}${undispatched_raw}${expired_raw}" ] ||
 		{ checks_ok=; echo "fail/undispatched/expired must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, msg_cnt=${msg_cnt}, aborted='${aborted_raw}'"
@@ -1161,7 +1166,7 @@ test_abort_13() {
 		exp_ok act_ok exp_aborted act_aborted \
 		tick_calls \
 		checks_ok=1 \
-		ABORT_DONE= \
+		ABORT_DONE='' \
 		ABORT_TARGETS=ok5_abort13 \
 		jobs='ok5_abort13 ok5_abort13b'
 
@@ -1170,7 +1175,7 @@ test_abort_13() {
 		ABORT_CALLS_FILE="/tmp/sched.abortcalls.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Aborting a job with a per-job timeout retires its deadline" "${jobs}"
 
@@ -1218,7 +1223,7 @@ test_abort_13() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}" ] ||
 		{ checks_ok=; echo "fail/unfinished/undispatched must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s, aborted='${aborted_raw}', expired='${expired_raw}'"
@@ -1255,7 +1260,7 @@ test_abort_14() {
 		DONE_FILE="/tmp/sched.done.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${DONE_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${DONE_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Aborting a job from the expiry sweep's JOB_DONE_CB is a no-op" "${jobs}"
 
@@ -1276,7 +1281,7 @@ test_abort_14() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat done_calls "${DONE_FILE}"
+	read_flat --rm done_calls "${DONE_FILE}"
 
 	# A second slot reclaim would trip the 'Not all jobs are done' check
 	[ "${sched_rv}" = 0 ] ||
@@ -1292,7 +1297,7 @@ test_abort_14() {
 	[ -z "${ok_raw}${fail_raw}${unfinished_raw}${undispatched_raw}" ] ||
 		{ checks_ok=; echo "ok/fail/unfinished/undispatched must all be empty" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${DONE_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, expired='${expired_raw}', aborted='${aborted_raw}'"
@@ -1336,7 +1341,7 @@ test_abort_15() {
 		ABORT_CALLS_FILE="/tmp/sched.abortcalls.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${PID_FILE_PREFIX}".* "${FIN_PIDS_FILE}" "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* "${FIN_PIDS_FILE}" "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Abort resolves a job by whole ID among prefix/suffix-overlapping IDs" "${jobs}"
 
@@ -1356,8 +1361,8 @@ test_abort_15() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat tick_calls "${ABORT_CALLS_FILE}"
-	read_first_line fin_pids "${FIN_PIDS_FILE}"
+	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
+	read_first_line --rm fin_pids "${FIN_PIDS_FILE}"
 	read_job_pid j_pid j ||
 		{ checks_ok=; echo "job 'j' recorded no PID" >&2; }
 
@@ -1377,7 +1382,7 @@ test_abort_15() {
 	[ -n "${j_pid}" ] && [ "${fin_pids}" = "${j_pid}" ] ||
 		{ checks_ok=; echo "finalize running_pids='${fin_pids}' (want job 'j' own PID '${j_pid}')" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${PID_FILE_PREFIX}".* "${FIN_PIDS_FILE}" "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', ok='${ok_raw}', running_pids='${fin_pids}'"
@@ -1420,7 +1425,7 @@ test_abort_16() {
 		ABORT_CALLS_FILE="/tmp/sched.abortcalls.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${PID_FILE_PREFIX}".* "${FIN_PIDS_FILE}" "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* "${FIN_PIDS_FILE}" "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Abort of a numeric job ID resolves the target's own PID" "${jobs}"
 
@@ -1440,8 +1445,8 @@ test_abort_16() {
 
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
-	read_flat tick_calls "${ABORT_CALLS_FILE}"
-	read_first_line fin_pids "${FIN_PIDS_FILE}"
+	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
+	read_first_line --rm fin_pids "${FIN_PIDS_FILE}"
 	read_job_pid target_pid 724 ||
 		{ checks_ok=; echo "job '724' recorded no PID" >&2; }
 
@@ -1462,7 +1467,7 @@ test_abort_16() {
 	[ -n "${target_pid}" ] && [ "${fin_pids}" = "${target_pid}" ] ||
 		{ checks_ok=; echo "finalize running_pids='${fin_pids}' (want job '724' own PID '${target_pid}')" >&2; }
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${PID_FILE_PREFIX}".* "${FIN_PIDS_FILE}" "${ABORT_CALLS_FILE}" "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', ok='${ok_raw}', running_pids='${fin_pids}'"

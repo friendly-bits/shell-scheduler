@@ -772,7 +772,7 @@ test_timeout_12() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line cb_pid "${PID_FILE}"
+	read_first_line --rm cb_pid "${PID_FILE}"
 
 	[ "${sched_rv}" = 98 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 98" >&2; }
 	grep -q '^expired=hang_t12$' "${FIN_FILE}" 2>/dev/null ||
@@ -780,7 +780,7 @@ test_timeout_12() {
 	is_uint "${cb_pid}" && grep -q "^pids=${cb_pid}$" "${FIN_FILE}" 2>/dev/null ||
 		{ checks_ok=; echo "abandoned pid mismatch: cb saw '${cb_pid}'" >&2; }
 
-	rm -f "${PID_FILE}" "${FIN_FILE}"
+	rm -f "${FIN_FILE}"
 
 	if [ -n "${checks_ok}" ]; then
 		PASS "sched_rv=${sched_rv}"
@@ -934,7 +934,7 @@ test_timeout_15() {
 			ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 			TO15_TARGET="${2}"
 
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 		job_set_timeout "${target}" "${TO15_DEADLINE_S:?}" ||
 			{ echo "${label}: job_set_timeout failed" >&2; return 1; }
@@ -976,7 +976,7 @@ test_timeout_15() {
 			{ pass_ok=; echo "${label}: running-job counter left unsound" >&2; }
 
 		[ -n "${pass_ok}" ] || print_id_sets >&2
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 		[ -n "${pass_ok}" ]
 	}

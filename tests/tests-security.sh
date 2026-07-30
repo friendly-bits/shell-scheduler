@@ -266,7 +266,7 @@ test_security_03() {
 		INJECT_FILE="/tmp/sched.inject.${TEST_ID:?}.$$" \
 		DISPATCH_FILE="/tmp/sched.dispatch.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${INJECT_FILE}" "${DISPATCH_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${INJECT_FILE}" "${DISPATCH_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Injection-shaped job IDs are rejected upfront, never classified" "${jobs}"
 
@@ -286,9 +286,9 @@ test_security_03() {
 	[ -e "${INJECT_FILE}" ] && inject_exists=yes || inject_exists=no
 	[ -e "${DISPATCH_FILE}" ] && dispatch_exists=yes || dispatch_exists=no
 
-	read_first_line ok_raw "${FINALIZE_SETS_PREFIX}.ok"
-	read_first_line fail_raw "${FINALIZE_SETS_PREFIX}.fail"
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${INJECT_FILE}" "${DISPATCH_FILE}"
+	read_first_line --rm ok_raw "${FINALIZE_SETS_PREFIX}.ok"
+	read_first_line --rm fail_raw "${FINALIZE_SETS_PREFIX}.fail"
+	rm -f "${INJECT_FILE}" "${DISPATCH_FILE}"
 
 	# Rejected upfront: rv=1, no injection, no dispatch, finalize sets unwritten
 	if [ "${sched_rv}" = 1 ] &&
@@ -881,7 +881,7 @@ test_security_13() {
 	[ "${sched_rv}" = 0 ] ||
 		{ checks_ok=; echo "2020-char ID: sched_rv=${sched_rv}, expected 0" >&2; }
 
-	read_first_line done_line "${DONE_FILE}" ||
+	read_first_line --rm done_line "${DONE_FILE}" ||
 		{ checks_ok=; echo "2020-char ID: no JOB_DONE_CB record" >&2; }
 	[ "${done_line}" = "${ok_id} 0" ] ||
 		{ checks_ok=; echo "2020-char ID: JOB_DONE_CB got a record of ${#done_line} chars, expected the ID verbatim with rv 0" >&2; }
@@ -891,7 +891,7 @@ test_security_13() {
 	[ "${msg_cnt}" -eq 0 ] ||
 		{ checks_ok=; echo "2020-char ID: ${msg_cnt} error message(s), expected 0" >&2; }
 
-	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${MSG_FILE}"
+	rm -f "${ARGS_FILE}" "${MSG_FILE}"
 
 	# Rejected: 2021-char ID
 	DO_JOB_CB=security_13_do_job \
@@ -1114,7 +1114,7 @@ test_security_17() {
 		MSG_FILE="/tmp/sched.msg.${TEST_ID:?}.$$" \
 		RV_FILE="/tmp/sched.abortrv.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${RV_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${RV_FILE}"
 
 	print_test_header "${TEST_ID:?}" "jobs_abort() from DO_JOB_CB is rejected" "${jobs}"
 
@@ -1130,7 +1130,7 @@ test_security_17() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line abort_rv "${RV_FILE}"
+	read_first_line --rm abort_rv "${RV_FILE}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 
@@ -1142,14 +1142,14 @@ test_security_17() {
 		[ -z "${aborted_raw}" ] &&
 		verify_id_partition "${jobs}"
 	then
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${RV_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 		PASS "jobs_abort rv=${abort_rv}, guard message recorded, both jobs OK"
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv} (want 0), abort_rv='${abort_rv}' (want 1), msg_cnt=${msg_cnt} (want 1)"
 		print_id_sets >&2
 		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${RV_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 		return 1
 	fi
 }
@@ -1217,20 +1217,19 @@ test_security_18() {
 		RV_FILE="/tmp/sched.abortrv.${TEST_ID:?}.$$" \
 		UID_FILE="/tmp/sched.uid.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${RV_FILE}" "${UID_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${RV_FILE}" "${UID_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Stale SCHED_UID / SCH_STARTED_* cannot pass the jobs_abort() guard" "${jobs}"
 
 	# Identity of a process that has since exited, as an earlier run would leave behind
 	( security_18_self_uid stale_uid && printf '%s\n' "${stale_uid}" ) > "${UID_FILE}"
-	read_first_line stale_uid "${UID_FILE}"
+	read_first_line --rm stale_uid "${UID_FILE}"
 
 	security_18_self_uid self_uid &&
 	[ -n "${stale_uid}" ] &&
 	[ "${stale_uid%%_*}" != "${self_uid%%_*}" ] ||
 	{
 		FAIL "could not capture identities: own='${self_uid}', exited='${stale_uid}'"
-		rm -f "${UID_FILE}"
 		return 1
 	}
 
@@ -1266,7 +1265,7 @@ test_security_18() {
 
 	unset "SCH_STARTED_${stale_uid}" "SCH_STARTED_${reused_uid}"
 
-	read_first_line rv_in_job "${RV_FILE}"
+	read_first_line --rm rv_in_job "${RV_FILE}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 
@@ -1281,14 +1280,14 @@ test_security_18() {
 		[ -z "${aborted_raw}" ] &&
 		verify_id_partition "${jobs}"
 	then
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${RV_FILE}" "${UID_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 		PASS "stale identities rejected (rv 1,1,1), ${msg_cnt} guard messages, run unaffected"
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv} (want 0), rvs: exited='${rv_exited}' reused='${rv_reused}' in_job='${rv_in_job}' (want 1,1,1), msgs=${msg_cnt_pre}/${msg_cnt} (want 2/3)"
 		print_id_sets >&2
 		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${RV_FILE}" "${UID_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 		return 1
 	fi
 }
@@ -1308,7 +1307,7 @@ test_security_19() {
 		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
 		MSG_FILE="/tmp/sched.msg.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
 	print_test_header "${TEST_ID:?}" "jobs_abort() outside a scheduler run is rejected" "${jobs} (after 3 standalone jobs_abort calls)"
 
@@ -1348,14 +1347,14 @@ test_security_19() {
 		[ -z "${aborted_raw}" ] &&
 		verify_id_partition "${jobs}"
 	then
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 		PASS "3 standalone calls rejected (rv 1), ${msg_cnt} guard messages, control run clean"
 		return 0
 	else
 		FAIL "rvs: plain='${rv_plain}' noargs='${rv_noargs}' stale='${rv_stale}' (want 1,1,1), msg_cnt=${msg_cnt} (want 3), sched_rv=${sched_rv} (want 0)"
 		print_id_sets >&2
 		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 		return 1
 	fi
 }
@@ -1392,7 +1391,7 @@ test_security_20() {
 		MSG_FILE="/tmp/sched.msg.${TEST_ID:?}.$$" \
 		DONE_FILE="/tmp/sched.done.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${DONE_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${DONE_FILE}"
 
 	print_test_header "${TEST_ID:?}" "Stray completion record for a running sibling misclassifies it" "${jobs}"
 
@@ -1418,7 +1417,7 @@ test_security_20() {
 		[ -z "${fail_raw}${expired_raw}${aborted_raw}${undispatched_raw}" ] &&
 		verify_id_partition "${jobs}"
 	then
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${DONE_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${DONE_FILE}"
 		PASS "'${SPOOF_DONE_ID}' misclassified OK, its genuine record fatal (rv=${sched_rv})"
 		return 0
 	else
@@ -1426,7 +1425,7 @@ test_security_20() {
 		print_id_sets >&2
 		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
 		[ -f "${DONE_FILE}" ] && cat "${DONE_FILE}" >&2
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${DONE_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${DONE_FILE}"
 		return 1
 	fi
 }
@@ -1462,7 +1461,7 @@ test_security_21() {
 		FIN_FILE="/tmp/sched.fin.${TEST_ID:?}.$$" \
 		RV_FILE="/tmp/sched.abortrv.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${FIN_FILE}" "${RV_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${FIN_FILE}" "${RV_FILE}"
 
 	print_test_header "${TEST_ID:?}" "jobs_abort() from SCHED_FINALIZE_CB is rejected" "${jobs}"
 
@@ -1478,10 +1477,10 @@ test_security_21() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line abort_rv "${RV_FILE}"
-	read_first_line fin_rv "${FIN_FILE}"
 	count_msgs fin_cnt "${FIN_FILE}"
 	count_msgs msg_cnt "${MSG_FILE}"
+	read_first_line --rm abort_rv "${RV_FILE}"
+	read_first_line --rm fin_rv "${FIN_FILE}"
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
 
 	if [ "${sched_rv}" = 0 ] &&
@@ -1494,14 +1493,14 @@ test_security_21() {
 		[ -z "${aborted_raw}" ] &&
 		verify_id_partition "${jobs}"
 	then
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${FIN_FILE}" "${RV_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 		PASS "jobs_abort rv=${abort_rv}, finalize entered ${fin_cnt}x, sched_rv=${sched_rv}"
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv} (want 0), fin_cnt=${fin_cnt} (want 1), fin_rv='${fin_rv}' (want '${sched_rv}'), abort_rv='${abort_rv}' (want 1), msg_cnt=${msg_cnt} (want 1)"
 		print_id_sets >&2
 		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${FIN_FILE}" "${RV_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 		return 1
 	fi
 }
@@ -1548,7 +1547,7 @@ test_security_22() {
 		ERR_FILE="/tmp/sched.err.${TEST_ID:?}.$$" \
 		RV_FILE="/tmp/sched.abortrv.${TEST_ID:?}.$$"
 
-	rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${ERR_FILE}" "${RV_FILE}"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${ERR_FILE}" "${RV_FILE}"
 
 	print_test_header "${TEST_ID:?}" "jobs_abort() from SCHED_FAIL_MSG_CB is rejected" "${jobs}"
 
@@ -1564,7 +1563,7 @@ test_security_22() {
 	wait "$!"
 	sched_rv=$?
 
-	read_first_line abort_rv "${RV_FILE}"
+	read_first_line --rm abort_rv "${RV_FILE}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	count_msgs err_cnt "${ERR_FILE}"
 	read_id_sets "${FINALIZE_SETS_PREFIX}"
@@ -1581,7 +1580,7 @@ test_security_22() {
 		[ -z "${aborted_raw}" ] &&
 		verify_id_partition "${jobs}"
 	then
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${ERR_FILE}" "${RV_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${ERR_FILE}"
 		PASS "jobs_abort rv=${abort_rv}, guard message on stderr with the recursion warning, callback entered ${msg_cnt}x"
 		return 0
 	else
@@ -1589,7 +1588,7 @@ test_security_22() {
 		print_id_sets >&2
 		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
 		[ -f "${ERR_FILE}" ] && cat "${ERR_FILE}" >&2
-		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}" "${ERR_FILE}" "${RV_FILE}"
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${ERR_FILE}" "${RV_FILE}"
 		return 1
 	fi
 }

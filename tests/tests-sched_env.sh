@@ -581,7 +581,7 @@ test_sched_env_12() {
 
 	local \
 		TEST_ID=sched_env_12 \
-		sched_rv sched_pid wd_pid msg_cnt warn_cnt \
+		sched_rv sched_pid killer_pid msg_cnt warn_cnt \
 		checks_ok=1 \
 		SE12_JOB=ok1_se12 \
 		jobs='ok1_se12'
@@ -605,11 +605,11 @@ test_sched_env_12() {
 		schedule_jobs "${jobs}" 2>"${ERR_FILE}" &
 
 	sched_pid="${!}"
-	start_kill_watchdog wd_pid "${sched_pid}" 20
+	start_bg_killer killer_pid "${sched_pid}" 20
 
 	wait "${sched_pid}"
 	sched_rv=$?
-	stop_kill_watchdog "${wd_pid}"
+	stop_bg_killer "${killer_pid}"
 
 	count_msgs msg_cnt "${MSG_FILE}"
 	warn_cnt=0
@@ -650,7 +650,7 @@ test_sched_env_13() {
 
 	local \
 		TEST_ID=sched_env_13 \
-		sched_rv sched_pid wd_pid msg_cnt escaped \
+		sched_rv sched_pid killer_pid msg_cnt escaped \
 		checks_ok=1 \
 		jobs='ok1_se13'
 
@@ -674,15 +674,15 @@ test_sched_env_13() {
 		schedule_jobs "${jobs}" &
 
 	sched_pid="${!}"
-	start_kill_watchdog wd_pid "${sched_pid}" 20
+	start_bg_killer killer_pid "${sched_pid}" 20
 
 	wait "${sched_pid}"
 	sched_rv=$?
-	stop_kill_watchdog "${wd_pid}"
+	stop_bg_killer "${killer_pid}"
 
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_first_line escaped "${FIN_FILE}" || escaped='<finalize never ran>'
-	rm -f "${MSG_FILE}" "${FIN_FILE}"
+	rm -f "${MSG_FILE}"
 
 	[ "${msg_cnt}" = 1 ] ||
 		{ checks_ok=; echo "SCHED_FAIL_MSG_CB invocations=${msg_cnt} (want 1)" >&2; }

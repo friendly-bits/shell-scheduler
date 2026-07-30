@@ -113,9 +113,14 @@ mk_name_of_len() {
 }
 
 read_first_line() {
+	local rfl_rm_file rfl_read_rv
+	[ "${1}" = --rm  ] && { rfl_rm_file=1; shift; }
 	export -n "${1:?}="
 	[ -f "${2:?}" ] || return 1
 	IFS= read -r "${1:?}" < "${2}"
+	rfl_read_rv=${?}
+	[ -n "${rfl_rm_file}" ] && rm -f "${2}"
+	return ${rfl_read_rv}
 }
 
 set_ansi() {
@@ -371,19 +376,20 @@ monitor_job_conc_fifo() {
 	printf '%s\n' "${mjc_max}" > "${mjc_result_file}"
 }
 
-# Kill <pid> after <secs> if it is still running, so a runaway callback fails the
-#   test instead of hanging the runner.
-# 1: out var for the watchdog pid
+# Kill <pid> with <sig> after <secs> if it is still running
+# 1: out var for the killer pid
 # 2: pid to kill
 # 3: seconds to wait first
-start_kill_watchdog() {
-	( sleep "${3:?}"; kill -9 "${2:?}" 2>/dev/null ) &
+# 4 (optional): signal (defaults to 9=KILL)
+start_bg_killer() {
+	( sleep "${3:?}"; kill -"${4:-9}" "${2:?}" 2>/dev/null ) &
 	export -n "${1:?}=${!}"
 }
 
-# 1: watchdog pid from start_kill_watchdog
-stop_kill_watchdog() {
-	kill "${1:?}" 2>/dev/null
+# 1: killer pid from start_bg_killer
+stop_bg_killer() {
+	kill -9 "${1:?}" 2>/dev/null
+	# reaps the zombie and swallows bash's async 'Killed' job notification
 	wait "${1}" 2>/dev/null
 }
 
