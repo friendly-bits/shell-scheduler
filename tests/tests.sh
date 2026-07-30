@@ -123,6 +123,23 @@ read_first_line() {
 	return ${rfl_read_rv}
 }
 
+# Set the out var to the file's lines joined by single spaces, empty if absent.
+# 0 (optional): '--rm' to remove the file after reading
+# 1: out var
+# 2: file
+read_flat() {
+	local rf_rm
+	[ "${1}" = '--rm' ] && { rf_rm=1; shift; }
+	local rf_val=
+
+	# 'read -d' slurps the whole file; it returns 1 at EOF but still sets the var
+	[ -f "${2:?}" ] && IFS= read -r -d '' rf_val < "${2}"
+	[ -n "${rf_rm}" ] && rm -f "${2}"
+
+	rf_val="${rf_val%$'\n'}"
+	export -n "${1:?}=${rf_val//$'\n'/ }"
+}
+
 set_ansi() {
 	local IFS=" "
 	# shellcheck disable=SC2046

@@ -718,17 +718,16 @@ test_security_10() {
 	wait "$!"
 	sched_rv=$?
 
-	dispatched=none
-	[ -f "${DISPATCH_FILE}" ] && dispatched="$(tr '\n' ' ' < "${DISPATCH_FILE}")"
+	read_flat --rm dispatched "${DISPATCH_FILE}"
 	msg_has_glob=no
 	[ -f "${MSG_FILE}" ] && grep -qF 'zzsibling*' "${MSG_FILE}" && msg_has_glob=yes
 
 	rm -rf "${WORK_DIR}"
-	rm -f "${DISPATCH_FILE}" "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	# Correct: whole list rejected upfront (rv=1), nothing dispatched, msg names the literal glob
 	if [ "${sched_rv}" = 1 ] &&
-		[ "${dispatched}" = none ] &&
+		[ -z "${dispatched}" ] &&
 		[ "${msg_has_glob}" = yes ]
 	then
 		PASS "list rejected verbatim, no dispatch"
@@ -1073,19 +1072,17 @@ test_security_16() {
 	sched_rv=$?
 
 	# Only the job dispatched before the callback ran may have started
-	ran=
-	[ -f "${RAN_FILE}" ] && ran="$(tr '\n' ' ' < "${RAN_FILE}")"
-	ran="${ran% }"
+	read_flat --rm ran "${RAN_FILE}"
 
 	if [ "${sched_rv}" = 1 ] && [ "${ran}" = 'security_16_j1' ] && [ ! -e "${INJECT_FILE}" ]
 	then
-		rm -f "${MSG_FILE}" "${INJECT_FILE}" "${RAN_FILE}"
+		rm -f "${MSG_FILE}" "${INJECT_FILE}"
 		PASS "sched_rv=${sched_rv}, ran='${ran}', no injection"
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv} (want 1), ran='${ran}' (want 'security_16_j1'), injected=$([ -e "${INJECT_FILE}" ] && echo yes || echo no)"
 		[ -f "${MSG_FILE}" ] && cat "${MSG_FILE}" >&2
-		rm -f "${MSG_FILE}" "${INJECT_FILE}" "${RAN_FILE}"
+		rm -f "${MSG_FILE}" "${INJECT_FILE}"
 		return 1
 	fi
 }

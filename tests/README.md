@@ -55,7 +55,7 @@ Note: non-interference between concurrent scheduler instances is covered in two 
 
 Update the list below when changing, adding or removing cross-category shared helpers.
 
-Shared helpers in tests.sh: PASS/FAIL/SKIP, require_variant, print_test_header, `read_first_line [--rm] <out_var> <file>` (`--rm` consumes the file), is_uint, mk_name_of_len, done_handler, finalize_handler, do_job_default, verify_recorded_set, write_id_sets, NL, and for delayed signals `start_bg_killer <out_var> <pid> <secs> [sig]` (signal defaults to 9) / `stop_bg_killer <pid>`.
+Shared helpers in tests.sh: PASS/FAIL/SKIP, require_variant, print_test_header, `read_first_line [--rm] <out_var> <file>` and `read_flat [--rm] <out_var> <file>` (the latter joins all lines with single spaces, no trailing space; `--rm` consumes the file), is_uint, mk_name_of_len, done_handler, finalize_handler, do_job_default, verify_recorded_set, write_id_sets, NL, and for delayed signals `start_bg_killer <out_var> <pid> <secs> [sig]` (signal defaults to 9) / `stop_bg_killer <pid>`.
 
 ### Testing suite command line options
 

@@ -81,16 +81,12 @@ test_sched_env_01() {
 	wait "$!"
 	rv_masked=$?
 
-	recorded_rvs=
-	[ -f "${FINALIZE_RV_FILE}" ] &&
-		recorded_rvs="$(tr '\n' ' ' < "${FINALIZE_RV_FILE}")"
-
-	rm -f "${FINALIZE_RV_FILE}"
+	read_flat --rm recorded_rvs "${FINALIZE_RV_FILE}"
 
 	if [ "${rv_success}" = "${SCHED_ENV_01_FINALIZE_RV}" ] &&
 		[ "${rv_failure}" = "${SCHED_ENV_01_FINALIZE_RV}" ] &&
 		[ "${rv_masked}" = 0 ] &&
-		[ "${recorded_rvs}" = "0 81 81 " ]
+		[ "${recorded_rvs}" = "0 81 81" ]
 	then
 		PASS "success_rv=${rv_success}, failure_rv=${rv_failure}, masked_rv=${rv_masked}"
 		return 0
