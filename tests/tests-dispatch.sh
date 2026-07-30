@@ -10,42 +10,14 @@
 #
 # Helpers
 #
-
-parallel_job_enter() {
-	printf 'enter\n' >&8
-}
-
-parallel_job_leave() {
-	printf 'leave\n' >&8
-}
+# parallel_job_enter / parallel_job_leave / monitor_job_conc_fifo live in tests.sh -
+#   the abort category observes concurrency the same way.
 
 run_parallelism_test() {
 	do_job_parallel() {
 		parallel_job_enter
 		sleep 1
 		parallel_job_leave
-	}
-
-	monitor_parallel_fifo() {
-		local active=0 max_active=0 msg \
-			result_file="${1:?}"
-
-		while IFS= read -r msg; do
-			case "${msg}" in
-				enter)
-					active=$((active + 1))
-
-					[ "${active}" -gt "${max_active}" ] &&
-						max_active="${active}"
-				;;
-
-				leave)
-					active=$((active - 1))
-				;;
-			esac
-		done
-
-		printf '%s\n' "${max_active}" > "${result_file}"
 	}
 
 	local \
@@ -61,7 +33,7 @@ run_parallelism_test() {
 
 	print_test_header "${TEST_ID:?}" "${TEST_NAME:?}" "${TEST_JOBS:?}"
 
-	monitor_parallel_fifo "${result_file}" < "${fifo}" &
+	monitor_job_conc_fifo "${result_file}" < "${fifo}" &
 	monitor_pid=$!
 
 	exec 8>"${fifo}"
@@ -352,28 +324,6 @@ test_dispatch_06() {
 		parallel_job_leave
 	}
 
-	monitor_stress_fifo() {
-		local active=0 max_active=0 msg \
-			result_file="${1:?}"
-
-		while IFS= read -r msg; do
-			case "${msg}" in
-				enter)
-					active=$((active + 1))
-
-					[ "${active}" -gt "${max_active}" ] &&
-						max_active="${active}"
-				;;
-
-				leave)
-					active=$((active - 1))
-				;;
-			esac
-		done
-
-		printf '%s\n' "${max_active}" > "${result_file}"
-	}
-
 	local TEST_ID=dispatch_06
 	local \
 		sched_rv \
@@ -391,7 +341,7 @@ test_dispatch_06() {
 	rm -f "${fifo}" "${result_file}" &&
 	mkfifo "${fifo}" || return 1
 
-	monitor_stress_fifo "${result_file}" < "${fifo}" &
+	monitor_job_conc_fifo "${result_file}" < "${fifo}" &
 	monitor_pid=$!
 
 	exec 8>"${fifo}"

@@ -2,9 +2,11 @@
 
 Consists of tests.sh and the category-specific test files. tests.sh is the launcher/entry point, the other files are categorized libraries of tests.
 
-Categories: `dispatch`, `core`, `scheduler_termination`, `sched_env`, `params`, `params_full`, `params_mini`, `misc`, `outcome`, `timeout`, `job_termination`, `job_termination_full`, `job_termination_mini`, `security`
+Categories: `dispatch`, `core`, `scheduler_termination`, `sched_env`, `params`, `params_full`, `params_mini`, `misc`, `outcome`, `timeout`, `abort`, `job_termination`, `job_termination_full`, `job_termination_mini`, `security`
 
 Note: `sched_env` covers the scheduler's own environment configuration - `SCHED_*` and `*_CB` variables: which values are accepted or rejected, defaults, and empty/unset fallback. Behavior of per-job parameters belongs in the `params` categories even when a `SCHED_*` variable selects it (`SCHED_AUTO_PARAMS` gating is a `params_full` test, not a `sched_env` one).
+
+Note: `abort` covers `jobs_abort()` - which jobs it acts on, how they are classified, and how an abort interacts with dispatch capacity, per-job deadlines and late completion records. Its caller-process guard (rejecting calls from `DO_JOB_CB`, `SCHED_FINALIZE_CB`, `SCHED_FAIL_MSG_CB` or outside a run) is a `security` test, and the membership rules of the `SCHED_FINALIZE_CB` ID sets remain an `outcome` concern even when one of those sets is the aborted set. Unlike `params` and `job_termination`, `abort` has no separate `*_full` / `*_mini` files: its two variant-specific tests (whether an aborted-and-killed PID appears in `SCHED_FINALIZE_CB`'s running-PIDs argument, which differs between the variants) live in `tests-abort.sh` behind `require_variant` and report SKIP on the other variant.
 
 ### Scheduler variants
 

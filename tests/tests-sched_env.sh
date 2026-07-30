@@ -392,11 +392,9 @@ test_sched_env_08() {
 
 	scheduler_pid=$!
 
-	# The FIFO lives in the scheduler's per-run dir under the custom SCHED_DIR,
-	#   whose '.<n>' suffix is chosen at runtime; resolve it by a PID-scoped glob
+	# The FIFO lives in the scheduler's per-run dir under the custom SCHED_DIR
 	sleep 1
-	set -- "${custom_dir}"/sched_"${scheduler_pid}".*/ipc
-	sched_fifo="${1}"
+	sched_fifo_path sched_fifo "${scheduler_pid}" "${custom_dir}"
 
 	# Observe the FIFO exists in the custom dir while the job runs.
 	[ -p "${sched_fifo}" ] && fifo_in_dir=yes
@@ -557,4 +555,148 @@ test_sched_env_11() {
 	TEST_EXPECT_RV=81 \
 	TEST_SCHED_MAX_JOBS=1 \
 		run_generic_test
+}
+
+#
+# Helpers for the SCHED_FAIL_MSG_CB tests below
+#
+
+# SCHED_DISPATCH_TICK_CB producing exactly one scheduler failure message per
+#   dispatched job, from a public helper called with an invalid value.
+fail_msg_on_dispatch() {
+	job_set_timeout "${1}" 'not-a-uint'
+	return 0
+}
+
+# Verify the SCHED_FAIL_MSG_CB re-entry guard: a callback that itself fails into the
+#   scheduler's message path is entered once, the nested message goes to stderr with
+#   exactly one recursion warning, and the run still completes normally.
+test_sched_env_12() {
+	sched_env_12_fail_msg() {
+		record_fail_msg "${@}"
+		# Fail into the message path from inside the callback
+		job_set_timeout "${SE12_JOB:?}" 'not-a-uint'
+		return 0
+	}
+
+	local \
+		TEST_ID=sched_env_12 \
+		sched_rv sched_pid wd_pid msg_cnt warn_cnt \
+		checks_ok=1 \
+		SE12_JOB=ok1_se12 \
+		jobs='ok1_se12'
+
+	local \
+		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$" \
+		ERR_FILE="/tmp/sched.err.${TEST_ID:?}.$$"
+
+	rm -f "${MSG_FILE}" "${ERR_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Recursive SCHED_FAIL_MSG_CB is entered once and warns once" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=sched_env_12_fail_msg \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_DISPATCH_TICK_CB=fail_msg_on_dispatch \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=10 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${jobs}" 2>"${ERR_FILE}" &
+
+	sched_pid="${!}"
+	start_kill_watchdog wd_pid "${sched_pid}" 20
+
+	wait "${sched_pid}"
+	sched_rv=$?
+	stop_kill_watchdog "${wd_pid}"
+
+	count_msgs msg_cnt "${MSG_FILE}"
+	warn_cnt=0
+	[ -f "${ERR_FILE}" ] &&
+		warn_cnt="$(grep -cF 'Warning: stopping infinite SCHED_FAIL_MSG_CB recursion.' "${ERR_FILE}")"
+	rm -f "${MSG_FILE}" "${ERR_FILE}"
+
+	[ "${sched_rv}" = 0 ] ||
+		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	# The nested message must bypass the callback entirely
+	[ "${msg_cnt}" = 1 ] ||
+		{ checks_ok=; echo "SCHED_FAIL_MSG_CB invocations=${msg_cnt} (want 1)" >&2; }
+	[ "${warn_cnt}" = 1 ] ||
+		{ checks_ok=; echo "recursion warnings on stderr=${warn_cnt} (want 1)" >&2; }
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "sched_rv=${sched_rv}, cb_calls=${msg_cnt}, warnings=${warn_cnt}"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, cb_calls=${msg_cnt}, warnings=${warn_cnt}"
+		return 1
+	fi
+}
+
+# Verify SCHED_FAIL_MSG_CB runs in a subshell: a variable it assigns is not visible to
+#   the scheduler afterwards, and an exit inside it does not end the run.
+test_sched_env_13() {
+	sched_env_13_fail_msg() {
+		record_fail_msg "${@}"
+		SE13_ESCAPED=yes
+		exit 7
+	}
+	sched_env_13_finalize() {
+		finalize_handler "${1}" "${2}"
+		printf 'escaped=%s\n' "${SE13_ESCAPED-unset}" > "${FIN_FILE:?}"
+		return "${1}"
+	}
+
+	local \
+		TEST_ID=sched_env_13 \
+		sched_rv sched_pid wd_pid msg_cnt escaped \
+		checks_ok=1 \
+		jobs='ok1_se13'
+
+	local \
+		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$" \
+		FIN_FILE="/tmp/sched.fin.${TEST_ID:?}.$$"
+
+	rm -f "${MSG_FILE}" "${FIN_FILE}"
+	unset SE13_ESCAPED
+
+	print_test_header "${TEST_ID:?}" "SCHED_FAIL_MSG_CB side effects stay in its subshell" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=sched_env_13_fail_msg \
+	SCHED_FINALIZE_CB=sched_env_13_finalize \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_DISPATCH_TICK_CB=fail_msg_on_dispatch \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=10 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${jobs}" &
+
+	sched_pid="${!}"
+	start_kill_watchdog wd_pid "${sched_pid}" 20
+
+	wait "${sched_pid}"
+	sched_rv=$?
+	stop_kill_watchdog "${wd_pid}"
+
+	count_msgs msg_cnt "${MSG_FILE}"
+	read_first_line escaped "${FIN_FILE}" || escaped='<finalize never ran>'
+	rm -f "${MSG_FILE}" "${FIN_FILE}"
+
+	[ "${msg_cnt}" = 1 ] ||
+		{ checks_ok=; echo "SCHED_FAIL_MSG_CB invocations=${msg_cnt} (want 1)" >&2; }
+	# An escaping 'exit 7' would end the run before SCHED_FINALIZE_CB
+	[ "${sched_rv}" = 0 ] ||
+		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${escaped}" = 'escaped=unset' ] ||
+		{ checks_ok=; echo "finalize saw '${escaped}' (want 'escaped=unset')" >&2; }
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "sched_rv=${sched_rv}, cb_calls=${msg_cnt}, ${escaped}"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}, cb_calls=${msg_cnt}, ${escaped}"
+		return 1
+	fi
 }

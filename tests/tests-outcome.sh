@@ -4,30 +4,10 @@
 
 # tests-outcome.sh
 
-# Category: Job Outcome Classification (ok/fail/unfinished/undispatched/expired)
+# Category: Job Outcome Classification (ok/fail/unfinished/undispatched/expired/aborted)
 # This file is sourced by tests.sh; it defines test_N functions only.
 
-#
-# Helpers
-#
-
-verify_id_set() {
-	local \
-		vis_expected_var="${1:?}" \
-		vis_actual_var="${2:?}" \
-		vis_expected \
-		vis_actual
-
-	vis_expected="$(printf '%s\n' "${3//[ 	]/$'\n'}" | sed '/^$/d' | sort -u)"
-	vis_actual="$(printf '%s\n' "${4//[ 	]/$'\n'}" | sed '/^$/d' | sort -u)"
-
-	export -n \
-		"${vis_expected_var}=${vis_expected}" \
-		"${vis_actual_var}=${vis_actual}"
-
-	[ "${vis_expected}" = "${vis_actual}" ]
-}
-
+# verify_id_set / sets_finalize_handler live in tests.sh - the abort category uses them too.
 
 #
 # Tests
@@ -36,12 +16,6 @@ verify_id_set() {
 # Verify SCHED_FINALIZE_CB's ok/fail sets are correct on a normal completion
 #   with no timeout/undispatched/unfinished jobs involved.
 test_outcome_01() {
-	outcome_01_finalize_handler() {
-		finalize_handler "${1}" "${2}"
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-		return "${1}"
-	}
-
 	local \
 		TEST_ID=outcome_01 \
 		sched_rv \
@@ -55,7 +29,7 @@ test_outcome_01() {
 	print_test_header "${TEST_ID:?}" "SCHED_FINALIZE_CB ok/fail sets on normal completion" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_01_finalize_handler \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=3 \
@@ -97,12 +71,6 @@ test_outcome_01() {
 # Verify a job recorded as failed before an idle-timeout abort stays in the fail set,
 #   while a still-running job at abort time lands in unfinished, not fail.
 test_outcome_02() {
-	outcome_02_finalize_handler() {
-		finalize_handler "${1}" "${2}"
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-		return "${1}"
-	}
-
 	local \
 		TEST_ID=outcome_02 \
 		sched_rv \
@@ -116,7 +84,7 @@ test_outcome_02() {
 	print_test_header "${TEST_ID:?}" "Fail set survives idle-timeout abort; running job is unfinished, not failed" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_02_finalize_handler \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=3 \
@@ -166,12 +134,6 @@ test_outcome_03() {
 		[ "${1}" = first ] && { sleep 2 & wait "$!"; }
 	}
 
-	outcome_03_finalize_handler() {
-		finalize_handler "${1}" "${2}"
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-		return "${1}"
-	}
-
 	local \
 		TEST_ID=outcome_03 \
 		sched_rv \
@@ -188,7 +150,7 @@ test_outcome_03() {
 	print_test_header "${TEST_ID:?}" "Global timeout during initial dispatch: undispatched vs. unfinished" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_03_finalize_handler \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=outcome_03_do_job \
 	SCHED_DISPATCH_TICK_CB=outcome_03_dispatch_tick \
@@ -225,12 +187,6 @@ test_outcome_03() {
 # Verify SIGUSR1 abort: a job already completed before the signal stays ok,
 #   the still-running job lands in unfinished.
 test_outcome_04() {
-	outcome_04_finalize_handler() {
-		finalize_handler "${1}" "${2}"
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-		return "${1}"
-	}
-
 	local \
 		TEST_ID=outcome_04 \
 		sched_rv \
@@ -245,7 +201,7 @@ test_outcome_04() {
 	print_test_header "${TEST_ID:?}" "SIGUSR1 abort: completed job stays ok, running job is unfinished" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_04_finalize_handler \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
@@ -286,12 +242,6 @@ test_outcome_04() {
 #   still preserves an already-completed job's ok status;
 #   the malformed job itself is unfinished.
 test_outcome_05() {
-	outcome_05_finalize_handler() {
-		finalize_handler "${1}" "${2}"
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-		return "${1}"
-	}
-
 	local \
 		TEST_ID=outcome_05 \
 		sched_rv \
@@ -307,7 +257,7 @@ test_outcome_05() {
 	# SCHED_MAX_JOBS=1 forces sequential execution:
 	#   "ok" must fully complete and be recorded before "malformed" is even dispatched.
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_05_finalize_handler \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \
@@ -352,12 +302,6 @@ test_outcome_06() {
 		esac
 	}
 
-	outcome_06_finalize_handler() {
-		finalize_handler "${1}" "${2}"
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-		return "${1}"
-	}
-
 	local \
 		TEST_ID=outcome_06 \
 		sched_rv \
@@ -380,7 +324,7 @@ test_outcome_06() {
 	#   hang2 is still sleeping when SCHED_TIMEOUT_S hits, so it lands in unfinished;
 	#   hang1 never gets dispatched.
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_06_finalize_handler \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=outcome_06_do_job \
 	SCHED_MAX_JOBS=1 \
@@ -426,12 +370,6 @@ test_outcome_06() {
 
 # Verify an empty job list yields all five sets empty.
 test_outcome_07() {
-	outcome_07_finalize_handler() {
-		finalize_handler "${1}" "${2}"
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-		return "${1}"
-	}
-
 	local \
 		TEST_ID=outcome_07 \
 		sched_rv \
@@ -444,7 +382,7 @@ test_outcome_07() {
 	print_test_header "${TEST_ID:?}" "Empty job list yields all-empty ok/fail/unfinished/undispatched/expired sets" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_07_finalize_handler \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=3 \
@@ -483,12 +421,6 @@ test_outcome_07() {
 #   Bucket-agnostic: asserts the partition invariant,
 #   not which bucket each ID lands in (test_outcome_06 checks specific membership).
 test_outcome_08() {
-	outcome_08_finalize_handler() {
-		finalize_handler "${1}" "${2}"
-		write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}"
-		return "${1}"
-	}
-
 	local \
 		TEST_ID=outcome_08 \
 		sched_rv \
@@ -515,7 +447,7 @@ test_outcome_08() {
 	#   hang_1 is still running when SCHED_TIMEOUT_S fires (unfinished);
 	#   ok_2, ok_3 are never dispatched.
 	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=outcome_08_finalize_handler \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=1 \
@@ -550,6 +482,193 @@ test_outcome_08() {
 			"input union expected='${exp_union}'" \
 			"bucket union actual  ='${act_union}'" \
 			"ok='${ok_raw}' fail='${fail_raw}' unfinished='${unfinished_raw}' undispatched='${undispatched_raw}' expired='${expired_raw}'"
+		return 1
+	fi
+}
+
+# Verify the SCHED_FINALIZE_CB argument contract over two runs, one with an abort
+#   and one without: exactly 8 arguments both times, and argument 8 is the aborted
+#   set. With no aborts, only '${8+x}' separates an empty argument 8 from an absent
+#   one - '${8:+x}' is empty either way, so both are recorded.
+test_outcome_09() {
+	# SCHED_FINALIZE_CB recording the argument contract; passes the scheduler rv through
+	outcome_09_finalize() {
+		printf '%s\n' "${#}"    > "${ARG_PROBE_PREFIX:?}.argc"
+		printf '%s\n' "${8+x}"  > "${ARG_PROBE_PREFIX}.set8"
+		printf '%s\n' "${8:+x}" > "${ARG_PROBE_PREFIX}.nonempty8"
+		printf '%s\n' "${8}"    > "${ARG_PROBE_PREFIX}.arg8"
+
+		finalize_handler "${1}" "${2}"
+		return "${1}"
+	}
+
+	# JOB_DONE_CB aborting ${ABORT_ID} on its first invocation
+	outcome_09_done() {
+		done_handler "${1}" "${2}"
+
+		[ -n "${ABORT_FIRED}" ] && return 0
+		ABORT_FIRED=1
+
+		jobs_abort "${ABORT_ID:?}"
+	}
+
+	outcome_09_read() {
+		read_first_line argc "${ARG_PROBE_PREFIX:?}.argc"
+		read_first_line set8 "${ARG_PROBE_PREFIX}.set8"
+		read_first_line nonempty8 "${ARG_PROBE_PREFIX}.nonempty8"
+		read_first_line arg8 "${ARG_PROBE_PREFIX}.arg8"
+	}
+
+	# 1: pass label
+	# 2: expected argument 8
+	outcome_09_check() {
+		[ "${argc}" = 8 ] ||
+			{ checks_ok=; echo "${1}: \$#=${argc} (want 8)" >&2; }
+		# Set even when empty: the only signal that argument 8 was passed at all
+		[ "${set8}" = x ] ||
+			{ checks_ok=; echo "${1}: \${8+x}='${set8}' (want 'x' - argument 8 was not passed)" >&2; }
+		[ "${nonempty8}" = "${2:+x}" ] ||
+			{ checks_ok=; echo "${1}: \${8:+x}='${nonempty8}' (want '${2:+x}')" >&2; }
+		[ "${arg8}" = "${2}" ] ||
+			{ checks_ok=; echo "${1}: argument 8='${arg8}' (want '${2}')" >&2; }
+	}
+
+	local \
+		TEST_ID=outcome_09 \
+		sched_rv argc set8 nonempty8 arg8 \
+		checks_ok=1 \
+		ABORT_FIRED= \
+		ABORT_ID=ok5_outcome09b \
+		plain_jobs='instant_outcome09' \
+		abort_jobs='ok1_outcome09 ok5_outcome09b'
+
+	local ARG_PROBE_PREFIX="/tmp/sched.finargs.${TEST_ID:?}.$$"
+
+	rm -f "${ARG_PROBE_PREFIX}".*
+
+	print_test_header "${TEST_ID:?}" "SCHED_FINALIZE_CB gets exactly 8 arguments, the 8th being the aborted set" "${plain_jobs} / ${abort_jobs}"
+
+	# Pass 1: no aborts
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=outcome_09_finalize \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=10 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${plain_jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	outcome_09_read
+	rm -f "${ARG_PROBE_PREFIX}".*
+
+	[ "${sched_rv}" = 0 ] ||
+		{ checks_ok=; echo "no-abort run: sched_rv=${sched_rv} (want 0)" >&2; }
+	outcome_09_check 'no-abort run' ''
+
+	# Pass 2: ok1_outcome09 completes and aborts the still-running ok5_outcome09b
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=outcome_09_finalize \
+	JOB_DONE_CB=outcome_09_done \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+		schedule_jobs "${abort_jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	outcome_09_read
+	rm -f "${ARG_PROBE_PREFIX}".*
+
+	[ "${sched_rv}" = 0 ] ||
+		{ checks_ok=; echo "abort run: sched_rv=${sched_rv} (want 0)" >&2; }
+	outcome_09_check 'abort run' 'ok5_outcome09b'
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "argc=${argc}, arg8='${arg8}'"
+		return 0
+	else
+		FAIL "argc=${argc}, set8='${set8}', nonempty8='${nonempty8}', arg8='${arg8}'"
+		return 1
+	fi
+}
+
+# Verify the six outcome sets partition the job list over a single run producing
+#   all six outcomes: every job ID in exactly one set, no unlisted IDs, and every
+#   set non-empty so the run really did mix all six.
+test_outcome_10() {
+	# SCHED_DISPATCH_TICK_CB aborting the job it was just called for, when that
+	#   job is ${ABORT_ID}. The tick runs after dispatch, so the job is running.
+	outcome_10_tick() {
+		[ "${1}" = "${ABORT_ID:?}" ] || return 0
+
+		jobs_abort "${1}"
+	}
+
+	local \
+		TEST_ID=outcome_10 \
+		sched_rv name empty_sets= \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_aborted act_aborted \
+		checks_ok=1 \
+		ABORT_ID=ok5_outcome10 \
+		jobs='ok1_outcome10 fail_outcome10 ok5_outcome10 hang_outcome10x hang_outcome10 ok_outcome10a ok_outcome10b'
+
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
+
+	rm -f "${FINALIZE_SETS_PREFIX}".*
+
+	print_test_header "${TEST_ID:?}" "All six outcome sets partition the job list" "${jobs}"
+
+	job_set_timeout hang_outcome10x 1 || { FAIL "job_set_timeout failed"; return 1; }
+
+	# SCHED_MAX_JOBS=1 dispatches strictly in order, so each job is fully
+	#   classified before the next starts:
+	#   ok1_outcome10 -> ok; fail_outcome10 -> fail;
+	#   ok5_outcome10 aborted on its own dispatch tick, freeing its slot at once;
+	#   hang_outcome10x expires on its 1 s budget;
+	#   hang_outcome10 is still running when SCHED_TIMEOUT_S fires -> unfinished;
+	#   ok_outcome10a, ok_outcome10b are never dispatched.
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	SCHED_DISPATCH_TICK_CB=outcome_10_tick \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=8 \
+	SCHED_IDLE_TIMEOUT_S=30 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	rm -f "${FINALIZE_SETS_PREFIX}".*
+
+	for name in ok fail unfinished undispatched expired aborted; do
+		eval "[ -n \"\${${name}_raw}\" ]" ||
+			empty_sets="${empty_sets}${empty_sets:+ }${name}"
+	done
+
+	[ "${sched_rv}" = 82 ] ||
+		{ checks_ok=; echo "sched_rv=${sched_rv} (want 82)" >&2; }
+	verify_id_partition "${jobs}" ||
+		{ checks_ok=; echo "the six ID sets do not partition the ${TEST_ID} job IDs" >&2; }
+	[ -z "${empty_sets}" ] ||
+		{ checks_ok=; echo "empty set(s): ${empty_sets} - the run did not produce all six outcomes" >&2; }
+	verify_id_set exp_aborted act_aborted "${ABORT_ID}" "${aborted_raw}" ||
+		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', expired='${expired_raw}'"
+		return 0
+	else
+		FAIL "sched_rv=${sched_rv}"
+		print_id_sets >&2
 		return 1
 	fi
 }

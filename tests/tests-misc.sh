@@ -156,44 +156,62 @@ test_misc_03() {
 		sched_rv \
 		scheduler_pid \
 		sched_fifo \
-		jobs='instant_1 instant_2 instant_3'
+		sched_run_dir \
+		fifo_seen=no \
+		checks_ok=1 \
+		jobs='ok2_m03a ok2_m03b'
 
-	print_test_header "${TEST_ID:?}" "FIFO cleanup after successful completion" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Run dir and FIFO are removed after successful completion" "${jobs}"
 
+	# Jobs must outlive the observation below, so they are 2s each rather than instant
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
 	SCHED_MAX_JOBS=2 \
-	SCHED_TIMEOUT_S=3 \
-	SCHED_IDLE_TIMEOUT_S=2 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
 		schedule_jobs "${jobs}" &
 
 	scheduler_pid=$!
 
-	sched_fifo="/tmp/sched_ipc_${scheduler_pid}"
+	# Observe the FIFO while the jobs still run: without proof that the path once
+	#   existed, the post-run 'is it gone' checks would pass for any wrong path
+	sleep 1
+	sched_fifo_path sched_fifo "${scheduler_pid}"
+	sched_run_dir="${sched_fifo%/ipc}"
+	[ -p "${sched_fifo}" ] && fifo_seen=yes
 
 	wait "${scheduler_pid}"
 	sched_rv=$?
 
-	if [ "${sched_rv}" = 0 ] &&
-		[ ! -e "${sched_fifo}" ]
-	then
-		PASS "sched_rv=${sched_rv}"
+	[ "${sched_rv}" = 0 ] ||
+		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${fifo_seen}" = yes ] ||
+		{ checks_ok=; echo "FIFO not observed during the run at '${sched_fifo}'" >&2; }
+	[ ! -e "${sched_fifo}" ] ||
+		{ checks_ok=; echo "FIFO left behind: '${sched_fifo}'" >&2; }
+	[ ! -d "${sched_run_dir}" ] ||
+		{ checks_ok=; echo "run dir left behind: '${sched_run_dir}'" >&2; }
+
+	if [ -n "${checks_ok}" ]; then
+		PASS "sched_rv=${sched_rv}, FIFO observed during the run, then removed with its run dir"
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}, fifo_exists=$([ -e "${sched_fifo}" ] && echo yes || echo no)"
+		FAIL
 		return 1
 	fi
 }
 
-# Verify unexpected PID is rejected as an internal-consistency error
+# Verify a completion record naming a job that is not currently running
+#   is rejected as an internal-consistency error
 test_misc_04() {
 	misc_04_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
 	misc_04_do_job() {
-		# Forge a well-formed record with a PID that is not the running worker.
-		printf '%s %s %s\n' 999999999 0 "${1}" >&3
+		# Forge a well-formed record for a registered job that has not been dispatched yet.
+		# SCHED_MAX_JOBS=1 keeps pending_m04 undispatched while realjob_m04 runs.
+		printf '%s %s\n' 0 pending_m04 >&3
 		sleep 1
 		return 0
 	}
@@ -203,12 +221,12 @@ test_misc_04() {
 		sched_rv \
 		msg \
 		msg_ok \
-		jobs='realjob'
+		jobs='realjob_m04 pending_m04'
 
-	local MSG_FILE="/tmp/sched.unknownpid.msg.${TEST_ID}.$$"
+	local MSG_FILE="/tmp/sched.unexpectedrec.msg.${TEST_ID}.$$"
 	rm -f "${MSG_FILE}"
 
-	print_test_header "${TEST_ID:?}" "Completion record with an unknown PID is rejected" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Completion record for a job that is not running is rejected" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=misc_04_fail_msg \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -226,7 +244,7 @@ test_misc_04() {
 	rm -f "${MSG_FILE}"
 
 	case "${msg}" in
-		*"Unknown PID"*) msg_ok=1 ;;
+		*"Unexpected completion record"*) msg_ok=1 ;;
 		*) msg_ok= ;;
 	esac
 
@@ -235,7 +253,7 @@ test_misc_04() {
 		PASS "sched_rv=${sched_rv}, msg='${msg}'"
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}, msg='${msg}', expected rv=1 and an 'Unknown PID' error"
+		FAIL "sched_rv=${sched_rv}, msg='${msg}', expected rv=1 and an 'Unexpected completion record' error"
 		return 1
 	fi
 }

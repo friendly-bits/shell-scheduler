@@ -754,6 +754,7 @@ test_scheduler_termination_16() {
 		TEST_ID=scheduler_termination_16 \
 		sched_rv \
 		scheduler_pid \
+		sched_fifo \
 		jobs="ok5_1 ok5_2"
 
 	local MSGS_F="/tmp/sched.fifo_gone.msgs.${TEST_ID:?}.$$"
@@ -772,10 +773,10 @@ test_scheduler_termination_16() {
 
 	scheduler_pid=$!
 
-	# The FIFO lives in the scheduler's per-run dir under SCHED_DIR (/tmp),
-	#   whose '.<n>' suffix is chosen at runtime; match it by a PID-scoped glob
+	# The FIFO lives in the scheduler's per-run dir under SCHED_DIR (/tmp)
 	sleep 1
-	rm -f /tmp/sched_"${scheduler_pid}".*/ipc
+	sched_fifo_path sched_fifo "${scheduler_pid}"
+	rm -f "${sched_fifo}"
 
 	wait "${scheduler_pid}"
 	sched_rv=$?
@@ -895,6 +896,7 @@ test_scheduler_termination_18() {
 		TEST_ID=scheduler_termination_18 \
 		sched_rv \
 		scheduler_pid \
+		sched_fifo \
 		undispatched \
 		started_cnt \
 		checks_ok=1 \
@@ -921,10 +923,10 @@ test_scheduler_termination_18() {
 
 	scheduler_pid=$!
 
-	# The FIFO lives in the scheduler's per-run dir under SCHED_DIR (/tmp),
-	#   whose '.<n>' suffix is chosen at runtime; match it by a PID-scoped glob
+	# The FIFO lives in the scheduler's per-run dir under SCHED_DIR (/tmp)
 	sleep 1
-	rm -f /tmp/sched_"${scheduler_pid}".*/ipc
+	sched_fifo_path sched_fifo "${scheduler_pid}"
+	rm -f "${sched_fifo}"
 
 	wait "${scheduler_pid}"
 	sched_rv=$?

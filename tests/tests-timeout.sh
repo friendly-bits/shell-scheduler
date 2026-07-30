@@ -318,7 +318,7 @@ test_timeout_04() {
 test_timeout_05() {
 	timeout_05_done() {
 		[ "${2}" = 124 ] && [ -n "${3:-}" ] &&
-			printf '%s 0 %s\n' "${3}" "${1}" >&3
+			printf '0 %s\n' "${1}" >&3
 		printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"
 		return 0
 	}
@@ -890,6 +890,123 @@ test_timeout_14() {
 		return 0
 	else
 		FAIL "sched_rv=${sched_rv}, elapsed=${elapsed}s, expected rv 0 and 2<=elapsed<=4 (elapsed<2 means the deadline was anchored before dispatch or fired early)"
+		return 1
+	fi
+}
+
+# Verify abort and expiry cannot both claim the same job. Two passes put the abort
+#   on either side of the deadline sweep - one from the dispatch tick at the very
+#   moment the deadline falls due, one from the completion callback the sweep itself
+#   invokes. Neither pass assumes a winner: each asserts only that the job is
+#   classified in exactly one of expired/aborted, that the six sets still partition
+#   the job list, and that the running-job counter stays sound.
+test_timeout_15() {
+	# SCHED_DISPATCH_TICK_CB: on the target's dispatch, sleep until its deadline
+	#   falls due, then abort it - the sweep has had no chance to run yet
+	to15_tick_abort() {
+		[ "${1}" = "${TO15_TARGET:?}" ] || return 0
+
+		# Forked sleep: an in-process NOFORK builtin sleep can be cut short by SIGCHLD
+		sleep "${TO15_DEADLINE_S:?}" & wait "$!"
+
+		jobs_abort "${1}"
+	}
+
+	# JOB_DONE_CB: abort the target, reached only once the sweep has classified it
+	to15_done_abort() {
+		done_handler "${1}" "${2}"
+
+		jobs_abort "${TO15_TARGET:?}"
+	}
+
+	# Run one pass and check the winner-agnostic invariants. Appends the winning
+	#   side to ${winners}. Returns 0 only if every check passed.
+	# 1: pass label
+	# 2: target job ID, given the deadline
+	# 3: second job ID, expected in ok
+	# 4: SCHED_DISPATCH_TICK_CB (may be empty)
+	# 5: JOB_DONE_CB
+	to15_pass() {
+		# TO15_TARGET is the target under the fixed name the two callbacks read
+		local \
+			label="${1:?}" target="${2:?}" other="${3:?}" tick_cb="${4}" done_cb="${5:?}" \
+			sched_rv exp_ok act_ok hits=0 winner=neither pass_ok=1 \
+			ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+			TO15_TARGET="${2}"
+
+		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}"
+
+		job_set_timeout "${target}" "${TO15_DEADLINE_S:?}" ||
+			{ echo "${label}: job_set_timeout failed" >&2; return 1; }
+
+		SCHED_FAIL_MSG_CB=record_fail_msg \
+		SCHED_FINALIZE_CB=sets_finalize_handler \
+		SCHED_DISPATCH_TICK_CB="${tick_cb}" \
+		JOB_DONE_CB="${done_cb}" \
+		DO_JOB_CB=do_job_default \
+		SCHED_MAX_JOBS=1 \
+		SCHED_TIMEOUT_S=20 \
+		SCHED_IDLE_TIMEOUT_S=15 \
+			schedule_jobs "${target} ${other}" &
+
+		wait "$!"
+		sched_rv=$?
+
+		read_id_sets "${FINALIZE_SETS_PREFIX}"
+
+		case " ${expired_raw} " in *" ${target} "*) hits=$((hits + 1)); winner=expired ;; esac
+		case " ${aborted_raw} " in *" ${target} "*) hits=$((hits + 1)); winner=aborted ;; esac
+		winners="${winners}${winners:+ }${label}=${winner}"
+
+		[ "${hits}" = 1 ] ||
+			{ pass_ok=; echo "${label}: '${target}' is in ${hits} of {expired, aborted} (want exactly 1)" >&2; }
+		case " ${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw} " in
+			*" ${target} "*)
+				pass_ok=; echo "${label}: '${target}' also in ok/fail/unfinished/undispatched" >&2
+			;;
+		esac
+		# The run must have outlived the target's deadline
+		verify_id_set exp_ok act_ok "${other}" "${ok_raw}" ||
+			{ pass_ok=; echo "${label}: ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
+		verify_id_partition "${target} ${other}" ||
+			{ pass_ok=; echo "${label}: the six ID sets do not partition '${target} ${other}'" >&2; }
+		[ "${sched_rv}" = 0 ] ||
+			{ pass_ok=; echo "${label}: sched_rv=${sched_rv} (want 0)" >&2; }
+		msgs_have "${MSG_FILE}" 'Not all jobs are done' &&
+			{ pass_ok=; echo "${label}: running-job counter left unsound" >&2; }
+
+		[ -n "${pass_ok}" ] || print_id_sets >&2
+		rm -f "${FINALIZE_SETS_PREFIX}".* "${MSG_FILE}"
+
+		[ -n "${pass_ok}" ]
+	}
+
+	local \
+		TEST_ID=timeout_15 \
+		winners= \
+		passes_ok=0 \
+		TO15_DEADLINE_S=2 \
+		jobs='hang_to15a ok2_to15a / hang_to15b ok2_to15b'
+
+	local \
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
+
+	print_test_header "${TEST_ID:?}" "Abort racing expiry on the same job classifies it exactly once" "${jobs}"
+
+	# SCHED_MAX_JOBS=1 throughout: the target holds the only slot, and the second
+	#   job only runs once the target has left it, keeping the run alive past the
+	#   target's original deadline.
+	to15_pass 'abort at the deadline' hang_to15a ok2_to15a to15_tick_abort done_handler &&
+		passes_ok=$((passes_ok + 1))
+	to15_pass 'abort after the sweep' hang_to15b ok2_to15b '' to15_done_abort &&
+		passes_ok=$((passes_ok + 1))
+
+	if [ "${passes_ok}" = 2 ]; then
+		PASS "winners: ${winners}"
+		return 0
+	else
+		FAIL "${passes_ok}/2 passes clean, winners: ${winners}"
 		return 1
 	fi
 }

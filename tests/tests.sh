@@ -10,7 +10,7 @@
 # 'run <category>' - run all tests in the given category
 # 'run <category> <space_separated_list_of_numbers>' - e.g. 'run params 1 3 5'
 # 'run <category> <test_num_start>-<test_num_end>' - run tests in a range, e.g. 'run scheduler_termination 3-6'
-# Categories: dispatch, core, scheduler_termination, sched_env, params, params_full, params_mini, misc, outcome, timeout, job_termination, job_termination_full, job_termination_mini, security
+# Categories: dispatch, core, scheduler_termination, sched_env, params, params_full, params_mini, misc, outcome, timeout, abort, job_termination, job_termination_full, job_termination_mini, security
 #
 # Variant selection (env var SCHEDULER_VARIANT): 'full' (default, scheduler.sh) or
 #   'mini' (scheduler-mini.sh). The *_full / *_mini categories hold tests specific
@@ -168,10 +168,29 @@ verify_recorded_set() {
 # 2: out var for normalized actual
 # 3: expected list (raw)
 # 4: actual list (raw)
+verify_id_set() {
+	local \
+		vis_expected_var="${1:?}" \
+		vis_actual_var="${2:?}" \
+		vis_expected \
+		vis_actual
+
+	vis_expected="$(printf '%s\n' "${3//[ 	]/$'\n'}" | sed '/^$/d' | sort -u)"
+	vis_actual="$(printf '%s\n' "${4//[ 	]/$'\n'}" | sed '/^$/d' | sort -u)"
+
+	export -n \
+		"${vis_expected_var}=${vis_expected}" \
+		"${vis_actual_var}=${vis_actual}"
+
+	[ "${vis_expected}" = "${vis_actual}" ]
+}
 
 # Write each whitespace-separated ID-set arg to its own file at "${1}.<suffix>".
+# Every file is written even when the set is empty, so a reader cannot mistake
+#   'callback never ran' for 'set was empty'.
 # 1: file prefix
 # 2: ok_ids  3: fail_ids  4: unfinished_ids  5: undispatched_ids  6: expired_ids
+# 7: aborted_ids
 write_id_sets() {
 	local wis_prefix="${1:?}"
 
@@ -180,6 +199,192 @@ write_id_sets() {
 	printf '%s\n' "${4}" > "${wis_prefix}.unfinished"
 	printf '%s\n' "${5}" > "${wis_prefix}.undispatched"
 	printf '%s\n' "${6}" > "${wis_prefix}.expired"
+	printf '%s\n' "${7}" > "${wis_prefix}.aborted"
+}
+
+# SCHED_FINALIZE_CB that records every ID set and passes the scheduler rv through.
+# Reads ${FINALIZE_SETS_PREFIX} from the calling test's scope.
+sets_finalize_handler() {
+	finalize_handler "${1}" "${2}"
+	write_id_sets "${FINALIZE_SETS_PREFIX:?}" "${3}" "${4}" "${5}" "${6}" "${7}" "${8}"
+	return "${1}"
+}
+
+# Read the six ID-set files written by write_id_sets into fixed var names:
+#   ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw
+# The caller must declare all six local.
+# 1: file prefix
+read_id_sets() {
+	local ris_prefix="${1:?}"
+
+	read_first_line ok_raw "${ris_prefix}.ok"
+	read_first_line fail_raw "${ris_prefix}.fail"
+	read_first_line unfinished_raw "${ris_prefix}.unfinished"
+	read_first_line undispatched_raw "${ris_prefix}.undispatched"
+	read_first_line expired_raw "${ris_prefix}.expired"
+	read_first_line aborted_raw "${ris_prefix}.aborted"
+}
+
+# Print the six sets read by read_id_sets, one per line, for a FAIL diagnostic.
+print_id_sets() {
+	printf '%s\n' \
+		"ok='${ok_raw}'" \
+		"fail='${fail_raw}'" \
+		"unfinished='${unfinished_raw}'" \
+		"undispatched='${undispatched_raw}'" \
+		"expired='${expired_raw}'" \
+		"aborted='${aborted_raw}'"
+}
+
+# Verify the six sets read by read_id_sets partition the given IDs: every ID in
+#   exactly one set, and no set holding an ID outside the list.
+# Prints one diagnostic line per offending ID to stderr.
+# 1: whitespace-separated list of every job ID in the run
+verify_id_partition() {
+	local \
+		vip_all="${1:?}" \
+		vip_names='ok fail unfinished undispatched expired aborted' \
+		vip_id vip_name vip_set vip_in vip_hits vip_had_f \
+		vip_ok=0 vip_total=0 vip_extra=0
+
+	case "${-}" in *f*) vip_had_f=1 ;; esac
+	set -f
+
+	for vip_id in ${vip_all}; do
+		vip_total=$((vip_total + 1))
+		vip_in=
+		vip_hits=0
+
+		for vip_name in ${vip_names}; do
+			eval "vip_set=\${${vip_name}_raw}"
+
+			case " ${vip_set} " in
+				*" ${vip_id} "*)
+					vip_hits=$((vip_hits + 1))
+					vip_in="${vip_in}${vip_in:+,}${vip_name}"
+				;;
+			esac
+		done
+
+		if [ "${vip_hits}" = 1 ]; then
+			vip_ok=$((vip_ok + 1))
+		else
+			printf "partition: id '%s' in %s set(s): %s\n" \
+				"${vip_id}" "${vip_hits}" "${vip_in:-none}" >&2
+		fi
+	done
+
+	for vip_name in ${vip_names}; do
+		eval "vip_set=\${${vip_name}_raw}"
+
+		for vip_id in ${vip_set}; do
+			case " ${vip_all} " in
+				*" ${vip_id} "*) ;;
+				*)
+					vip_extra=$((vip_extra + 1))
+					printf "partition: unlisted id '%s' in %s\n" "${vip_id}" "${vip_name}" >&2
+				;;
+			esac
+		done
+	done
+
+	[ -n "${vip_had_f}" ] || set +f
+
+	[ "${vip_ok}" = "${vip_total}" ] && [ "${vip_extra}" = 0 ]
+}
+
+# SCHED_FAIL_MSG_CB that appends one line to ${MSG_FILE} per invocation, so a
+#   line count is a message count. IFS is pinned because the suite's default
+#   starts with a tab, which would otherwise join a multi-argument message.
+record_fail_msg() {
+	local IFS=' '
+
+	printf '%s\n' "${*}" >> "${MSG_FILE:?}"
+}
+
+# Set the out var to the number of messages recorded by record_fail_msg
+#   (0 when the file is absent).
+# 1: out var
+# 2: message file
+count_msgs() {
+	local cm_out="${1:?}" cm_file="${2:?}" cm_cnt=0
+
+	[ -f "${cm_file}" ] && cm_cnt="$(sed '/^$/d' "${cm_file}" | wc -l)"
+
+	export -n "${cm_out}=${cm_cnt}"
+}
+
+# Return 0 if any recorded message contains the substring, which is matched
+#   literally even if it holds glob characters.
+# 1: message file
+# 2: substring
+msgs_have() {
+	local mh_file="${1:?}" mh_want="${2:?}" mh_line
+
+	[ -f "${mh_file}" ] || return 1
+
+	while IFS= read -r mh_line; do
+		case "${mh_line}" in
+			*"${mh_want}"*) return 0 ;;
+		esac
+	done < "${mh_file}"
+
+	return 1
+}
+
+# DO_JOB_CB where only the job whose ID is ${SPOOF_FROM_ID} forges a completion
+#   record for another job on fd 3; every other job runs do_job_default unchanged.
+# Reads ${SPOOF_DONE_ID} for the forged job ID, and ${SPOOF_DONE_RV} for the
+#   forged rv (default 0).
+spoof_done_job_from() {
+	[ "${1}" = "${SPOOF_FROM_ID:?}" ] &&
+		printf '%s %s\n' "${SPOOF_DONE_RV:-0}" "${SPOOF_DONE_ID:?}" >&3
+
+	do_job_default "${@}"
+}
+
+# Record the number of concurrently running jobs on fd 8, which the caller
+#   connects to a monitor_job_conc_fifo reader.
+parallel_job_enter() {
+	printf 'enter\n' >&8
+}
+
+parallel_job_leave() {
+	printf 'leave\n' >&8
+}
+
+# Read enter/leave events until EOF, then write the peak concurrent count to a file.
+# 1: result file
+monitor_job_conc_fifo() {
+	local mjc_active=0 mjc_max=0 mjc_msg mjc_result_file="${1:?}"
+
+	while IFS= read -r mjc_msg; do
+		case "${mjc_msg}" in
+			enter)
+				mjc_active=$((mjc_active + 1))
+				[ "${mjc_active}" -gt "${mjc_max}" ] && mjc_max="${mjc_active}"
+			;;
+			leave) mjc_active=$((mjc_active - 1)) ;;
+		esac
+	done
+
+	printf '%s\n' "${mjc_max}" > "${mjc_result_file}"
+}
+
+# Kill <pid> after <secs> if it is still running, so a runaway callback fails the
+#   test instead of hanging the runner.
+# 1: out var for the watchdog pid
+# 2: pid to kill
+# 3: seconds to wait first
+start_kill_watchdog() {
+	( sleep "${3:?}"; kill -9 "${2:?}" 2>/dev/null ) &
+	export -n "${1:?}=${!}"
+}
+
+# 1: watchdog pid from start_kill_watchdog
+stop_kill_watchdog() {
+	kill "${1:?}" 2>/dev/null
+	wait "${1}" 2>/dev/null
 }
 
 done_handler() {
@@ -365,6 +570,22 @@ get_test_pid() {
 	export -n "${1}=${__pid}"
 }
 
+# Resolve the scheduler's per-run FIFO path.
+# The run dir is '<SCHED_DIR>/sched_<scheduler UID>.<n>': the UID carries a start-time
+#   suffix and the '.<n>' is picked at runtime, so match it by a PID-scoped glob.
+# The trailing '_' after the PID anchors the match, so PID 123 cannot match PID 1234.
+# On no match the out var holds the unexpanded pattern, which fails '[ -p ]' and is a
+#   harmless 'rm -f' target.
+# 1: out var
+# 2: scheduler PID
+# 3: SCHED_DIR (default /tmp)
+sched_fifo_path() {
+	local sfp_out="${1:?}" sfp_pid="${2:?}" sfp_dir="${3:-/tmp}"
+
+	set -- "${sfp_dir}"/sched_"${sfp_pid}"_*.*/ipc
+	export -n "${sfp_out}=${1}"
+}
+
 run_generic_test() {
 	local sched_rv
 
@@ -405,6 +626,7 @@ run_generic_test() {
 . "${script_dir}/tests-misc.sh"
 . "${script_dir}/tests-outcome.sh"
 . "${script_dir}/tests-timeout.sh"
+. "${script_dir}/tests-abort.sh"
 . "${script_dir}/tests-job_termination.sh"
 . "${script_dir}/tests-job_termination_full.sh"
 . "${script_dir}/tests-job_termination_mini.sh"
@@ -417,7 +639,7 @@ run_generic_test() {
 # Category registry
 #
 
-TEST_CATEGORIES="dispatch core scheduler_termination sched_env params params_full params_mini misc outcome timeout job_termination job_termination_full job_termination_mini security"
+TEST_CATEGORIES="dispatch core scheduler_termination sched_env params params_full params_mini misc outcome timeout abort job_termination job_termination_full job_termination_mini security"
 
 is_valid_cat() {
 	case " ${TEST_CATEGORIES} " in
