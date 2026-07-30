@@ -19,6 +19,8 @@
 ### Verified facts
 - tests.sh auto-discovers tests by scanning each `tests-<category>.sh` for `test_<category>_NN()` functions (NN two digits), so a new test only needs a correctly-named function. `do_job_default` selects a job's behavior from its ID prefix (text before the first `_`): e.g. `instant`=sleep 0, `ok`/`ok1`=1s, `ok2`=2s, `ok5`=5s, `hang`=30s, `fail`=1s then return 17 (also `crash`, `malformed`); name jobs accordingly to reuse it as `DO_JOB_CB`.
 - A test function returns 0=pass, 1=fail, 2=skip; the runner counts anything else as a fail. A helper failure that only prints to stderr and falls through will still report PASS.
+- `DEFAULT_IFS` starts with a tab, so `"$*"` in a callback joins its arguments with tabs, not spaces. A helper that must produce a space-joined line needs `local IFS=' '`.
+- An aborted job leaves the running-jobs count immediately, so the scheduler can finish and exit before that job's own completion record arrives. A test that needs to observe the late record must keep a separate, longer-running job alive.
 - schedule_jobs()'s capacity-wait while loop only calls process_done_record() until running_jobs_cnt drops below SCHED_MAX_JOBS — it drains exactly one completion, not all pending ones. A second already-finished job can stay unread in the FIFO. To get multiple jobs fully classified (OK/FAIL) before a later timeout/abort, use SCHED_MAX_JOBS=1 for strict sequential dispatch instead of relying on this loop to drain everything.
 
 ### Test categories
@@ -46,7 +48,7 @@ Note: `job_termination` covers the modular job termination feature (`JOB_TERM_CB
 
 The core-contract tests (and the PPID-walk mechanism, which needs only `/proc` and `awk`) run everywhere.
 
-Note: non-interference between concurrent scheduler instances is covered in two places - `core` verifies two instances sharing one `SCHED_DIR` do not cross-talk or leave residue, and `job_termination_full` verifies a cgroup base collision with a same-PID sibling is avoided (this second one is cgroup-gated as above).
+Note: non-interference between concurrent scheduler instances is covered in two places - `core` verifies two concurrent instances do not cross-talk or leave residue, and `job_termination_full` verifies a cgroup base collision with a same-PID sibling is avoided (this second one is cgroup-gated as above).
 
 ### Shared test helpers
 

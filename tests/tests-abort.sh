@@ -32,7 +32,7 @@ abort_on_first_cb() {
 # A no-op when the ID is not live, so every dispatched job leaves at most once.
 # Runs in the scheduler's main process, so the assignment persists across calls.
 ab08_retire() {
-	local ab_id ab_new= ab_hit=
+	local ab_id ab_new='' ab_hit=
 
 	for ab_id in ${AB08_LIVE}; do
 		if [ -z "${ab_hit}" ] && [ "${ab_id}" = "${1}" ]; then

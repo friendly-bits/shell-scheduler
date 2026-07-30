@@ -315,10 +315,9 @@ test_core_06() {
 	fi
 }
 
-# Two scheduler instances run concurrently under a SHARED SCHED_DIR with disjoint job sets.
-# Each must finish with rv 0 and report exactly its own jobs in the ok bucket -
-#   no cross-instance leakage through the shared FIFO directory -
-#   and both per-run dirs must be cleaned up, leaving no residue.
+# Two scheduler instances run concurrently with disjoint job sets, sharing /tmp for their
+#   per-run FIFO dirs. Each must finish with rv 0 and report exactly its own jobs in the ok
+#   bucket - no cross-instance leakage - and both per-run dirs must be cleaned up.
 # Guards non-interference between simultaneous instances on a shared volume.
 # Runs in any environment.
 test_core_07() {
@@ -354,15 +353,13 @@ test_core_07() {
 		jobs_b='ok_b1 ok_b2'
 
 	local \
-		SHARED_DIR="/tmp/sched.concurrency.${TEST_ID}.$$" \
 		REC_A="/tmp/sched.concurrency.reca.${TEST_ID}.$$" \
 		REC_B="/tmp/sched.concurrency.recb.${TEST_ID}.$$"
-	rm -rf "${SHARED_DIR}"; rm -f "${REC_A}" "${REC_B}"
+	rm -f "${REC_A}" "${REC_B}"
 
-	print_test_header "${TEST_ID}" "Two instances share SCHED_DIR without interfering" "${jobs_a} | ${jobs_b}"
+	print_test_header "${TEST_ID}" "Two concurrent instances do not interfere" "${jobs_a} | ${jobs_b}"
 
 	CORE07_REC="${REC_A}" \
-	SCHED_DIR="${SHARED_DIR}" \
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=core_07_finalize \
 	DO_JOB_CB=do_job_default \
@@ -373,7 +370,6 @@ test_core_07() {
 	pid_a=$!
 
 	CORE07_REC="${REC_B}" \
-	SCHED_DIR="${SHARED_DIR}" \
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=core_07_finalize \
 	DO_JOB_CB=do_job_default \
@@ -407,11 +403,12 @@ test_core_07() {
 		*) checks_pass=$((checks_pass + 1))
 	esac
 
-	# Both per-run dirs cleaned up: no leftover under the shared dir
-	set -- "${SHARED_DIR}"/sched_*
-	[ ! -e "${1}" ] && checks_pass=$((checks_pass + 1)) || echo "leftover run dir(s): $*"
+	# Both per-run dirs cleaned up. PID-scoped: /tmp also holds unrelated runs
+	set -- /tmp/sched_"${pid_a}"_*.* /tmp/sched_"${pid_b}"_*.*
+	[ ! -e "${1}" ] && [ ! -e "${2}" ] &&
+		checks_pass=$((checks_pass + 1)) || echo "leftover run dir(s): $*"
 
-	rm -rf "${SHARED_DIR}"; rm -f "${REC_A}" "${REC_B}"
+	rm -f "${REC_A}" "${REC_B}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "both rv 0, ok sets correct and disjoint, run dirs cleaned"

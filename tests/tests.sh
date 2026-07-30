@@ -364,7 +364,7 @@ msgs_have() {
 #   forged rv (default 0).
 spoof_done_job_from() {
 	[ "${1}" = "${SPOOF_FROM_ID:?}" ] &&
-		printf '%s %s\n' "${SPOOF_DONE_RV:-0}" "${SPOOF_DONE_ID:?}" >&3
+		printf '\002%s %s\003\n' "${SPOOF_DONE_RV:-0}" "${SPOOF_DONE_ID:?}" >&3
 
 	do_job_default "${@}"
 }
@@ -598,18 +598,18 @@ get_test_pid() {
 }
 
 # Resolve the scheduler's per-run FIFO path.
-# The run dir is '<SCHED_DIR>/sched_<scheduler UID>.<n>': the UID carries a start-time
+# The run dir is '/tmp/sched_<scheduler UID>.<n>': the UID carries a start-time
 #   suffix and the '.<n>' is picked at runtime, so match it by a PID-scoped glob.
 # The trailing '_' after the PID anchors the match, so PID 123 cannot match PID 1234.
 # On no match the out var holds the unexpanded pattern, which fails '[ -p ]' and is a
 #   harmless 'rm -f' target.
+# Only for a run with no ${SCHED_FIFO}: with one, the caller already knows the path.
 # 1: out var
 # 2: scheduler PID
-# 3: SCHED_DIR (default /tmp)
 sched_fifo_path() {
-	local sfp_out="${1:?}" sfp_pid="${2:?}" sfp_dir="${3:-/tmp}"
+	local sfp_out="${1:?}" sfp_pid="${2:?}"
 
-	set -- "${sfp_dir}"/sched_"${sfp_pid}"_*.*/ipc
+	set -- /tmp/sched_"${sfp_pid}"_*.*/ipc
 	export -n "${sfp_out}=${1}"
 }
 

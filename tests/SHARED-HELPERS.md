@@ -26,7 +26,7 @@ Shared helpers in tests.sh:
 - `monitor_job_conc_fifo <result_file>` - read those events from stdin until EOF, then write the peak concurrent count to the file.
 - `start_bg_killer <out_var> <pid> <secs> [<sig>]` (signal defaults to 9) / `stop_bg_killer <killer_pid>` - for delayed signals.
 - `get_test_pid <out_var>` - PID of the calling process, read from `/proc/self/status`.
-- `sched_fifo_path <out_var> <sched_pid> [<sched_dir>]` (dir defaults to `/tmp`) - the scheduler's per-run FIFO path, matched by a PID-scoped glob.
+- `sched_fifo_path <out_var> <sched_pid>` - the scheduler's per-run FIFO path under `/tmp`, matched by a PID-scoped glob. Only for runs with no `SCHED_FIFO`.
 - `run_generic_test` - run one pass and check only the rv; reads `${TEST_ID}`, `${TEST_NAME}`, `${TEST_JOBS}`, `${TEST_SCHED_MAX_JOBS}`, `${TEST_EXPECT_RV}` and optionally `${SCHED_TIMEOUT_S}` (default 3) from the caller's scope.
 - `ap_record <output_file> <param_var_name>` / `ap_probe_job` / `ap_probe_done` / `ap_run_variants <job_id> <expected_record> <auto_params_values>` - auto-delivered param probes shared by the `params_full` / `params_mini` categories; the callers set `${AP_PARAM_VAR}`, `${AP_JOB_FILE}`, `${AP_DONE_FILE}` and must leave the param variable itself undeclared. `<expected_record>` is `unset` or `set:<value>`; `<auto_params_values>` is the list of `SCHED_AUTO_PARAMS` values to run, or the literal `__UNSET__`.
 - Full variant only: `jt_mech_capable cgroup|children|ppid|auto` - probe a job-termination mechanism quietly, without `sched_use_job_term`'s `${JOB_TERM_CB}` side effect.

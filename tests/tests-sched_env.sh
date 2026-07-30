@@ -356,26 +356,26 @@ test_sched_env_07() {
 	fi
 }
 
-# Verify SCHED_DIR: a custom directory (with a trailing slash)
-#   is used for the FIFO and cleaned up afterward,
-#   and a directory that normalizes to empty is rejected before any job starts.
+# Verify SCHED_FIFO: the FIFO is created at exactly that path and removed afterward,
+#   a value with a trailing slash is rejected, and an already existing path is not reused.
 test_sched_env_08() {
 	local \
 		TEST_ID=sched_env_08 \
 		sched_rv \
 		bad_rv \
+		busy_rv \
 		scheduler_pid \
-		sched_fifo \
-		fifo_in_dir=no \
-		custom_dir \
+		custom_fifo \
+		fifo_at_path=no \
+		fifo_left=yes \
 		jobs='ok2'
 
-	custom_dir="/tmp/sched.customdir.${TEST_ID}.$$"
-	rm -rf "${custom_dir}"
+	custom_fifo="/tmp/sched.customfifo.${TEST_ID}.$$"
+	rm -f "${custom_fifo}"
 
-	print_test_header "${TEST_ID:?}" "SCHED_DIR: custom dir used and cleaned up; empty-normalized dir rejected" "${jobs}"
+	print_test_header "${TEST_ID:?}" "SCHED_FIFO: exact path used and cleaned up; trailing slash and existing path rejected" "${jobs}"
 
-	# Sub-check 1: custom SCHED_DIR with a trailing slash.
+	# Sub-check 1: the FIFO is created at the given path, not under /tmp/sched_*
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
@@ -383,22 +383,21 @@ test_sched_env_08() {
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=15 \
 	SCHED_IDLE_TIMEOUT_S=10 \
-	SCHED_DIR="${custom_dir}/" \
+	SCHED_FIFO="${custom_fifo}" \
 		schedule_jobs "${jobs}" &
 
 	scheduler_pid=$!
 
-	# The FIFO lives in the scheduler's per-run dir under the custom SCHED_DIR
 	sleep 1
-	sched_fifo_path sched_fifo "${scheduler_pid}" "${custom_dir}"
-
-	# Observe the FIFO exists in the custom dir while the job runs.
-	[ -p "${sched_fifo}" ] && fifo_in_dir=yes
+	[ -p "${custom_fifo}" ] && fifo_at_path=yes
 
 	wait "${scheduler_pid}"
 	sched_rv=$?
 
-	# Sub-check 2: SCHED_DIR='///' -> empty after trailing-slash strip -> rejected.
+	# Captured before sub-check 3 re-creates the path
+	[ -e "${custom_fifo}" ] || fifo_left=no
+
+	# Sub-check 2: trailing slash -> rejected
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
@@ -406,22 +405,38 @@ test_sched_env_08() {
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=3 \
-	SCHED_DIR='///' \
+	SCHED_FIFO="${custom_fifo}/" \
 		schedule_jobs 'ok_1' &
 	wait "$!"
 	bad_rv=$?
 
+	# Sub-check 3: a leftover FIFO is not reused
+	rm -f "${custom_fifo}"
+	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=3 \
+	SCHED_FIFO="${custom_fifo}" \
+		schedule_jobs 'ok_1' &
+	wait "$!"
+	busy_rv=$?
+	rm -f "${custom_fifo}"
+
 	if [ "${sched_rv}" = 0 ] &&
-		[ "${fifo_in_dir}" = yes ] &&
-		[ ! -e "${sched_fifo}" ] &&
-		[ "${bad_rv}" = 1 ]
+		[ "${fifo_at_path}" = yes ] &&
+		[ "${fifo_left}" = no ] &&
+		[ "${bad_rv}" = 1 ] &&
+		[ "${busy_rv}" = 1 ]
 	then
-		rm -rf "${custom_dir}"
-		PASS "fifo_in_dir=${fifo_in_dir}, sched_rv=${sched_rv}, bad_rv=${bad_rv}"
+		PASS "fifo_at_path=${fifo_at_path}, sched_rv=${sched_rv}, bad_rv=${bad_rv}, busy_rv=${busy_rv}"
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}, fifo_in_dir=${fifo_in_dir}, fifo_left=$([ -e "${sched_fifo}" ] && echo yes || echo no), bad_rv=${bad_rv}"
-		rm -rf "${custom_dir}"
+		FAIL "sched_rv=${sched_rv}, fifo_at_path=${fifo_at_path}, fifo_left=${fifo_left}, bad_rv=${bad_rv}, busy_rv=${busy_rv}"
 		return 1
 	fi
 }

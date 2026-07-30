@@ -160,7 +160,7 @@ test_security_02() {
 	}
 
 	security_02_do_job() {
-		printf '%s %s\n' 0 "${SPOOF_DONE_ID:?}" >&3
+		printf '\002%s %s\003\n' 0 "${SPOOF_DONE_ID:?}" >&3
 		sleep 1
 
 		return 0

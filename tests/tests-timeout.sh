@@ -1,5 +1,5 @@
 #!/bin/sh
-# shellcheck disable=SC3043,SC3045,SC3001,SC3060,SC3003,SC2329
+# shellcheck disable=SC3043,SC2329
 # shellcheck source=/dev/null
 
 # tests-timeout.sh
@@ -318,7 +318,7 @@ test_timeout_04() {
 test_timeout_05() {
 	timeout_05_done() {
 		[ "${2}" = 124 ] && [ -n "${3:-}" ] &&
-			printf '0 %s\n' "${1}" >&3
+			printf '\002%s %s\003\n' 0 "${1}" >&3
 		printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"
 		return 0
 	}

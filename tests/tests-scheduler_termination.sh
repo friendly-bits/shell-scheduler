@@ -777,7 +777,7 @@ test_scheduler_termination_16() {
 
 	scheduler_pid=$!
 
-	# The FIFO lives in the scheduler's per-run dir under SCHED_DIR (/tmp)
+	# The FIFO lives in the scheduler's per-run dir under /tmp
 	sleep 1
 	sched_fifo_path sched_fifo "${scheduler_pid}"
 	rm -f "${sched_fifo}"
@@ -926,7 +926,7 @@ test_scheduler_termination_18() {
 
 	scheduler_pid=$!
 
-	# The FIFO lives in the scheduler's per-run dir under SCHED_DIR (/tmp)
+	# The FIFO lives in the scheduler's per-run dir under /tmp
 	sleep 1
 	sched_fifo_path sched_fifo "${scheduler_pid}"
 	rm -f "${sched_fifo}"
