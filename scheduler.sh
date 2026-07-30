@@ -252,7 +252,7 @@ sch_finalize() {
 
 	unset "SCH_STARTED_${SCHED_UID}"
 
-	trap ':' USR1 INT TERM
+	trap ':' USR1 INT TERM EXIT
 
 	[ -n "${2}" ] && [ "${sch_rv}" != 0 ] && sch_fail_msg "${2}"
 
@@ -815,6 +815,10 @@ schedule_jobs() {
 
 	trap 'sch_finalize "${SCH_RV_USR1}"' USR1
 	trap 'sch_finalize "${SCH_RV_INT_TERM}"' INT TERM
+	# Catches exits that bypass sch_finalize(): an 'exit' from a callback running in this
+	#   process, or a shell-fatal error. Every normal path disarms this trap before exiting,
+	#   so the message only ever surfaces for an unexpected exit (and only when rv is non-zero)
+	trap 'sch_finalize "${?}" "Scheduler process exited unexpectedly."' EXIT
 
 	# Start jobs
 
