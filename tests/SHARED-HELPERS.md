@@ -1,0 +1,33 @@
+Update the list below when changing, adding or removing cross-category shared helpers.
+
+Shared helpers in tests.sh:
+- `PASS [<detail>]` / `FAIL [<detail>]` / `SKIP [<reason>]` - print the test's result line; the optional detail is parenthesized. After `SKIP` the test must `return 2`.
+- `require_variant full|mini` - SKIP and return non-zero under the other variant. Usage: `require_variant full || return 2`.
+- `print_test_header <test_id> <description> <jobs>`
+- `is_uint <value> [<value>...]` - true only if every argument is an unsigned integer.
+- `mk_name_of_len <out_var> <len> [<prefix>]` - name of exactly `<len>` `[a-zA-Z0-9_]` chars, `'x'`-padded.
+- `read_first_line [--rm] <out_var> <file>` - first line of the file; `--rm` consumes the file.
+- `read_flat [--rm] <out_var> <file>` - all lines joined with single spaces, no trailing space, empty if absent; `--rm` consumes the file.
+- `verify_recorded_set <expected_items_var> <actual_items_var> <expected_cnt_var> <actual_cnt_var> <record_file> <expected_items>` - compare a whitespace-separated expected list against the file's non-empty lines: the deduped sets must match and their counts must be equal, so a duplicate line in the file fails. Sets the four out vars to the normalized items and the two counts for diagnostics.
+- `verify_id_set <expected_out_var> <actual_out_var> <expected_ids> <actual_ids>` - set equality of two whitespace-separated ID lists, order- and duplicate-insensitive.
+- `write_id_sets <file_prefix> <ok_ids> <fail_ids> <unfinished_ids> <undispatched_ids> <expired_ids> <aborted_ids>` - one file per set at `<file_prefix>.<name>`, written even when the set is empty.
+- `read_id_sets [--rm] <file_prefix>` - read those six files into `ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw` (the caller must declare all six local); `--rm` consumes the files.
+- `print_id_sets` - print the six sets read by `read_id_sets`, one per line, for a FAIL diagnostic.
+- `verify_id_partition <all_job_ids>` - verify the six sets hold every listed ID exactly once and nothing else; prints one line per offender.
+- `sets_finalize_handler` - `SCHED_FINALIZE_CB` that `write_id_sets`-records every set under `${FINALIZE_SETS_PREFIX}` and passes the scheduler rv through.
+- `record_fail_msg` - `SCHED_FAIL_MSG_CB` appending one line per invocation to `${MSG_FILE}`, so a line count is a message count.
+- `count_msgs <out_var> <message_file>` - number of messages recorded by `record_fail_msg` (0 when the file is absent).
+- `msgs_have <message_file> <substring>` - true if any recorded message contains the substring, matched literally.
+- `done_handler <job_id> <rv>` - `JOB_DONE_CB` printing the job ID and rv.
+- `finalize_handler <sched_rv> <running_pids>` - `SCHED_FINALIZE_CB` printing the rv and PID list (suppressed past 20 PIDs), killing any still-running PID and passing the rv through.
+- `do_job_default <job_id>` - `DO_JOB_CB` whose behavior is keyed on the ID prefix up to the first `_`: `instant`, `ok`/`ok1`, `ok2`, `ok5`, `hang` (30 s), `crash` (SIGKILLs itself), `fail` (rv 17), `malformed` (garbage on fd 3).
+- `spoof_done_job_from <job_id>` - `DO_JOB_CB` where only `${SPOOF_FROM_ID}` forges a completion record for `${SPOOF_DONE_ID}` (rv `${SPOOF_DONE_RV}`, default 0) on fd 3; every other job runs `do_job_default`.
+- `parallel_job_enter` / `parallel_job_leave` - report job entry/exit on fd 8, which the caller connects to a `monitor_job_conc_fifo` reader.
+- `monitor_job_conc_fifo <result_file>` - read those events from stdin until EOF, then write the peak concurrent count to the file.
+- `start_bg_killer <out_var> <pid> <secs> [<sig>]` (signal defaults to 9) / `stop_bg_killer <killer_pid>` - for delayed signals.
+- `get_test_pid <out_var>` - PID of the calling process, read from `/proc/self/status`.
+- `sched_fifo_path <out_var> <sched_pid> [<sched_dir>]` (dir defaults to `/tmp`) - the scheduler's per-run FIFO path, matched by a PID-scoped glob.
+- `run_generic_test` - run one pass and check only the rv; reads `${TEST_ID}`, `${TEST_NAME}`, `${TEST_JOBS}`, `${TEST_SCHED_MAX_JOBS}`, `${TEST_EXPECT_RV}` and optionally `${SCHED_TIMEOUT_S}` (default 3) from the caller's scope.
+- `ap_record <output_file> <param_var_name>` / `ap_probe_job` / `ap_probe_done` / `ap_run_variants <job_id> <expected_record> <auto_params_values>` - auto-delivered param probes shared by the `params_full` / `params_mini` categories; the callers set `${AP_PARAM_VAR}`, `${AP_JOB_FILE}`, `${AP_DONE_FILE}` and must leave the param variable itself undeclared. `<expected_record>` is `unset` or `set:<value>`; `<auto_params_values>` is the list of `SCHED_AUTO_PARAMS` values to run, or the literal `__UNSET__`.
+- Full variant only: `jt_mech_capable cgroup|children|ppid|auto` - probe a job-termination mechanism quietly, without `sched_use_job_term`'s `${JOB_TERM_CB}` side effect.
+- `term_default_capable` - true if the selected variant's default termination mechanism works here; pair a SKIP with `${TERM_DEFAULT_SKIP_REASON}`.
