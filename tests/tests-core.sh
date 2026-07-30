@@ -50,7 +50,7 @@ test_core_03() {
 		return "${1}"
 	}
 
-	local sched_rv checks_ok=1 \
+	local sched_rv checks_pass=0 checks_exp=2 \
 		TEST_ID=core_03 \
 		CORE_03_DONE_HANDLER_RV=99 \
 		jobs="instant_c03 hang_c03"
@@ -72,15 +72,16 @@ test_core_03() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = "${CORE_03_DONE_HANDLER_RV}" ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv}, expected ${CORE_03_DONE_HANDLER_RV}" >&2; }
+	[ "${sched_rv}" = "${CORE_03_DONE_HANDLER_RV}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv}, expected ${CORE_03_DONE_HANDLER_RV}" >&2
 	grep -q '^ok=instant_c03$' "${FIN_FILE}" 2>/dev/null &&
-	grep -q '^unfin=hang_c03$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
+	grep -q '^unfin=hang_c03$' "${FIN_FILE}" 2>/dev/null &&
+		checks_pass=$((checks_pass + 1)) ||
+		echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2
 
 	rm -f "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -348,7 +349,7 @@ test_core_07() {
 
 	local \
 		TEST_ID=core_07 \
-		checks_ok=1 rv_a rv_b pid_a pid_b ok_a ok_b \
+		checks_pass=0 checks_exp=7 rv_a rv_b pid_a pid_b ok_a ok_b \
 		jobs_a='ok_a1 ok_a2' \
 		jobs_b='ok_b1 ok_b2'
 
@@ -385,28 +386,34 @@ test_core_07() {
 	wait "${pid_a}"; rv_a=$?
 	wait "${pid_b}"; rv_b=$?
 
-	[ "${rv_a}" = 0 ] || { checks_ok=; echo "instance A rv=${rv_a} (want 0)"; }
-	[ "${rv_b}" = 0 ] || { checks_ok=; echo "instance B rv=${rv_b} (want 0)"; }
+	[ "${rv_a}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "instance A rv=${rv_a} (want 0)"
+	[ "${rv_b}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "instance B rv=${rv_b} (want 0)"
 
 	# Each instance reports exactly its own jobs
 	core_07_ok ok_a "${REC_A}"
 	core_07_ok ok_b "${REC_B}"
-	core_07_same_set "${ok_a}" "${jobs_a}" ||
-		{ checks_ok=; echo "A ok bucket '${ok_a}' (want '${jobs_a}')"; }
-	core_07_same_set "${ok_b}" "${jobs_b}" ||
-		{ checks_ok=; echo "B ok bucket '${ok_b}' (want '${jobs_b}')"; }
+	core_07_same_set "${ok_a}" "${jobs_a}" && checks_pass=$((checks_pass + 1)) ||
+		echo "A ok bucket '${ok_a}' (want '${jobs_a}')"
+	core_07_same_set "${ok_b}" "${jobs_b}" && checks_pass=$((checks_pass + 1)) ||
+		echo "B ok bucket '${ok_b}' (want '${jobs_b}')"
 
 	# No cross-instance leakage through the shared FIFO directory
-	case " ${ok_a} " in *" ok_b"*) checks_ok=; echo "A leaked B's ids: '${ok_a}'" ;; esac
-	case " ${ok_b} " in *" ok_a"*) checks_ok=; echo "B leaked A's ids: '${ok_b}'" ;; esac
+	case " ${ok_a} " in
+		*" ok_b"*) echo "A leaked B's ids: '${ok_a}'" ;;
+		*) checks_pass=$((checks_pass + 1))
+	esac
+	case " ${ok_b} " in
+		*" ok_a"*) echo "B leaked A's ids: '${ok_b}'" ;;
+		*) checks_pass=$((checks_pass + 1))
+	esac
 
 	# Both per-run dirs cleaned up: no leftover under the shared dir
 	set -- "${SHARED_DIR}"/sched_*
-	[ -e "${1}" ] && { checks_ok=; echo "leftover run dir(s): $*"; }
+	[ ! -e "${1}" ] && checks_pass=$((checks_pass + 1)) || echo "leftover run dir(s): $*"
 
 	rm -rf "${SHARED_DIR}"; rm -f "${REC_A}" "${REC_B}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "both rv 0, ok sets correct and disjoint, run dirs cleaned"
 		return 0
 	else

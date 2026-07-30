@@ -158,7 +158,7 @@ test_misc_03() {
 		sched_fifo \
 		sched_run_dir \
 		fifo_seen=no \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		jobs='ok2_m03a ok2_m03b'
 
 	print_test_header "${TEST_ID:?}" "Run dir and FIFO are removed after successful completion" "${jobs}"
@@ -185,16 +185,16 @@ test_misc_03() {
 	wait "${scheduler_pid}"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${fifo_seen}" = yes ] ||
-		{ checks_ok=; echo "FIFO not observed during the run at '${sched_fifo}'" >&2; }
-	[ ! -e "${sched_fifo}" ] ||
-		{ checks_ok=; echo "FIFO left behind: '${sched_fifo}'" >&2; }
-	[ ! -d "${sched_run_dir}" ] ||
-		{ checks_ok=; echo "run dir left behind: '${sched_run_dir}'" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${fifo_seen}" = yes ] && checks_pass=$((checks_pass + 1)) ||
+		echo "FIFO not observed during the run at '${sched_fifo}'" >&2
+	[ ! -e "${sched_fifo}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "FIFO left behind: '${sched_fifo}'" >&2
+	[ ! -d "${sched_run_dir}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "run dir left behind: '${sched_run_dir}'" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, FIFO observed during the run, then removed with its run dir"
 		return 0
 	else

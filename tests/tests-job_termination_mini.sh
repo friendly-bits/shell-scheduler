@@ -24,7 +24,8 @@ test_job_termination_mini_01() {
 
 	local \
 		TEST_ID=job_termination_mini_01 \
-		sched_pid sched_rv checks_ok=1 rec argc arg1 \
+		sched_pid sched_rv checks_pass=0 checks_exp=3 rec argc arg1 \
+		recs=0 argc_ok=0 arg1_ok=0 \
 		job_id='hang_m01'
 
 	local REC_FILE="/tmp/sched.job_termination_mini.rec.${TEST_ID}.$$"
@@ -50,23 +51,28 @@ test_job_termination_mini_01() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
 	if [ -f "${REC_FILE}" ]; then
 		while IFS= read -r rec; do
+			recs=$((recs + 1))
 			argc="${rec#argc=}"; argc="${argc%% *}"
 			arg1="${rec##* arg1=}"
-			[ "${argc}" -ge 1 ] 2>/dev/null ||
-				{ checks_ok=; echo "callback argc='${argc}' (want >=1)"; }
-			is_uint "${arg1}" ||
-				{ checks_ok=; echo "callback \$1='${arg1}' is not a PID (full-protocol subcommand leaked?)"; }
+			[ "${argc}" -ge 1 ] 2>/dev/null && argc_ok=$((argc_ok + 1)) ||
+				echo "callback argc='${argc}' (want >=1)"
+			is_uint "${arg1}" && arg1_ok=$((arg1_ok + 1)) ||
+				echo "callback \$1='${arg1}' is not a PID (full-protocol subcommand leaked?)"
 		done < "${REC_FILE}"
-	else
-		checks_ok=; echo "callback was never invoked"
 	fi
 	rm -f "${REC_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	# recs=0 means the callback was never invoked
+	[ "${recs}" -ge 1 ] && [ "${argc_ok}" = "${recs}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "argc ok in ${argc_ok} of ${recs} callback records"
+	[ "${recs}" -ge 1 ] && [ "${arg1_ok}" = "${recs}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "\$1 was a PID in ${arg1_ok} of ${recs} callback records"
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, callback received PIDs as positional args"
 		return 0
 	else
@@ -80,7 +86,7 @@ test_job_termination_mini_01() {
 test_job_termination_mini_02() {
 	local \
 		TEST_ID=job_termination_mini_02 \
-		checks_ok=1 victim msg_cnt=0
+		checks_pass=0 checks_exp=2 victim msg_cnt=0
 
 	local MSG_FILE="/tmp/sched.job_termination_mini.msg.${TEST_ID}.$$"
 	rm -f "${MSG_FILE}"
@@ -97,15 +103,19 @@ test_job_termination_mini_02() {
 	SCHED_FAIL_MSG_CB=mini_02_fail_msg sched_job_term_mini notanumber "${victim}"
 
 	sleep 1
-	kill -0 "${victim}" 2>/dev/null &&
-		{ checks_ok=; echo "valid seed ${victim} survived"; kill -KILL "${victim}" 2>/dev/null; }
+	if kill -0 "${victim}" 2>/dev/null; then
+		echo "valid seed ${victim} survived"
+		kill -KILL "${victim}" 2>/dev/null
+	else
+		checks_pass=$((checks_pass + 1))
+	fi
 
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(grep -c "invalid PID 'notanumber'" "${MSG_FILE}")
-	[ "${msg_cnt}" -ge 1 ] ||
-		{ checks_ok=; echo "no 'invalid PID' warning emitted (msg_cnt=${msg_cnt})"; }
+	[ "${msg_cnt}" -ge 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "no 'invalid PID' warning emitted (msg_cnt=${msg_cnt})"
 	rm -f "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "invalid PID warned, valid seed killed"
 		return 0
 	else
@@ -119,7 +129,7 @@ test_job_termination_mini_02() {
 test_job_termination_mini_03() {
 	local \
 		TEST_ID=job_termination_mini_03 \
-		checks_ok=1 victim msg_cnt=0
+		checks_pass=0 checks_exp=2 victim msg_cnt=0
 
 	local MSG_FILE="/tmp/sched.job_termination_mini.msg.${TEST_ID}.$$"
 	rm -f "${MSG_FILE}"
@@ -137,15 +147,19 @@ test_job_termination_mini_03() {
 		sched_job_term_mini "${victim}"
 
 	sleep 1
-	kill -0 "${victim}" 2>/dev/null &&
-		{ checks_ok=; echo "seed ${victim} survived a scan failure"; kill -KILL "${victim}" 2>/dev/null; }
+	if kill -0 "${victim}" 2>/dev/null; then
+		echo "seed ${victim} survived a scan failure"
+		kill -KILL "${victim}" 2>/dev/null
+	else
+		checks_pass=$((checks_pass + 1))
+	fi
 
 	[ -f "${MSG_FILE}" ] && msg_cnt=$(grep -c '/proc scan failed' "${MSG_FILE}")
-	[ "${msg_cnt}" -ge 1 ] ||
-		{ checks_ok=; echo "no '/proc scan failed' message emitted (msg_cnt=${msg_cnt})"; }
+	[ "${msg_cnt}" -ge 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "no '/proc scan failed' message emitted (msg_cnt=${msg_cnt})"
 	rm -f "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "scan failure reported, seed killed"
 		return 0
 	else

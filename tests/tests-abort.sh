@@ -211,7 +211,7 @@ test_abort_01() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
 		abort_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=5 \
 		ABORT_DONE='' \
 		ABORT_TARGETS=ok5_abort01 \
 		jobs='ok5_abort01 ok1_abort01b'
@@ -244,18 +244,18 @@ test_abort_01() {
 
 	# The abort must have been driven by a real callback invocation, not by a
 	#   callback that never ran and an aborted set that was empty anyway
-	[ "${abort_calls}" = 'ok1_abort01b ' ] ||
-		{ checks_ok=; echo "JOB_DONE_CB calls='${abort_calls}' (want 'ok1_abort01b ')" >&2; }
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	verify_id_set exp_ok act_ok 'ok1_abort01b' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok5_abort01' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${abort_calls}" = 'ok1_abort01b ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls='${abort_calls}' (want 'ok1_abort01b ')" >&2
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	verify_id_set exp_ok act_ok 'ok1_abort01b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	verify_id_set exp_aborted act_aborted 'ok5_abort01' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, ok='${ok_raw}', aborted='${aborted_raw}'"
 		return 0
 	else
@@ -275,7 +275,7 @@ test_abort_02() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_undisp act_undisp exp_starts act_starts \
 		tick_calls starts \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		ABORT_DONE='' \
 		ABORT_TARGETS=instant_abort02b \
 		jobs='ok1_abort02 instant_abort02b instant_abort02c'
@@ -309,28 +309,28 @@ test_abort_02() {
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_flat --rm starts "${START_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
 	# Aborting a known, pending job is silent
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
 	# The aborted job is skipped, the one after it still dispatches
-	[ "${tick_calls}" = 'ok1_abort02 instant_abort02c ' ] ||
-		{ checks_ok=; echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok1_abort02 instant_abort02c ')" >&2; }
-	verify_id_set exp_starts act_starts 'ok1_abort02 instant_abort02c' "${starts}" ||
-		{ checks_ok=; echo "started jobs: expected='${exp_starts}' actual='${act_starts}'" >&2; }
-	verify_id_set exp_ok act_ok 'ok1_abort02 instant_abort02c' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	verify_id_set exp_undisp act_undisp 'instant_abort02b' "${undispatched_raw}" ||
-		{ checks_ok=; echo "undispatched: expected='${exp_undisp}' actual='${act_undisp}'" >&2; }
-	[ -z "${aborted_raw}" ] ||
-		{ checks_ok=; echo "aborted='${aborted_raw}' (want empty)" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/expired must all be empty" >&2; }
+	[ "${tick_calls}" = 'ok1_abort02 instant_abort02c ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok1_abort02 instant_abort02c ')" >&2
+	verify_id_set exp_starts act_starts 'ok1_abort02 instant_abort02c' "${starts}" && checks_pass=$((checks_pass + 1)) ||
+		echo "started jobs: expected='${exp_starts}' actual='${act_starts}'" >&2
+	verify_id_set exp_ok act_ok 'ok1_abort02 instant_abort02c' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	verify_id_set exp_undisp act_undisp 'instant_abort02b' "${undispatched_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "undispatched: expected='${exp_undisp}' actual='${act_undisp}'" >&2
+	[ -z "${aborted_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted='${aborted_raw}' (want empty)" >&2
+	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/expired must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, started='${starts}', undispatched='${undispatched_raw}'"
 		return 0
 	else
@@ -362,7 +362,7 @@ test_abort_03() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted exp_undisp act_undisp \
 		done_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=10 \
 		jobs='instant_abort03 ok5_abort03b ok5_abort03c'
 
 	local \
@@ -394,32 +394,32 @@ test_abort_03() {
 	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
 	read_first_line --rm abort_rv "${RV_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
 	# Neither the unknown nor the invalid ID makes jobs_abort fail
-	[ "${abort_rv}" = 0 ] ||
-		{ checks_ok=; echo "jobs_abort rv='${abort_rv}' (want 0)" >&2; }
-	[ "${done_calls}" = 'instant_abort03 ' ] ||
-		{ checks_ok=; echo "JOB_DONE_CB calls='${done_calls}' (want 'instant_abort03 ')" >&2; }
+	[ "${abort_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "jobs_abort rv='${abort_rv}' (want 0)" >&2
+	[ "${done_calls}" = 'instant_abort03 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls='${done_calls}' (want 'instant_abort03 ')" >&2
 	# The completed ID is skipped silently, so only two IDs are reported
-	[ "${msg_cnt}" = 2 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 2)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	msgs_have "${MSG_FILE}" "unknown job ID 'nosuch_abort03'" ||
-		{ checks_ok=; echo "no message for the unknown ID" >&2; print_msgs "${MSG_FILE}" >&2; }
-	msgs_have "${MSG_FILE}" "job ID 'bad-id-abort03'" ||
-		{ checks_ok=; echo "no message for the invalid ID" >&2; print_msgs "${MSG_FILE}" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok5_abort03b' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	verify_id_set exp_undisp act_undisp 'ok5_abort03c' "${undispatched_raw}" ||
-		{ checks_ok=; echo "undispatched: expected='${exp_undisp}' actual='${act_undisp}'" >&2; }
-	verify_id_set exp_ok act_ok 'instant_abort03' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/expired must all be empty" >&2; }
+	[ "${msg_cnt}" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 2)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	msgs_have "${MSG_FILE}" "unknown job ID 'nosuch_abort03'" && checks_pass=$((checks_pass + 1)) ||
+		{ echo "no message for the unknown ID" >&2; print_msgs "${MSG_FILE}" >&2; }
+	msgs_have "${MSG_FILE}" "job ID 'bad-id-abort03'" && checks_pass=$((checks_pass + 1)) ||
+		{ echo "no message for the invalid ID" >&2; print_msgs "${MSG_FILE}" >&2; }
+	verify_id_set exp_aborted act_aborted 'ok5_abort03b' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_undisp act_undisp 'ok5_abort03c' "${undispatched_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "undispatched: expected='${exp_undisp}' actual='${act_undisp}'" >&2
+	verify_id_set exp_ok act_ok 'instant_abort03' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/expired must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, jobs_abort rv=${abort_rv}, msg_cnt=${msg_cnt}, aborted='${aborted_raw}', undispatched='${undispatched_raw}'"
 		return 0
 	else
@@ -450,7 +450,7 @@ test_abort_04() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok \
 		done_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=6 \
 		jobs='ok1_abort04 instant_abort04b'
 
 	local \
@@ -480,23 +480,23 @@ test_abort_04() {
 	read_flat --rm done_calls "${DONE_FILE}"
 	read_flat --rm abort_rvs "${RV_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ "${abort_rvs}" = '0 0 ' ] ||
-		{ checks_ok=; echo "jobs_abort rvs='${abort_rvs}' (want '0 0 ')" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${abort_rvs}" = '0 0 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "jobs_abort rvs='${abort_rvs}' (want '0 0 ')" >&2
 	# Both jobs still ran to completion
-	[ "${done_calls}" = 'ok1_abort04 0 instant_abort04b 0 ' ] ||
-		{ checks_ok=; echo "JOB_DONE_CB calls='${done_calls}' (want 'ok1_abort04 0 instant_abort04b 0 ')" >&2; }
-	verify_id_set exp_ok act_ok "${jobs}" "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}${aborted_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired/aborted must all be empty" >&2; }
+	[ "${done_calls}" = 'ok1_abort04 0 instant_abort04b 0 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls='${done_calls}' (want 'ok1_abort04 0 instant_abort04b 0 ')" >&2
+	verify_id_set exp_ok act_ok "${jobs}" "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}${aborted_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired/aborted must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, jobs_abort rvs='${abort_rvs}', ok='${ok_raw}'"
 		return 0
 	else
@@ -530,7 +530,7 @@ test_abort_05() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
 		done_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		jobs='ok5_abort05 ok1_abort05b'
 
 	local \
@@ -562,28 +562,28 @@ test_abort_05() {
 	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
 	read_first_line --rm abort_rvs "${RV_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
 	# A lost or doubled slot count would trip the 'Not all jobs are done' check
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ "${abort_rvs}" = '0 0' ] ||
-		{ checks_ok=; echo "jobs_abort rvs='${abort_rvs}' (want '0 0')" >&2; }
-	[ "${done_calls}" = 'ok1_abort05b ' ] ||
-		{ checks_ok=; echo "JOB_DONE_CB calls='${done_calls}' (want 'ok1_abort05b ')" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok5_abort05' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${abort_rvs}" = '0 0' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "jobs_abort rvs='${abort_rvs}' (want '0 0')" >&2
+	[ "${done_calls}" = 'ok1_abort05b ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls='${done_calls}' (want 'ok1_abort05b ')" >&2
+	verify_id_set exp_aborted act_aborted 'ok5_abort05' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
 	# verify_id_set is duplicate-insensitive: count separately
-	[ "${aborted_cnt}" = 1 ] ||
-		{ checks_ok=; echo "aborted holds ${aborted_cnt} item(s) (want 1): '${aborted_raw}'" >&2; }
-	verify_id_set exp_ok act_ok 'ok1_abort05b' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${aborted_cnt}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted holds ${aborted_cnt} item(s) (want 1): '${aborted_raw}'" >&2
+	verify_id_set exp_ok act_ok 'ok1_abort05b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, abort rvs='${abort_rvs}', aborted='${aborted_raw}'"
 		return 0
 	else
@@ -609,7 +609,7 @@ test_abort_06() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok \
 		done_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=6 \
 		jobs='ok1_abort06 instant_abort06b'
 
 	local \
@@ -638,23 +638,23 @@ test_abort_06() {
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm done_calls "${DONE_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
 	# Both jobs ran: the abort neither killed nor unscheduled anything
-	[ "${done_calls}" = 'ok1_abort06 0 instant_abort06b 0 ' ] ||
-		{ checks_ok=; echo "JOB_DONE_CB calls='${done_calls}' (want 'ok1_abort06 0 instant_abort06b 0 ')" >&2; }
-	verify_id_set exp_ok act_ok "${jobs}" "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${aborted_raw}" ] ||
-		{ checks_ok=; echo "aborted='${aborted_raw}' (want empty)" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${done_calls}" = 'ok1_abort06 0 instant_abort06b 0 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls='${done_calls}' (want 'ok1_abort06 0 instant_abort06b 0 ')" >&2
+	verify_id_set exp_ok act_ok "${jobs}" "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${aborted_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted='${aborted_raw}' (want empty)" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, ok='${ok_raw}', aborted='${aborted_raw}'"
 		return 0
 	else
@@ -674,7 +674,7 @@ test_abort_07() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
 		tick_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=6 \
 		ABORT_DONE='' \
 		ABORT_TARGETS=ok5_abort07 \
 		jobs='ok5_abort07 instant_abort07'
@@ -710,22 +710,22 @@ test_abort_07() {
 	[ -f "${ABORT_CALLS_FILE}" ] && tick_calls="$(tr '\n' ' ' < "${ABORT_CALLS_FILE}")"
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
 	# 5 s or more means the slot was only reclaimed by the aborted job's own completion
-	[ "${elapsed}" -le 2 ] ||
-		{ checks_ok=; echo "elapsed=${elapsed}s (want <= 2)" >&2; }
+	[ "${elapsed}" -le 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "elapsed=${elapsed}s (want <= 2)" >&2
 	# Both dispatches happened, in order
-	[ "${tick_calls}" = 'ok5_abort07 instant_abort07 ' ] ||
-		{ checks_ok=; echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok5_abort07 instant_abort07 ')" >&2; }
-	verify_id_set exp_ok act_ok 'instant_abort07' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok5_abort07' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${tick_calls}" = 'ok5_abort07 instant_abort07 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok5_abort07 instant_abort07 ')" >&2
+	verify_id_set exp_ok act_ok 'instant_abort07' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	verify_id_set exp_aborted act_aborted 'ok5_abort07' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s, aborted='${aborted_raw}'"
 		return 0
 	else
@@ -769,7 +769,7 @@ test_abort_08() {
 		sched_rv sched_pid monitor_pid max_active \
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		i=1 aborted_cnt \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		max_jobs=3 \
 		jobs='' \
 		AB08_LIVE=
@@ -819,17 +819,17 @@ test_abort_08() {
 
 	count_items aborted_cnt "${aborted_raw}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	is_uint "${max_active}" && [ "${max_active}" -le "${max_jobs}" ] ||
-		{ checks_ok=; echo "peak concurrency='${max_active}' (want an integer <= ${max_jobs})" >&2; }
-	verify_id_partition "${jobs}" ||
-		{ checks_ok=; echo "the six ID sets do not partition the 20 job IDs" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	is_uint "${max_active}" && [ "${max_active}" -le "${max_jobs}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "peak concurrency='${max_active}' (want an integer <= ${max_jobs})" >&2
+	verify_id_partition "${jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "the six ID sets do not partition the 20 job IDs" >&2
 	# Without this the run could pass with no abort ever taking effect
-	[ "${aborted_cnt}" -ge 1 ] ||
-		{ checks_ok=; echo "aborted set is empty - no abort took effect" >&2; }
+	[ "${aborted_cnt}" -ge 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted set is empty - no abort took effect" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, peak=${max_active}, aborted_cnt=${aborted_cnt}"
 		return 0
 	else
@@ -849,7 +849,7 @@ test_abort_09() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_undisp act_undisp exp_starts act_starts \
 		tick_calls starts \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		ABORT_DONE='' \
 		ABORT_TARGETS='instant_abort09b instant_abort09c instant_abort09d' \
 		jobs='ok1_abort09 instant_abort09b instant_abort09c instant_abort09d'
@@ -883,29 +883,29 @@ test_abort_09() {
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_flat --rm starts "${START_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
 	# Exactly one dispatch: an empty-ID dispatch would show as a trailing tick
-	[ "${tick_calls}" = 'ok1_abort09 ' ] ||
-		{ checks_ok=; echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok1_abort09 ')" >&2; }
+	[ "${tick_calls}" = 'ok1_abort09 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok1_abort09 ')" >&2
 	# DO_JOB_CB records its job ID before running, so an empty ID would appear here
-	verify_id_set exp_starts act_starts 'ok1_abort09' "${starts}" ||
-		{ checks_ok=; echo "started jobs: expected='${exp_starts}' actual='${act_starts}'" >&2; }
-	verify_id_set exp_ok act_ok 'ok1_abort09' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	verify_id_set exp_undisp act_undisp "${ABORT_TARGETS}" "${undispatched_raw}" ||
-		{ checks_ok=; echo "undispatched: expected='${exp_undisp}' actual='${act_undisp}'" >&2; }
+	verify_id_set exp_starts act_starts 'ok1_abort09' "${starts}" && checks_pass=$((checks_pass + 1)) ||
+		echo "started jobs: expected='${exp_starts}' actual='${act_starts}'" >&2
+	verify_id_set exp_ok act_ok 'ok1_abort09' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	verify_id_set exp_undisp act_undisp "${ABORT_TARGETS}" "${undispatched_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "undispatched: expected='${exp_undisp}' actual='${act_undisp}'" >&2
 	# Aborting a pending job reports it as undispatched, never as aborted
-	[ -z "${aborted_raw}" ] ||
-		{ checks_ok=; echo "aborted='${aborted_raw}' (want empty)" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/expired must all be empty" >&2; }
+	[ -z "${aborted_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted='${aborted_raw}' (want empty)" >&2
+	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/expired must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, started='${starts}', undispatched='${undispatched_raw}'"
 		return 0
 	else
@@ -924,7 +924,7 @@ test_abort_10() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
 		done_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=7 \
 		ABORT_DONE='' \
 		ABORT_TARGETS='ok5_abort10b ok5_abort10c ok5_abort10d' \
 		jobs='instant_abort10 ok5_abort10b ok5_abort10c ok5_abort10d'
@@ -960,26 +960,26 @@ test_abort_10() {
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
 	# 5 s or more means the run waited the aborted jobs out
-	[ "${elapsed}" -le 2 ] ||
-		{ checks_ok=; echo "elapsed=${elapsed}s (want <= 2)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${elapsed}" -le 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "elapsed=${elapsed}s (want <= 2)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
 	# Only the completed job reaches JOB_DONE_CB
-	[ "${done_calls}" = 'instant_abort10 ' ] ||
-		{ checks_ok=; echo "JOB_DONE_CB calls='${done_calls}' (want 'instant_abort10 ')" >&2; }
-	verify_id_set exp_aborted act_aborted "${ABORT_TARGETS}" "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	verify_id_set exp_ok act_ok 'instant_abort10' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${done_calls}" = 'instant_abort10 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls='${done_calls}' (want 'instant_abort10 ')" >&2
+	verify_id_set exp_aborted act_aborted "${ABORT_TARGETS}" "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'instant_abort10' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s, aborted='${aborted_raw}'"
 		return 0
 	else
@@ -999,7 +999,7 @@ test_abort_11() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted exp_marks act_marks \
 		tick_calls done_calls marks \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		ABORT_DONE='' \
 		ABORT_TARGETS=ok2_abort11 \
 		jobs='ok2_abort11 ok5_abort11b'
@@ -1036,29 +1036,29 @@ test_abort_11() {
 	read_flat --rm done_calls "${DONE_FILE}"
 	read_flat --rm marks "${MARK_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
 	# A discarded record is silent - any message here means it was not recognized
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ "${tick_calls}" = 'ok2_abort11 ok5_abort11b ' ] ||
-		{ checks_ok=; echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok2_abort11 ok5_abort11b ')" >&2; }
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${tick_calls}" = 'ok2_abort11 ok5_abort11b ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok2_abort11 ok5_abort11b ')" >&2
 	# The aborted job must not reach JOB_DONE_CB
-	[ "${done_calls}" = 'ok5_abort11b 0 ' ] ||
-		{ checks_ok=; echo "JOB_DONE_CB calls='${done_calls}' (want 'ok5_abort11b 0 ')" >&2; }
+	[ "${done_calls}" = 'ok5_abort11b 0 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls='${done_calls}' (want 'ok5_abort11b 0 ')" >&2
 	# Both marks present: the aborted job ran its full 2 s and was never killed
-	verify_id_set exp_marks act_marks "${jobs}" "${marks}" ||
-		{ checks_ok=; echo "completion marks: expected='${exp_marks}' actual='${act_marks}'" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok2_abort11' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	verify_id_set exp_ok act_ok 'ok5_abort11b' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	verify_id_set exp_marks act_marks "${jobs}" "${marks}" && checks_pass=$((checks_pass + 1)) ||
+		echo "completion marks: expected='${exp_marks}' actual='${act_marks}'" >&2
+	verify_id_set exp_aborted act_aborted 'ok2_abort11' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'ok5_abort11b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, marks='${marks}', aborted='${aborted_raw}'"
 		return 0
 	else
@@ -1084,7 +1084,7 @@ test_abort_12() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_aborted act_aborted exp_ok act_ok exp_unfin act_unfin \
 		tick_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=7 \
 		ABORT_DONE='' \
 		ABORT_TARGETS=ok2_abort12 \
 		SPOOF_DONE_ID=ok2_abort12 \
@@ -1122,26 +1122,26 @@ test_abort_12() {
 	tick_calls=
 	[ -f "${ABORT_CALLS_FILE}" ] && tick_calls="$(tr '\n' ' ' < "${ABORT_CALLS_FILE}")"
 
-	[ "${sched_rv}" = 1 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 1)" >&2; }
-	msgs_have "${MSG_FILE}" "Unexpected completion record for job ID 'ok2_abort12'" ||
-		{ checks_ok=; echo "no 'Unexpected completion record' message for ok2_abort12 (${msg_cnt} message(s) recorded)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ "${tick_calls}" = 'ok2_abort12 instant_abort12b instant_abort12c ok5_abort12d ' ] ||
-		{ checks_ok=; echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok2_abort12 instant_abort12b instant_abort12c ok5_abort12d ')" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok2_abort12' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
+	[ "${sched_rv}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 1)" >&2
+	msgs_have "${MSG_FILE}" "Unexpected completion record for job ID 'ok2_abort12'" && checks_pass=$((checks_pass + 1)) ||
+		{ echo "no 'Unexpected completion record' message for ok2_abort12 (${msg_cnt} message(s) recorded)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${tick_calls}" = 'ok2_abort12 instant_abort12b instant_abort12c ok5_abort12d ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok2_abort12 instant_abort12b instant_abort12c ok5_abort12d ')" >&2
+	verify_id_set exp_aborted act_aborted 'ok2_abort12' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
 	# Both must be OK: the forger's own record still classifies normally, and the
 	#   witness proves the forged record was absorbed without ending the run
-	verify_id_set exp_ok act_ok 'instant_abort12b instant_abort12c' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	verify_id_set exp_unfin act_unfin 'ok5_abort12d' "${unfinished_raw}" ||
-		{ checks_ok=; echo "unfinished: expected='${exp_unfin}' actual='${act_unfin}'" >&2; }
-	[ -z "${fail_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/undispatched/expired must all be empty" >&2; }
+	verify_id_set exp_ok act_ok 'instant_abort12b instant_abort12c' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	verify_id_set exp_unfin act_unfin 'ok5_abort12d' "${unfinished_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "unfinished: expected='${exp_unfin}' actual='${act_unfin}'" >&2
+	[ -z "${fail_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/undispatched/expired must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, msg_cnt=${msg_cnt}, aborted='${aborted_raw}'"
 		return 0
 	else
@@ -1165,7 +1165,7 @@ test_abort_13() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
 		tick_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		ABORT_DONE='' \
 		ABORT_TARGETS=ok5_abort13 \
 		jobs='ok5_abort13 ok5_abort13b'
@@ -1205,27 +1205,27 @@ test_abort_13() {
 	tick_calls=
 	[ -f "${ABORT_CALLS_FILE}" ] && tick_calls="$(tr '\n' ' ' < "${ABORT_CALLS_FILE}")"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
 	# A stale deadline firing would reclaim a slot a second time and cut the wait short
-	[ "${elapsed}" -ge 4 ] ||
-		{ checks_ok=; echo "elapsed=${elapsed}s (want >= 4 - the run must wait out ok5_abort13b)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ "${tick_calls}" = 'ok5_abort13 ok5_abort13b ' ] ||
-		{ checks_ok=; echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok5_abort13 ok5_abort13b ')" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok5_abort13' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	verify_id_set exp_ok act_ok 'ok5_abort13b' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${expired_raw}" ] ||
-		{ checks_ok=; echo "expired='${expired_raw}' (want empty - the aborted job must not expire too)" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched must all be empty" >&2; }
+	[ "${elapsed}" -ge 4 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "elapsed=${elapsed}s (want >= 4 - the run must wait out ok5_abort13b)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${tick_calls}" = 'ok5_abort13 ok5_abort13b ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'ok5_abort13 ok5_abort13b ')" >&2
+	verify_id_set exp_aborted act_aborted 'ok5_abort13' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'ok5_abort13b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "expired='${expired_raw}' (want empty - the aborted job must not expire too)" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${ABORT_CALLS_FILE}" "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s, aborted='${aborted_raw}', expired='${expired_raw}'"
 		return 0
 	else
@@ -1252,7 +1252,7 @@ test_abort_14() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_expired act_expired \
 		done_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=6 \
 		jobs='ok5_abort14'
 
 	local \
@@ -1284,22 +1284,22 @@ test_abort_14() {
 	read_flat --rm done_calls "${DONE_FILE}"
 
 	# A second slot reclaim would trip the 'Not all jobs are done' check
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ "${done_calls}" = 'ok5_abort14 124 ' ] ||
-		{ checks_ok=; echo "JOB_DONE_CB calls='${done_calls}' (want 'ok5_abort14 124 ')" >&2; }
-	verify_id_set exp_expired act_expired 'ok5_abort14' "${expired_raw}" ||
-		{ checks_ok=; echo "expired: expected='${exp_expired}' actual='${act_expired}'" >&2; }
-	[ -z "${aborted_raw}" ] ||
-		{ checks_ok=; echo "aborted='${aborted_raw}' (want empty - the job was already expired)" >&2; }
-	[ -z "${ok_raw}${fail_raw}${unfinished_raw}${undispatched_raw}" ] ||
-		{ checks_ok=; echo "ok/fail/unfinished/undispatched must all be empty" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${done_calls}" = 'ok5_abort14 124 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls='${done_calls}' (want 'ok5_abort14 124 ')" >&2
+	verify_id_set exp_expired act_expired 'ok5_abort14' "${expired_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "expired: expected='${exp_expired}' actual='${act_expired}'" >&2
+	[ -z "${aborted_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted='${aborted_raw}' (want empty - the job was already expired)" >&2
+	[ -z "${ok_raw}${fail_raw}${unfinished_raw}${undispatched_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "ok/fail/unfinished/undispatched must all be empty" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, expired='${expired_raw}', aborted='${aborted_raw}'"
 		return 0
 	else
@@ -1329,7 +1329,7 @@ test_abort_15() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
 		tick_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		ABORT_AT_ID=j_2 \
 		ABORT_TARGETS=j \
 		jobs='j j2 xj j_2'
@@ -1363,28 +1363,28 @@ test_abort_15() {
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_first_line --rm fin_pids "${FIN_PIDS_FILE}"
-	read_job_pid j_pid j ||
-		{ checks_ok=; echo "job 'j' recorded no PID" >&2; }
+	read_job_pid j_pid j && checks_pass=$((checks_pass + 1)) ||
+		echo "job 'j' recorded no PID" >&2
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ "${tick_calls}" = 'j j2 xj j_2 ' ] ||
-		{ checks_ok=; echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'j j2 xj j_2 ')" >&2; }
-	verify_id_set exp_aborted act_aborted 'j' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	verify_id_set exp_ok act_ok 'j2 xj j_2' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${tick_calls}" = 'j j2 xj j_2 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want 'j j2 xj j_2 ')" >&2
+	verify_id_set exp_aborted act_aborted 'j' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'j2 xj j_2' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 	# 'j' is the only job left unreaped, so its PID is the only one finalize reports
-	[ -n "${j_pid}" ] && [ "${fin_pids}" = "${j_pid}" ] ||
-		{ checks_ok=; echo "finalize running_pids='${fin_pids}' (want job 'j' own PID '${j_pid}')" >&2; }
+	[ -n "${j_pid}" ] && [ "${fin_pids}" = "${j_pid}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "finalize running_pids='${fin_pids}' (want job 'j' own PID '${j_pid}')" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', ok='${ok_raw}', running_pids='${fin_pids}'"
 		return 0
 	else
@@ -1413,7 +1413,7 @@ test_abort_16() {
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
 		tick_calls \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		ABORT_AT_ID=7241 \
 		ABORT_TARGETS=724 \
 		jobs='40724 724 7241'
@@ -1447,29 +1447,29 @@ test_abort_16() {
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_first_line --rm fin_pids "${FIN_PIDS_FILE}"
-	read_job_pid target_pid 724 ||
-		{ checks_ok=; echo "job '724' recorded no PID" >&2; }
+	read_job_pid target_pid 724 && checks_pass=$((checks_pass + 1)) ||
+		echo "job '724' recorded no PID" >&2
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ "${tick_calls}" = '40724 724 7241 ' ] ||
-		{ checks_ok=; echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want '40724 724 7241 ')" >&2; }
-	verify_id_set exp_aborted act_aborted '724' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	verify_id_set exp_ok act_ok '40724 7241' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ "${tick_calls}" = '40724 724 7241 ' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_DISPATCH_TICK_CB calls='${tick_calls}' (want '40724 724 7241 ')" >&2
+	verify_id_set exp_aborted act_aborted '724' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok '40724 7241' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 	# '724' is the only job left unreaped, so its PID is the only one finalize
 	#   reports; a PID parsed out of the '40724' entry would differ
-	[ -n "${target_pid}" ] && [ "${fin_pids}" = "${target_pid}" ] ||
-		{ checks_ok=; echo "finalize running_pids='${fin_pids}' (want job '724' own PID '${target_pid}')" >&2; }
+	[ -n "${target_pid}" ] && [ "${fin_pids}" = "${target_pid}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "finalize running_pids='${fin_pids}' (want job '724' own PID '${target_pid}')" >&2
 
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', ok='${ok_raw}', running_pids='${fin_pids}'"
 		return 0
 	else
@@ -1501,7 +1501,7 @@ test_abort_17() {
 		sched_rv msg_cnt term_calls target_pid fin_pids \
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		jobs='ok5_abort17 ok1_abort17b'
 
 	local \
@@ -1517,25 +1517,25 @@ test_abort_17() {
 
 	run_abort_term_scenario ab17_term_cb ok5_abort17 ok1_abort17b
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ -n "${target_pid}" ] ||
-		{ checks_ok=; echo "job ok5_abort17 recorded no PID" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ -n "${target_pid}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "job ok5_abort17 recorded no PID" >&2
 	# One term call, carrying exactly the aborted job's own PID
-	[ "${term_calls}" = "${target_pid} " ] ||
-		{ checks_ok=; echo "JOB_TERM_CB term calls='${term_calls}' (want '${target_pid} ')" >&2; }
-	[ -z "${fin_pids}" ] ||
-		{ checks_ok=; echo "finalize running_pids='${fin_pids}' (want empty - the kill was verified)" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok5_abort17' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	verify_id_set exp_ok act_ok 'ok1_abort17b' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${term_calls}" = "${target_pid} " ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_TERM_CB term calls='${term_calls}' (want '${target_pid} ')" >&2
+	[ -z "${fin_pids}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "finalize running_pids='${fin_pids}' (want empty - the kill was verified)" >&2
+	verify_id_set exp_aborted act_aborted 'ok5_abort17' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'ok1_abort17b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, killed PID ${target_pid}, running_pids='${fin_pids}'"
 		return 0
 	else
@@ -1562,7 +1562,7 @@ test_abort_18() {
 		sched_rv msg_cnt term_calls target_pid fin_pids \
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_ok act_ok exp_aborted act_aborted \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=8 \
 		jobs='ok5_abort18 ok1_abort18b'
 
 	local \
@@ -1578,25 +1578,25 @@ test_abort_18() {
 
 	run_abort_term_scenario ab18_term_cb ok5_abort18 ok1_abort18b
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
-	[ -n "${target_pid}" ] ||
-		{ checks_ok=; echo "job ok5_abort18 recorded no PID" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	[ -n "${target_pid}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "job ok5_abort18 recorded no PID" >&2
 	# One term call, carrying exactly the aborted job's own PID
-	[ "${term_calls}" = "${target_pid} " ] ||
-		{ checks_ok=; echo "JOB_TERM_CB calls='${term_calls}' (want '${target_pid} ')" >&2; }
-	[ -n "${target_pid}" ] && [ "${fin_pids}" = "${target_pid}" ] ||
-		{ checks_ok=; echo "finalize running_pids='${fin_pids}' (want the aborted PID '${target_pid}')" >&2; }
-	verify_id_set exp_aborted act_aborted 'ok5_abort18' "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
-	verify_id_set exp_ok act_ok 'ok1_abort18b' "${ok_raw}" ||
-		{ checks_ok=; echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] ||
-		{ checks_ok=; echo "fail/unfinished/undispatched/expired must all be empty" >&2; }
+	[ "${term_calls}" = "${target_pid} " ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_TERM_CB calls='${term_calls}' (want '${target_pid} ')" >&2
+	[ -n "${target_pid}" ] && [ "${fin_pids}" = "${target_pid}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "finalize running_pids='${fin_pids}' (want the aborted PID '${target_pid}')" >&2
+	verify_id_set exp_aborted act_aborted 'ok5_abort18' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'ok1_abort18b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, killed PID ${target_pid}, running_pids='${fin_pids}'"
 		return 0
 	else

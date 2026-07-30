@@ -39,8 +39,8 @@ test_security_01() {
 
 	local \
 		TEST_ID=security_01 \
-		sched_rv bad_id bad_cnt=0 msg_cnt=0 \
-		checks_ok=1 \
+		sched_rv bad_id bad_cnt=0 rejected=0 msg_cnt=0 \
+		checks_pass=0 checks_exp=5 \
 		inject_cmd=security_01_touch_inject
 
 	local \
@@ -110,22 +110,25 @@ test_security_01() {
 			schedule_jobs "validok ${bad_id}" &
 		wait "$!"
 		sched_rv=$?
-		[ "${sched_rv}" = 1 ] ||
-			{ checks_ok=; echo "id '${bad_id}': sched_rv=${sched_rv}, expected 1" >&2; }
+		[ "${sched_rv}" = 1 ] && rejected=$((rejected + 1)) ||
+			echo "id '${bad_id}': sched_rv=${sched_rv}, expected 1" >&2
 	done
 
+	[ "${rejected}" = "${bad_cnt}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "rejected ${rejected} of ${bad_cnt} invalid IDs" >&2
+
 	# Nothing may be dispatched from a rejected list - not even the valid ID
-	[ ! -s "${ARGS_FILE}" ] ||
-		{ checks_ok=; echo "jobs ran despite rejection: $(cat "${ARGS_FILE}")" >&2; }
+	[ ! -s "${ARGS_FILE}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "jobs ran despite rejection: $(cat "${ARGS_FILE}")" >&2
 
 	# Injection-shaped IDs must never be executed
-	[ ! -e "${INJECT_FILE}" ] ||
-		{ checks_ok=; echo "injection marker exists" >&2; }
+	[ ! -e "${INJECT_FILE}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "injection marker exists" >&2
 
 	# One error message per rejected list
 	[ -f "${MSG_FILE}" ] && msg_cnt="$(wc -l < "${MSG_FILE}")"
-	[ "${msg_cnt}" -eq "${bad_cnt}" ] ||
-		{ checks_ok=; echo "expected ${bad_cnt} error messages, got ${msg_cnt}" >&2; }
+	[ "${msg_cnt}" -eq "${bad_cnt}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "expected ${bad_cnt} error messages, got ${msg_cnt}" >&2
 
 	# Control: valid IDs, including one with a leading digit, still run
 	SCHED_FAIL_MSG_CB=security_01_fail_msg \
@@ -136,12 +139,12 @@ test_security_01() {
 		schedule_jobs 'plain_ok 0digit_ok' &
 	wait "$!"
 	sched_rv=$?
-	[ "${sched_rv}" = 0 ] && [ "$(sed '/^$/d' "${ARGS_FILE}" 2>/dev/null | wc -l)" = 2 ] ||
-		{ checks_ok=; echo "control run: sched_rv=${sched_rv}, jobs run: $(cat "${ARGS_FILE}" 2>/dev/null)" >&2; }
+	[ "${sched_rv}" = 0 ] && [ "$(sed '/^$/d' "${ARGS_FILE}" 2>/dev/null | wc -l)" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "control run: sched_rv=${sched_rv}, jobs run: $(cat "${ARGS_FILE}" 2>/dev/null)" >&2
 
 	rm -f "${ARGS_FILE}" "${MSG_FILE}" "${INJECT_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "${bad_cnt} invalid IDs rejected, control run ok"
 		return 0
 	else
@@ -846,7 +849,7 @@ test_security_13() {
 	local \
 		TEST_ID=security_13 \
 		sched_rv msg_cnt done_line ok_id long_id \
-		checks_ok=1
+		checks_pass=0 checks_exp=10
 
 	local \
 		ARGS_FILE="/tmp/sched.idlen.args.${TEST_ID}.$$" \
@@ -878,18 +881,18 @@ test_security_13() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "2020-char ID: sched_rv=${sched_rv}, expected 0" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "2020-char ID: sched_rv=${sched_rv}, expected 0" >&2
 
-	read_first_line --rm done_line "${DONE_FILE}" ||
-		{ checks_ok=; echo "2020-char ID: no JOB_DONE_CB record" >&2; }
-	[ "${done_line}" = "${ok_id} 0" ] ||
-		{ checks_ok=; echo "2020-char ID: JOB_DONE_CB got a record of ${#done_line} chars, expected the ID verbatim with rv 0" >&2; }
+	read_first_line --rm done_line "${DONE_FILE}" && checks_pass=$((checks_pass + 1)) ||
+		echo "2020-char ID: no JOB_DONE_CB record" >&2
+	[ "${done_line}" = "${ok_id} 0" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "2020-char ID: JOB_DONE_CB got a record of ${#done_line} chars, expected the ID verbatim with rv 0" >&2
 
 	msg_cnt=0
 	[ -f "${MSG_FILE}" ] && msg_cnt="$(wc -l < "${MSG_FILE}")"
-	[ "${msg_cnt}" -eq 0 ] ||
-		{ checks_ok=; echo "2020-char ID: ${msg_cnt} error message(s), expected 0" >&2; }
+	[ "${msg_cnt}" -eq 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "2020-char ID: ${msg_cnt} error message(s), expected 0" >&2
 
 	rm -f "${ARGS_FILE}" "${MSG_FILE}"
 
@@ -903,29 +906,32 @@ test_security_13() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 1 ] ||
-		{ checks_ok=; echo "2021-char ID: sched_rv=${sched_rv}, expected 1" >&2; }
+	[ "${sched_rv}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "2021-char ID: sched_rv=${sched_rv}, expected 1" >&2
 
-	[ ! -s "${ARGS_FILE}" ] ||
-		{ checks_ok=; echo "2021-char ID: job dispatched despite rejection" >&2; }
+	[ ! -s "${ARGS_FILE}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "2021-char ID: job dispatched despite rejection" >&2
 
-	[ ! -s "${DONE_FILE}" ] ||
-		{ checks_ok=; echo "2021-char ID: JOB_DONE_CB invoked despite rejection" >&2; }
+	[ ! -s "${DONE_FILE}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "2021-char ID: JOB_DONE_CB invoked despite rejection" >&2
 
 	msg_cnt=0
 	[ -f "${MSG_FILE}" ] && msg_cnt="$(wc -l < "${MSG_FILE}")"
-	[ "${msg_cnt}" -eq 1 ] ||
-		{ checks_ok=; echo "2021-char ID: ${msg_cnt} error message(s), expected 1" >&2; }
+	[ "${msg_cnt}" -eq 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "2021-char ID: ${msg_cnt} error message(s), expected 1" >&2
 
 	# jobs_init() applies the same cap
-	jobs_init "${long_id}" &&
-		{ checks_ok=; echo "jobs_init accepted the 2021-char ID" >&2; }
-	jobs_init "${ok_id}" ||
-		{ checks_ok=; echo "jobs_init rejected the 2020-char ID" >&2; }
+	if jobs_init "${long_id}"; then
+		echo "jobs_init accepted the 2021-char ID" >&2
+	else
+		checks_pass=$((checks_pass + 1))
+	fi
+	jobs_init "${ok_id}" && checks_pass=$((checks_pass + 1)) ||
+		echo "jobs_init rejected the 2020-char ID" >&2
 
 	rm -f "${ARGS_FILE}" "${DONE_FILE}" "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "2020-char ID ran and reported verbatim, 2021-char ID rejected"
 		return 0
 	else

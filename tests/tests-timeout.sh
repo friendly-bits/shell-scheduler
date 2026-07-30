@@ -134,7 +134,7 @@ test_timeout_02() {
 	local \
 		TEST_ID=timeout_02 \
 		sched_rv pid_a pid_b \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=5 \
 		jobs='hang_t02a hang_t02b instant_t02a instant_t02b instant_t02c'
 
 	local \
@@ -163,21 +163,21 @@ test_timeout_02() {
 	pid_a="$(sed -n 's/^3|hang_t02a|124|\([0-9][0-9]*\)$/\1/p' "${DONE_FILE}" 2>/dev/null)"
 	pid_b="$(sed -n 's/^3|hang_t02b|124|\([0-9][0-9]*\)$/\1/p' "${DONE_FILE}" 2>/dev/null)"
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
-	is_uint "${pid_a}" && is_uint "${pid_b}" ||
-		{ checks_ok=; echo "expected exactly one timeout record per hung job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
-	[ "$(wc -l < "${DONE_FILE}" 2>/dev/null)" -eq 5 ] 2>/dev/null ||
-		{ checks_ok=; echo "expected exactly 5 callback records: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 0" >&2
+	is_uint "${pid_a}" && is_uint "${pid_b}" && checks_pass=$((checks_pass + 1)) ||
+		echo "expected exactly one timeout record per hung job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2
+	[ "$(wc -l < "${DONE_FILE}" 2>/dev/null)" -eq 5 ] 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "expected exactly 5 callback records: $(cat "${DONE_FILE}" 2>/dev/null)" >&2
 	grep -q '^expired=hang_t02a hang_t02b$' "${FIN_FILE}" 2>/dev/null &&
 	grep -q '^fail=$' "${FIN_FILE}" 2>/dev/null &&
-	grep -q '^unfin=$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
-	grep -q "^pids=${pid_a} ${pid_b}$" "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "abandoned pids mismatch or duplicated" >&2; }
+	grep -q '^unfin=$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2
+	grep -q "^pids=${pid_a} ${pid_b}$" "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "abandoned pids mismatch or duplicated" >&2
 
 	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -200,7 +200,7 @@ test_timeout_03() {
 	local \
 		TEST_ID=timeout_03 \
 		sched_rv pid_cnt \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		jobs='hang_t03a hang_t03b hang_t03c'
 
 	local \
@@ -223,23 +223,23 @@ test_timeout_03() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 0" >&2
 	[ "$(grep -c -F '|124|' "${DONE_FILE}" 2>/dev/null)" = 3 ] &&
 	grep -q -F '3|hang_t03a|124|' "${DONE_FILE}" 2>/dev/null &&
 	grep -q -F '3|hang_t03b|124|' "${DONE_FILE}" 2>/dev/null &&
-	grep -q -F '3|hang_t03c|124|' "${DONE_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "expected one timeout record per job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	grep -q -F '3|hang_t03c|124|' "${DONE_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "expected one timeout record per job: $(cat "${DONE_FILE}" 2>/dev/null)" >&2
 	grep -qxF 'expired=hang_t03a hang_t03b hang_t03c' "${FIN_FILE}" 2>/dev/null &&
 	grep -qxF 'fail=' "${FIN_FILE}" 2>/dev/null &&
-	grep -qxF 'unfin=' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
+	grep -qxF 'unfin=' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2
 	pid_cnt="$(sed -n 's/^pids=//p' "${FIN_FILE}" 2>/dev/null | wc -w)"
-	[ "${pid_cnt}" = 3 ] ||
-		{ checks_ok=; echo "expected 3 abandoned pids, got '${pid_cnt}'" >&2; }
+	[ "${pid_cnt}" = 3 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "expected 3 abandoned pids, got '${pid_cnt}'" >&2
 
 	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -262,7 +262,7 @@ test_timeout_04() {
 	local \
 		TEST_ID=timeout_04 \
 		sched_rv \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		jobs='ok1_t04 hang_t04'
 
 	local \
@@ -287,20 +287,20 @@ test_timeout_04() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
-	grep -q '^2|ok1_t04|0|$' "${DONE_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "missing normal completion record for ok1_t04" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 0" >&2
+	grep -q '^2|ok1_t04|0|$' "${DONE_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "missing normal completion record for ok1_t04" >&2
 	[ "$(grep -c -F '|124|' "${DONE_FILE}" 2>/dev/null)" = 1 ] &&
-	grep -q '^3|hang_t04|124|' "${DONE_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "expected exactly one timeout record (hang_t04): $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	grep -q '^3|hang_t04|124|' "${DONE_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "expected exactly one timeout record (hang_t04): $(cat "${DONE_FILE}" 2>/dev/null)" >&2
 	grep -q '^ok=ok1_t04$' "${FIN_FILE}" 2>/dev/null &&
 	grep -q '^fail=$' "${FIN_FILE}" 2>/dev/null &&
-	grep -q '^expired=hang_t04$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
+	grep -q '^expired=hang_t04$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "outcome sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2
 
 	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -331,7 +331,7 @@ test_timeout_05() {
 	local \
 		TEST_ID=timeout_05 \
 		sched_rv hung_pid \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=6 \
 		jobs='hang_t05x ok2_t05'
 
 	local \
@@ -355,18 +355,18 @@ test_timeout_05() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
-	[ "$(grep -c '^3|hang_t05x|124|' "${DONE_FILE}" 2>/dev/null)" = 1 ] ||
-		{ checks_ok=; echo "expected exactly one timeout record for hang_t05x" >&2; }
-	grep -q '^2|ok2_t05|0|$' "${DONE_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "missing ok record for ok2_t05" >&2; }
-	[ "$(wc -l < "${DONE_FILE}" 2>/dev/null)" -eq 2 ] 2>/dev/null ||
-		{ checks_ok=; echo "unexpected extra callback invocations: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 0" >&2
+	[ "$(grep -c '^3|hang_t05x|124|' "${DONE_FILE}" 2>/dev/null)" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "expected exactly one timeout record for hang_t05x" >&2
+	grep -q '^2|ok2_t05|0|$' "${DONE_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "missing ok record for ok2_t05" >&2
+	[ "$(wc -l < "${DONE_FILE}" 2>/dev/null)" -eq 2 ] 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "unexpected extra callback invocations: $(cat "${DONE_FILE}" 2>/dev/null)" >&2
 	grep -q '^expired=hang_t05x$' "${FIN_FILE}" 2>/dev/null &&
-	grep -q '^fail=$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "expired/fail set mismatch (job classified twice?)" >&2; }
-	grep -q '^pids=$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "abandoned pid not delisted after record discard" >&2; }
+	grep -q '^fail=$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "expired/fail set mismatch (job classified twice?)" >&2
+	grep -q '^pids=$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "abandoned pid not delisted after record discard" >&2
 
 	# The hung job's process is still sleeping; clean it up
 	hung_pid="$(sed -n 's/^3|hang_t05x|124|\([0-9][0-9]*\)$/\1/p' "${DONE_FILE}" 2>/dev/null)"
@@ -374,7 +374,7 @@ test_timeout_05() {
 
 	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -400,7 +400,7 @@ test_timeout_06() {
 	local \
 		TEST_ID=timeout_06 \
 		sched_rv done_pid \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=5 \
 		jobs='hang_t06 instant_t06a instant_t06b'
 
 	local \
@@ -426,20 +426,20 @@ test_timeout_06() {
 	# Timed-out job: 3 args, rv 124, uint pid
 	done_pid="$(sed -n 's/^3|hang_t06|124|\([0-9][0-9]*\)$/\1/p' "${DONE_FILE}" 2>/dev/null)"
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
-	is_uint "${done_pid}" || { checks_ok=; echo "no timeout record with uint pid in DONE_FILE" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 0" >&2
+	is_uint "${done_pid}" && checks_pass=$((checks_pass + 1)) || echo "no timeout record with uint pid in DONE_FILE" >&2
 	grep -q '^2|instant_t06a|0|$' "${DONE_FILE}" 2>/dev/null &&
-	grep -q '^2|instant_t06b|0|$' "${DONE_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "missing 2-arg ok records in DONE_FILE" >&2; }
+	grep -q '^2|instant_t06b|0|$' "${DONE_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "missing 2-arg ok records in DONE_FILE" >&2
 	grep -q "^expired=hang_t06$" "${FIN_FILE}" 2>/dev/null &&
-	grep -q "^fail=$" "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "finalize expired/fail-set mismatch" >&2; }
-	grep -q "^pids=${done_pid}$" "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "finalize running_pids != pid reported to JOB_DONE_CB" >&2; }
+	grep -q "^fail=$" "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "finalize expired/fail-set mismatch" >&2
+	grep -q "^pids=${done_pid}$" "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "finalize running_pids != pid reported to JOB_DONE_CB" >&2
 
 	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, abandoned_pid=${done_pid}"
 		return 0
 	else
@@ -462,7 +462,7 @@ test_timeout_07() {
 	local \
 		TEST_ID=timeout_07 \
 		sched_rv \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		jobs='hang_t07 instant_t07'
 
 	local FIN_FILE="/tmp/sched.t07.fin.$$"
@@ -483,17 +483,17 @@ test_timeout_07() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
-	grep -q '^ok=instant_t07$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "queued job did not complete" >&2; }
-	grep -q '^expired=hang_t07$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "hung job not classified as expired" >&2; }
-	grep -q '^undisp=$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "undispatched set not empty" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 0" >&2
+	grep -q '^ok=instant_t07$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "queued job did not complete" >&2
+	grep -q '^expired=hang_t07$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "hung job not classified as expired" >&2
+	grep -q '^undisp=$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "undispatched set not empty" >&2
 
 	rm -f "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -551,7 +551,7 @@ test_timeout_09() {
 	local \
 		TEST_ID=timeout_09 \
 		sched_rv \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=2 \
 		jobs='t09_g124'
 
 	local DONE_FILE="/tmp/sched.t09.done.$$"
@@ -572,13 +572,13 @@ test_timeout_09() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 0" >&2; }
-	grep -q '^2|t09_g124|124|$' "${DONE_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "expected 2-arg record with rv 124, got: $(cat "${DONE_FILE}" 2>/dev/null)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 0" >&2
+	grep -q '^2|t09_g124|124|$' "${DONE_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "expected 2-arg record with rv 124, got: $(cat "${DONE_FILE}" 2>/dev/null)" >&2
 
 	rm -f "${DONE_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -604,7 +604,7 @@ test_timeout_10() {
 	local \
 		TEST_ID=timeout_10 \
 		sched_rv \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=3 \
 		jobs='hang_t10'
 
 	local \
@@ -627,16 +627,16 @@ test_timeout_10() {
 	wait "$!"
 	sched_rv=$?
 
-	[ "${sched_rv}" = 82 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 82" >&2; }
-	[ ! -s "${DONE_FILE}" ] ||
-		{ checks_ok=; echo "unexpected completion records: $(cat "${DONE_FILE}")" >&2; }
+	[ "${sched_rv}" = 82 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 82" >&2
+	[ ! -s "${DONE_FILE}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "unexpected completion records: $(cat "${DONE_FILE}")" >&2
 	grep -q '^fail=$' "${FIN_FILE}" 2>/dev/null &&
-	grep -q '^unfin=hang_t10$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "finalize sets mismatch" >&2; }
+	grep -q '^unfin=hang_t10$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "finalize sets mismatch" >&2
 
 	rm -f "${DONE_FILE}" "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -663,7 +663,7 @@ test_timeout_11() {
 	local \
 		TEST_ID=timeout_11 \
 		rv_abort rv_drain \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		jobs='hang_t11a hang_t11b'
 
 	local FIN_FILE="/tmp/sched.t11.fin.$$"
@@ -689,10 +689,10 @@ test_timeout_11() {
 	wait "$!"
 	rv_abort=$?
 
-	[ "${rv_abort}" = 81 ] || { checks_ok=; echo "rv_abort=${rv_abort}, expected 81" >&2; }
+	[ "${rv_abort}" = 81 ] && checks_pass=$((checks_pass + 1)) || echo "rv_abort=${rv_abort}, expected 81" >&2
 	grep -q '^expired=hang_t11a$' "${FIN_FILE}" 2>/dev/null &&
-	grep -q '^unfin=hang_t11b$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "half-drained sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
+	grep -q '^unfin=hang_t11b$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "half-drained sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2
 
 	rm -f "${FIN_FILE}"
 
@@ -710,14 +710,14 @@ test_timeout_11() {
 	wait "$!"
 	rv_drain=$?
 
-	[ "${rv_drain}" = 0 ] || { checks_ok=; echo "rv_drain=${rv_drain}, expected 0" >&2; }
+	[ "${rv_drain}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "rv_drain=${rv_drain}, expected 0" >&2
 	grep -q '^expired=hang_t11a hang_t11b$' "${FIN_FILE}" 2>/dev/null &&
-	grep -q '^unfin=$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "full-drain sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
+	grep -q '^unfin=$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "full-drain sets mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2
 
 	rm -f "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv_abort=${rv_abort}, rv_drain=${rv_drain}"
 		return 0
 	else
@@ -748,7 +748,7 @@ test_timeout_12() {
 	local \
 		TEST_ID=timeout_12 \
 		sched_rv cb_pid \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=3 \
 		jobs='hang_t12'
 
 	local \
@@ -774,15 +774,15 @@ test_timeout_12() {
 
 	read_first_line --rm cb_pid "${PID_FILE}"
 
-	[ "${sched_rv}" = 98 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 98" >&2; }
-	grep -q '^expired=hang_t12$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "expired set mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
-	is_uint "${cb_pid}" && grep -q "^pids=${cb_pid}$" "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "abandoned pid mismatch: cb saw '${cb_pid}'" >&2; }
+	[ "${sched_rv}" = 98 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 98" >&2
+	grep -q '^expired=hang_t12$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "expired set mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2
+	is_uint "${cb_pid}" && grep -q "^pids=${cb_pid}$" "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "abandoned pid mismatch: cb saw '${cb_pid}'" >&2
 
 	rm -f "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}"
 		return 0
 	else
@@ -810,7 +810,7 @@ test_timeout_13() {
 	local \
 		TEST_ID=timeout_13 \
 		sched_rv start_s end_s elapsed \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		jobs='hang_t13a hang_t13b hang_t13c'
 
 	local FIN_FILE="/tmp/sched.t13.fin.$$"
@@ -835,17 +835,17 @@ test_timeout_13() {
 	end_s=$(date +%s)
 	elapsed=$((end_s - start_s))
 
-	[ "${sched_rv}" = 81 ] || { checks_ok=; echo "sched_rv=${sched_rv}, expected 81" >&2; }
-	grep -q '^undisp=$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "job left undispatched: dispatch did not reset the idle timeout" >&2; }
-	grep -q '^unfin=hang_t13a hang_t13b hang_t13c$' "${FIN_FILE}" 2>/dev/null ||
-		{ checks_ok=; echo "unfinished set mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2; }
-	[ "${elapsed}" -ge 3 ] && [ "${elapsed}" -le 6 ] ||
-		{ checks_ok=; echo "elapsed=${elapsed}s, expected 3..6" >&2; }
+	[ "${sched_rv}" = 81 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv}, expected 81" >&2
+	grep -q '^undisp=$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "job left undispatched: dispatch did not reset the idle timeout" >&2
+	grep -q '^unfin=hang_t13a hang_t13b hang_t13c$' "${FIN_FILE}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "unfinished set mismatch: $(tr '\n' ' ' < "${FIN_FILE}" 2>/dev/null)" >&2
+	[ "${elapsed}" -ge 3 ] && [ "${elapsed}" -le 6 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "elapsed=${elapsed}s, expected 3..6" >&2
 
 	rm -f "${FIN_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s"
 		return 0
 	else
@@ -930,7 +930,7 @@ test_timeout_15() {
 		# TO15_TARGET is the target under the fixed name the two callbacks read
 		local \
 			label="${1:?}" target="${2:?}" other="${3:?}" tick_cb="${4}" done_cb="${5:?}" \
-			sched_rv exp_ok act_ok hits=0 winner=neither pass_ok=1 \
+			sched_rv exp_ok act_ok hits=0 winner=neither checks_pass=0 checks_exp=6 \
 			ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 			TO15_TARGET="${2}"
 
@@ -958,27 +958,31 @@ test_timeout_15() {
 		case " ${aborted_raw} " in *" ${target} "*) hits=$((hits + 1)); winner=aborted ;; esac
 		winners="${winners}${winners:+ }${label}=${winner}"
 
-		[ "${hits}" = 1 ] ||
-			{ pass_ok=; echo "${label}: '${target}' is in ${hits} of {expired, aborted} (want exactly 1)" >&2; }
+		[ "${hits}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: '${target}' is in ${hits} of {expired, aborted} (want exactly 1)" >&2
 		case " ${ok_raw} ${fail_raw} ${unfinished_raw} ${undispatched_raw} " in
 			*" ${target} "*)
-				pass_ok=; echo "${label}: '${target}' also in ok/fail/unfinished/undispatched" >&2
+				echo "${label}: '${target}' also in ok/fail/unfinished/undispatched" >&2
 			;;
+			*) checks_pass=$((checks_pass + 1))
 		esac
 		# The run must have outlived the target's deadline
-		verify_id_set exp_ok act_ok "${other}" "${ok_raw}" ||
-			{ pass_ok=; echo "${label}: ok: expected='${exp_ok}' actual='${act_ok}'" >&2; }
-		verify_id_partition "${target} ${other}" ||
-			{ pass_ok=; echo "${label}: the six ID sets do not partition '${target} ${other}'" >&2; }
-		[ "${sched_rv}" = 0 ] ||
-			{ pass_ok=; echo "${label}: sched_rv=${sched_rv} (want 0)" >&2; }
-		msgs_have "${MSG_FILE}" 'Not all jobs are done' &&
-			{ pass_ok=; echo "${label}: running-job counter left unsound" >&2; }
+		verify_id_set exp_ok act_ok "${other}" "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+		verify_id_partition "${target} ${other}" && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: the six ID sets do not partition '${target} ${other}'" >&2
+		[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: sched_rv=${sched_rv} (want 0)" >&2
+		if msgs_have "${MSG_FILE}" 'Not all jobs are done'; then
+			echo "${label}: running-job counter left unsound" >&2
+		else
+			checks_pass=$((checks_pass + 1))
+		fi
 
-		[ -n "${pass_ok}" ] || print_id_sets >&2
+		[ "${checks_pass}" = "${checks_exp}" ] || print_id_sets >&2
 		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
 
-		[ -n "${pass_ok}" ]
+		[ "${checks_pass}" = "${checks_exp}" ]
 	}
 
 	local \

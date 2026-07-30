@@ -298,7 +298,7 @@ test_scheduler_termination_07() {
 		pids \
 		schedule_pid \
 		killer_pid \
-		all_ok=1
+		sigs_run=0 sigs_ok=0
 
 	local \
 		SIG_RV_FILE="/tmp/sched.sigintterm.rv.${TEST_ID:?}.$$" \
@@ -356,25 +356,30 @@ test_scheduler_termination_07() {
 
 		read_first_line --rm pids "${SIG_PIDS_FILE}"
 
+		sigs_run=$((sigs_run + 1))
 		if [ "${sched_rv}" = "${expect_rv}" ] &&
 			read_first_line --rm callback_rv "${SIG_RV_FILE}" &&
 			[ "${callback_rv}" = "${expect_rv}" ] &&
 			[ -n "${pids}" ]
 		then
+			sigs_ok=$((sigs_ok + 1))
 			printf 'SIG%s: %s\n' "${sig}" "${PASS}"
 		else
-			all_ok=0
 			printf 'SIG%s: %s (expect_rv=%s, sched_rv=%s, callback_rv=%s, pids=%s)\n' \
 				"${sig}" "${FAIL}" "${expect_rv}" "${sched_rv}" "${callback_rv}" "${pids}"
 		fi
 	done
 
-	if [ "${all_ok}" = 1 ]
+	if [ "${sigs_run}" = 0 ]
 	then
-		PASS
+		SKIP "every signal sub-case was skipped"
+		return 2
+	elif [ "${sigs_ok}" = "${sigs_run}" ]
+	then
+		PASS "${sigs_ok}/${sigs_run} signals"
 		return 0
 	else
-		FAIL
+		FAIL "${sigs_ok}/${sigs_run} signals"
 		return 1
 	fi
 }
@@ -440,7 +445,7 @@ test_scheduler_termination_09() {
 		elapsed \
 		schedule_pid \
 		killer_pid \
-		all_ok=1
+		sigs_run=0 sigs_ok=0
 
 	# shellcheck disable=SC2034
 	local \
@@ -501,23 +506,28 @@ test_scheduler_termination_09() {
 
 		elapsed=$((end_s - start_s))
 
+		sigs_run=$((sigs_run + 1))
 		if [ "${sched_rv}" = "${expect_rv}" ] &&
 			[ "${elapsed}" -le 3 ]
 		then
+			sigs_ok=$((sigs_ok + 1))
 			printf 'SIG%s: %s (elapsed=%ss, sched_rv=%s)\n' "${sig}" "${PASS}" "${elapsed}" "${sched_rv}"
 		else
-			all_ok=0
 			printf 'SIG%s: %s (elapsed=%ss, expected <=3s, sched_rv=%s, expected %s)\n' \
 				"${sig}" "${FAIL}" "${elapsed}" "${sched_rv}" "${expect_rv}"
 		fi
 	done
 
-	if [ "${all_ok}" = 1 ]
+	if [ "${sigs_run}" = 0 ]
 	then
-		PASS
+		SKIP "every signal sub-case was skipped"
+		return 2
+	elif [ "${sigs_ok}" = "${sigs_run}" ]
+	then
+		PASS "${sigs_ok}/${sigs_run} signals"
 		return 0
 	else
-		FAIL
+		FAIL "${sigs_ok}/${sigs_run} signals"
 		return 1
 	fi
 }
@@ -530,7 +540,7 @@ test_scheduler_termination_10() {
 		start_s \
 		end_s \
 		elapsed \
-		all_ok=1
+		checks_pass=0 checks_exp=2
 
 	print_test_header "${TEST_ID:?}" "Timeouts fire within their configured window" "hang"
 
@@ -554,9 +564,9 @@ test_scheduler_termination_10() {
 		[ "${elapsed}" -ge 3 ] &&
 		[ "${elapsed}" -le 6 ]
 	then
+		checks_pass=$((checks_pass + 1))
 		printf 'idle: %s (elapsed=%ss)\n' "${PASS}" "${elapsed}"
 	else
-		all_ok=0
 		printf 'idle: %s (elapsed=%ss, sched_rv=%s, expected 3<=elapsed<=6 and sched_rv=81)\n' "${FAIL}" "${elapsed}" "${sched_rv}"
 	fi
 
@@ -580,13 +590,13 @@ test_scheduler_termination_10() {
 		[ "${elapsed}" -ge 3 ] &&
 		[ "${elapsed}" -le 6 ]
 	then
+		checks_pass=$((checks_pass + 1))
 		printf 'global: %s (elapsed=%ss)\n' "${PASS}" "${elapsed}"
 	else
-		all_ok=0
 		printf 'global: %s (elapsed=%ss, sched_rv=%s, expected 3<=elapsed<=6 and sched_rv=82)\n' "${FAIL}" "${elapsed}" "${sched_rv}"
 	fi
 
-	if [ "${all_ok}" = 1 ]
+	if [ "${checks_pass}" = "${checks_exp}" ]
 	then
 		PASS
 		return 0
@@ -892,7 +902,7 @@ test_scheduler_termination_18() {
 		sched_fifo \
 		undispatched \
 		started_cnt \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		jobs='ok2_st18a ok2_st18b ok2_st18c ok2_st18d' \
 		want_undispatched='ok2_st18b ok2_st18c ok2_st18d'
 
@@ -929,20 +939,20 @@ test_scheduler_termination_18() {
 	started_cnt=$(sed '/^$/d' "${STARTED_F}" | wc -l)
 	read_first_line --rm undispatched "${UNDISPATCHED_FILE}"
 
-	[ "${sched_rv}" = 1 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 1)"; }
+	[ "${sched_rv}" = 1 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 1)"
 
-	scheduler_termination_18_same_set "${undispatched}" "${want_undispatched}" ||
-		{ checks_ok=; echo "undispatched='${undispatched}' (want '${want_undispatched}')"; }
+	scheduler_termination_18_same_set "${undispatched}" "${want_undispatched}" && checks_pass=$((checks_pass + 1)) ||
+		echo "undispatched='${undispatched}' (want '${want_undispatched}')"
 
-	[ "${started_cnt}" -eq 1 ] ||
-		{ checks_ok=; echo "started ${started_cnt} job(s) (want 1)"; }
+	[ "${started_cnt}" -eq 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "started ${started_cnt} job(s) (want 1)"
 
-	grep -qF FIFO "${MSGS_F}" 2>/dev/null ||
-		{ checks_ok=; echo "no failure message mentioning the FIFO"; }
+	grep -qF FIFO "${MSGS_F}" 2>/dev/null && checks_pass=$((checks_pass + 1)) ||
+		echo "no failure message mentioning the FIFO"
 
 	rm -f "${STARTED_F}" "${MSGS_F}"
 
-	if [ -n "${checks_ok}" ]
+	if [ "${checks_pass}" = "${checks_exp}" ]
 	then
 		PASS "undispatched='${undispatched}', started=${started_cnt}"
 		return 0

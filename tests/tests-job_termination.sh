@@ -213,7 +213,7 @@ _jt_timeout_scenario() {
 	local \
 		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_job="${5}" \
 		jt_variant="${6}" \
-		sched_rv checks_ok=1 done_rec done_pid fin_pids fin_expired
+		sched_rv checks_pass=0 checks_exp=5 done_rec done_pid fin_pids fin_expired
 
 	local \
 		PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
@@ -244,30 +244,30 @@ _jt_timeout_scenario() {
 	wait "${!}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 0)"
 
 	read_first_line --rm done_rec "${DONE_F}"
 	done_pid="${done_rec#expired|${jt_job}|}"
 	done_pid="${done_pid%%|*}"
 	case "${done_rec}" in
-		"expired|${jt_job}|${done_pid}|dead_at_cb=yes") ;;
-		*) checks_ok=; echo "done record '${done_rec}' (want 'expired|${jt_job}|<pid>|dead_at_cb=yes')" ;;
+		"expired|${jt_job}|${done_pid}|dead_at_cb=yes") checks_pass=$((checks_pass + 1)) ;;
+		*) echo "done record '${done_rec}' (want 'expired|${jt_job}|<pid>|dead_at_cb=yes')" ;;
 	esac
 
-	jt_finalize_get fin_expired expired "${FINALIZE_F}" && [ "${fin_expired}" = "${jt_job}" ] ||
-		{ checks_ok=; echo "expired bucket '${fin_expired}' (want '${jt_job}')"; }
+	jt_finalize_get fin_expired expired "${FINALIZE_F}" && [ "${fin_expired}" = "${jt_job}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "expired bucket '${fin_expired}' (want '${jt_job}')"
 
 	# No verification in a /proc-based library:
 	#   the expired job's wrapper PID must still be reported in running_pids
-	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ "${fin_pids}" = "${done_pid}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want '${done_pid}' - unverified kill)"; }
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ "${fin_pids}" = "${done_pid}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want '${done_pid}' - unverified kill)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "job child still alive: ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "job child still alive: ${ALIVE_PIDS}"
 
 	jt_teardown "${PIDS_F}" "" "${FINALIZE_F}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "killed at expiry, expired='${fin_expired}', running_pids='${fin_pids}' (unverified)"
 		return 0
 	else
@@ -287,7 +287,7 @@ _jt_abort_scenario() {
 	local \
 		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_jobs="${5}" \
 		jt_variant="${6}" \
-		sched_pid sched_rv checks_ok=1 fin_pids fin_unfin pid_cnt=0 job_cnt=0 p
+		sched_pid sched_rv checks_pass=0 checks_exp=4 fin_pids fin_unfin pid_cnt=0 job_cnt=0 p
 
 	local \
 		PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$" \
@@ -320,23 +320,23 @@ _jt_abort_scenario() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
-	jt_finalize_get fin_unfin unfin "${FINALIZE_F}" && jt_same_set "${fin_unfin}" "${jt_jobs}" ||
-		{ checks_ok=; echo "unfinished bucket '${fin_unfin}' (want '${jt_jobs}')"; }
+	jt_finalize_get fin_unfin unfin "${FINALIZE_F}" && jt_same_set "${fin_unfin}" "${jt_jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "unfinished bucket '${fin_unfin}' (want '${jt_jobs}')"
 
 	# Kills are unverified: every wrapper PID must still be reported
 	jt_finalize_get fin_pids pids "${FINALIZE_F}"
 	for p in ${fin_pids}; do pid_cnt=$((pid_cnt + 1)); done
-	[ "${pid_cnt}" = "${job_cnt}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want ${job_cnt} PIDs - unverified kills)"; }
+	[ "${pid_cnt}" = "${job_cnt}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want ${job_cnt} PIDs - unverified kills)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "job children still alive: ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "job children still alive: ${ALIVE_PIDS}"
 
 	jt_teardown "${PIDS_F}" "" "${FINALIZE_F}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, unfinished='${fin_unfin}', children dead, running_pids has ${job_cnt} (unverified)"
 		return 0
 	else
@@ -355,7 +355,7 @@ _jt_abort_scenario() {
 _jt_strag_scenario() {
 	local \
 		TEST_ID="${1}" jt_cb="${2}" jt_job="${3}" jt_variant="${4}" \
-		sched_rv checks_ok=1 alive_cnt=0 pid
+		sched_rv checks_pass=0 checks_exp=2 alive_cnt=0 pid
 
 	local PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
 	rm -f "${PIDS_F}"
@@ -377,19 +377,19 @@ _jt_strag_scenario() {
 	wait "${!}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 0)"
 
 	while read -r pid; do
 		[ -n "${pid}" ] || continue
 		kill -0 "${pid}" 2>/dev/null && alive_cnt=$((alive_cnt + 1))
 	done < "${PIDS_F}"
 
-	[ "${alive_cnt}" = 2 ] ||
-		{ checks_ok=; echo "alive straggler count ${alive_cnt} (want 2 - the documented gap)"; }
+	[ "${alive_cnt}" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "alive straggler count ${alive_cnt} (want 2 - the documented gap)"
 
 	jt_teardown "${PIDS_F}" ""
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=0, stragglers survived as documented (then killed by the test)"
 		return 0
 	else
@@ -411,7 +411,7 @@ _jt_forkrace_scenario() {
 	local \
 		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_job="${5}" \
 		jt_variant="${6}" \
-		sched_pid sched_rv checks_ok=1 pid_cnt=0
+		sched_pid sched_rv checks_pass=0 checks_exp=3 pid_cnt=0
 
 	local PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
 	rm -f "${PIDS_F}"
@@ -440,19 +440,19 @@ _jt_forkrace_scenario() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
 	# The helper child plus at least one process forked after the first SIGSTOP
 	pid_cnt=$(sed '/^$/d' "${PIDS_F}" | wc -l)
-	[ "${pid_cnt}" -ge 2 ] ||
-		{ checks_ok=; echo "recorded pid count ${pid_cnt} (want >=2 - the fork race did not occur)"; }
+	[ "${pid_cnt}" -ge 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "recorded pid count ${pid_cnt} (want >=2 - the fork race did not occur)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "survivor(s) forked between scans: ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "survivor(s) forked between scans: ${ALIVE_PIDS}"
 
 	jt_teardown "${PIDS_F}" ""
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, all ${pid_cnt} recorded processes killed"
 		return 0
 	else
@@ -519,7 +519,7 @@ test_job_termination_01() {
 test_job_termination_02() {
 	local \
 		TEST_ID=job_termination_02 \
-		sched_rv checks_ok=1 alive_cnt=0 pid
+		sched_rv checks_pass=0 checks_exp=3 alive_cnt=0 pid
 
 	local PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
 	rm -f "${PIDS_F}"
@@ -538,22 +538,22 @@ test_job_termination_02() {
 	wait "${!}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 0)"
 
-	[ "$(sed '/^$/d' "${PIDS_F}" | wc -l)" = 2 ] ||
-		{ checks_ok=; echo "recorded pid count $(sed '/^$/d' "${PIDS_F}" | wc -l) (want 2)"; }
+	[ "$(sed '/^$/d' "${PIDS_F}" | wc -l)" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "recorded pid count $(sed '/^$/d' "${PIDS_F}" | wc -l) (want 2)"
 
 	while read -r pid; do
 		[ -n "${pid}" ] || continue
 		kill -0 "${pid}" 2>/dev/null && alive_cnt=$((alive_cnt + 1))
 	done < "${PIDS_F}"
 
-	[ "${alive_cnt}" = 2 ] ||
-		{ checks_ok=; echo "alive straggler count ${alive_cnt} (want 2)"; }
+	[ "${alive_cnt}" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "alive straggler count ${alive_cnt} (want 2)"
 
 	jt_teardown "${PIDS_F}" ""
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=0, both stragglers survived (then killed by the test)"
 		return 0
 	else
@@ -585,7 +585,7 @@ test_job_termination_05() {
 test_job_termination_06() {
 	local \
 		TEST_ID=job_termination_06 \
-		sched_pid sched_rv checks_ok=1 \
+		sched_pid sched_rv checks_pass=0 checks_exp=3 \
 		jobs='deep_06'
 
 	local PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
@@ -613,17 +613,17 @@ test_job_termination_06() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
 	# Both the mid child and the grandchild (2 recorded PIDs) must be dead
-	[ "$(sed '/^$/d' "${PIDS_F}" | wc -l)" = 2 ] ||
-		{ checks_ok=; echo "recorded pid count $(sed '/^$/d' "${PIDS_F}" | wc -l) (want 2)"; }
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "multi-level subtree survivor(s): ${ALIVE_PIDS}"; }
+	[ "$(sed '/^$/d' "${PIDS_F}" | wc -l)" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "recorded pid count $(sed '/^$/d' "${PIDS_F}" | wc -l) (want 2)"
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "multi-level subtree survivor(s): ${ALIVE_PIDS}"
 
 	jt_teardown "${PIDS_F}" ""
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, whole wrapper->child->grandchild chain killed"
 		return 0
 	else
@@ -651,7 +651,7 @@ test_job_termination_07() {
 
 	local \
 		TEST_ID=job_termination_07 \
-		sched_pid sched_rv checks_ok=1 \
+		sched_pid sched_rv checks_pass=0 checks_exp=2 \
 		jobs='parse_07'
 
 	local \
@@ -683,15 +683,15 @@ test_job_termination_07() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "crafted-comm child survived (parser mis-read its stat line): ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "crafted-comm child survived (parser mis-read its stat line): ${ALIVE_PIDS}"
 
 	jt_teardown "${PIDS_F}" ""
 	rm -rf "${P6_DIR}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, crafted-comm child discovered and killed"
 		return 0
 	else

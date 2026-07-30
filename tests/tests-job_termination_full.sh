@@ -210,7 +210,7 @@ test_job_termination_full_03() {
 	local \
 		TEST_ID=job_termination_full_03 \
 		CG_TEST_BASE \
-		sched_rv checks_ok=1 fin_pids fin_ok base_state=empty \
+		sched_rv checks_pass=0 checks_exp=6 fin_pids fin_ok base_state=empty \
 		jobs='strag_03 instant_03'
 
 	print_test_header "${TEST_ID}" "cgroup: completed job's stragglers reaped by scheduler exit; base left empty" "${jobs}"
@@ -242,24 +242,25 @@ test_job_termination_full_03() {
 	wait "${!}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 0)"
 
-	[ "$(sed '/^$/d' "${PIDS_F}" | wc -l)" = 2 ] ||
-		{ checks_ok=; echo "recorded pid count $(sed '/^$/d' "${PIDS_F}" | wc -l) (want 2)"; }
+	[ "$(sed '/^$/d' "${PIDS_F}" | wc -l)" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "recorded pid count $(sed '/^$/d' "${PIDS_F}" | wc -l) (want 2)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "stragglers still alive: ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "stragglers still alive: ${ALIVE_PIDS}"
 
-	jt_finalize_get fin_ok ok "${FINALIZE_F}" && jt_same_set "${fin_ok}" "${jobs}" ||
-		{ checks_ok=; echo "ok bucket '${fin_ok}' (want '${jobs}')"; }
-	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want empty)"; }
+	jt_finalize_get fin_ok ok "${FINALIZE_F}" && jt_same_set "${fin_ok}" "${jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok bucket '${fin_ok}' (want '${jobs}')"
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want empty)"
 
-	cg_base_empty "${CG_TEST_BASE}" || { base_state=dirty; checks_ok=; echo "base cgroup not empty"; }
+	cg_base_empty "${CG_TEST_BASE}" && checks_pass=$((checks_pass + 1)) ||
+		{ base_state=dirty; echo "base cgroup not empty"; }
 
 	jt_teardown "${PIDS_F}" "${CG_TEST_BASE}" "${FINALIZE_F}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "stragglers reaped, ok='${fin_ok}', base ${base_state}"
 		return 0
 	else
@@ -293,7 +294,7 @@ test_job_termination_full_04() {
 	local \
 		TEST_ID=job_termination_full_04 \
 		CG_TEST_BASE \
-		sched_rv checks_ok=1 done_rec fin_pids fin_expired
+		sched_rv checks_pass=0 checks_exp=6 done_rec fin_pids fin_expired
 
 	print_test_header "${TEST_ID}" "cgroup: per-job timeout kills the job's process tree at expiry" "block_04"
 
@@ -327,25 +328,25 @@ test_job_termination_full_04() {
 	wait "${!}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 0)"
 
 	read_first_line --rm done_rec "${DONE_F}" &&
-	[ "${done_rec}" = "expired|block_04|dead_at_cb=yes" ] ||
-		{ checks_ok=; echo "done record '${done_rec}' (want 'expired|block_04|dead_at_cb=yes')"; }
+	[ "${done_rec}" = "expired|block_04|dead_at_cb=yes" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "done record '${done_rec}' (want 'expired|block_04|dead_at_cb=yes')"
 
-	jt_finalize_get fin_expired expired "${FINALIZE_F}" && [ "${fin_expired}" = block_04 ] ||
-		{ checks_ok=; echo "expired bucket '${fin_expired}' (want 'block_04')"; }
-	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want empty - kill verified)"; }
+	jt_finalize_get fin_expired expired "${FINALIZE_F}" && [ "${fin_expired}" = block_04 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "expired bucket '${fin_expired}' (want 'block_04')"
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want empty - kill verified)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "job child still alive: ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "job child still alive: ${ALIVE_PIDS}"
 
-	cg_base_empty "${CG_TEST_BASE}" || { checks_ok=; echo "base cgroup not empty"; }
+	cg_base_empty "${CG_TEST_BASE}" && checks_pass=$((checks_pass + 1)) || echo "base cgroup not empty"
 
 	jt_teardown "${PIDS_F}" "${CG_TEST_BASE}" "${FINALIZE_F}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "killed at expiry, expired='${fin_expired}', running_pids empty"
 		return 0
 	else
@@ -361,7 +362,7 @@ test_job_termination_full_05() {
 	local \
 		TEST_ID=job_termination_full_05 \
 		CG_TEST_BASE \
-		sched_pid sched_rv checks_ok=1 fin_pids fin_unfin \
+		sched_pid sched_rv checks_pass=0 checks_exp=5 fin_pids fin_unfin \
 		jobs='block_05a block_05b'
 
 	print_test_header "${TEST_ID}" "cgroup: USR1 abort kills all running job trees (verified)" "${jobs}"
@@ -396,21 +397,21 @@ test_job_termination_full_05() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
-	jt_finalize_get fin_unfin unfin "${FINALIZE_F}" && jt_same_set "${fin_unfin}" "${jobs}" ||
-		{ checks_ok=; echo "unfinished bucket '${fin_unfin}' (want '${jobs}')"; }
-	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want empty - kills verified)"; }
+	jt_finalize_get fin_unfin unfin "${FINALIZE_F}" && jt_same_set "${fin_unfin}" "${jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "unfinished bucket '${fin_unfin}' (want '${jobs}')"
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want empty - kills verified)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "job children still alive: ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "job children still alive: ${ALIVE_PIDS}"
 
-	cg_base_empty "${CG_TEST_BASE}" || { checks_ok=; echo "base cgroup not empty"; }
+	cg_base_empty "${CG_TEST_BASE}" && checks_pass=$((checks_pass + 1)) || echo "base cgroup not empty"
 
 	jt_teardown "${PIDS_F}" "${CG_TEST_BASE}" "${FINALIZE_F}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, unfinished='${fin_unfin}', running_pids empty, trees dead"
 		return 0
 	else
@@ -425,7 +426,7 @@ test_job_termination_full_06() {
 	local \
 		TEST_ID=job_termination_full_06 \
 		CG_TEST_BASE \
-		sched_rv checks_ok=1 fin_pids fin_unfin
+		sched_rv checks_pass=0 checks_exp=5 fin_pids fin_unfin
 
 	print_test_header "${TEST_ID}" "cgroup: scheduler global timeout kills the running job tree (verified)" "block_06"
 
@@ -456,21 +457,21 @@ test_job_termination_full_06() {
 	wait "${!}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 82 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 82)"; }
+	[ "${sched_rv}" = 82 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 82)"
 
-	jt_finalize_get fin_unfin unfin "${FINALIZE_F}" && [ "${fin_unfin}" = block_06 ] ||
-		{ checks_ok=; echo "unfinished bucket '${fin_unfin}' (want 'block_06')"; }
-	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want empty - kill verified)"; }
+	jt_finalize_get fin_unfin unfin "${FINALIZE_F}" && [ "${fin_unfin}" = block_06 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "unfinished bucket '${fin_unfin}' (want 'block_06')"
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want empty - kill verified)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "job child still alive: ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "job child still alive: ${ALIVE_PIDS}"
 
-	cg_base_empty "${CG_TEST_BASE}" || { checks_ok=; echo "base cgroup not empty"; }
+	cg_base_empty "${CG_TEST_BASE}" && checks_pass=$((checks_pass + 1)) || echo "base cgroup not empty"
 
 	jt_teardown "${PIDS_F}" "${CG_TEST_BASE}" "${FINALIZE_F}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=82, unfinished='${fin_unfin}', running_pids empty, tree dead"
 		return 0
 	else
@@ -485,7 +486,7 @@ test_job_termination_full_06() {
 test_job_termination_full_07() {
 	local \
 		TEST_ID=job_termination_full_07 \
-		sched_rv checks_ok=1 fin_pids fin_ok
+		sched_rv checks_pass=0 checks_exp=4 fin_pids fin_ok
 
 	print_test_header "${TEST_ID}" "cgroup: autodetected base (no SCHED_CGROUP_BASE): stragglers reaped" "strag_07"
 
@@ -512,19 +513,19 @@ test_job_termination_full_07() {
 	wait "${!}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 0 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 0)"; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 0)"
 
-	jt_finalize_get fin_ok ok "${FINALIZE_F}" && [ "${fin_ok}" = strag_07 ] ||
-		{ checks_ok=; echo "ok bucket '${fin_ok}' (want 'strag_07')"; }
-	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want empty)"; }
+	jt_finalize_get fin_ok ok "${FINALIZE_F}" && [ "${fin_ok}" = strag_07 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "ok bucket '${fin_ok}' (want 'strag_07')"
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want empty)"
 
-	jt_assert_dead "${PIDS_F}" ||
-		{ checks_ok=; echo "stragglers still alive: ${ALIVE_PIDS}"; }
+	jt_assert_dead "${PIDS_F}" && checks_pass=$((checks_pass + 1)) ||
+		echo "stragglers still alive: ${ALIVE_PIDS}"
 
 	jt_teardown "${PIDS_F}" "" "${FINALIZE_F}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "autodetected base, stragglers reaped, running_pids empty"
 		return 0
 	else
@@ -583,7 +584,7 @@ test_job_termination_full_11() {
 
 	local \
 		TEST_ID=job_termination_full_11 \
-		sched_pid sched_rv checks_ok=1 fin_pids fin_unfin bad_msg_cnt=0 \
+		sched_pid sched_rv checks_pass=0 checks_exp=4 fin_pids fin_unfin bad_msg_cnt=0 \
 		jobs='block_11a block_11b'
 
 	local \
@@ -613,24 +614,24 @@ test_job_termination_full_11() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
-	jt_finalize_get fin_unfin unfin "${FINALIZE_F}" && jt_same_set "${fin_unfin}" "${jobs}" ||
-		{ checks_ok=; echo "unfinished bucket '${fin_unfin}' (want '${jobs}')"; }
+	jt_finalize_get fin_unfin unfin "${FINALIZE_F}" && jt_same_set "${fin_unfin}" "${jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "unfinished bucket '${fin_unfin}' (want '${jobs}')"
 
 	# The custom command reported both wrapper PIDs as verified: despite the
 	# stdout noise, running_pids must be empty
-	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want empty - report honored)"; }
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want empty - report honored)"
 
 	# No 'invalid verified PID' complaints: the noise never reached the report
 	[ -f "${MSG_FILE}" ] && bad_msg_cnt=$(grep -c "invalid verified PID" "${MSG_FILE}")
-	[ "${bad_msg_cnt}" = 0 ] ||
-		{ checks_ok=; echo "core saw ${bad_msg_cnt} invalid-PID token(s): $(cat "${MSG_FILE}")"; }
+	[ "${bad_msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "core saw ${bad_msg_cnt} invalid-PID token(s): $(cat "${MSG_FILE}")"
 
 	jt_teardown "${PIDS_F}" "" "${FINALIZE_F}" "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, running_pids empty via out-var report, stdout noise ignored"
 		return 0
 	else
@@ -652,7 +653,7 @@ test_job_termination_full_12() {
 		TEST_ID=job_termination_full_12 \
 		CG_TEST_BASE \
 		SCH_JT_BASE SCH_JT_PENDING \
-		checks_ok=1 p init_rv cleanup_rv reaped squat newbase
+		checks_pass=0 checks_exp=8 p init_rv cleanup_rv reaped squat newbase
 
 	print_test_header "${TEST_ID}" "cgroup: base collision with a same-PID sibling is avoided; sibling untouched" "(no jobs)"
 
@@ -676,23 +677,24 @@ test_job_termination_full_12() {
 	SCHED_CGROUP_BASE="${CG_TEST_BASE}" sched_job_term_cgroup init
 	init_rv=$?
 
-	[ "${init_rv}" = 0 ] || { checks_ok=; echo "init rv=${init_rv} (want 0)"; }
-	[ -d "${newbase}" ] || { checks_ok=; echo "new base 'sched_${p}.1' not created (did not route around .0)"; }
-	[ -d "${squat}" ] || { checks_ok=; echo "squat 'sched_${p}.0' vanished"; }
-	[ -d "${squat}/job_squat" ] || { checks_ok=; echo "squat's job cgroup vanished (stolen)"; }
+	[ "${init_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "init rv=${init_rv} (want 0)"
+	[ -d "${newbase}" ] && checks_pass=$((checks_pass + 1)) || echo "new base 'sched_${p}.1' not created (did not route around .0)"
+	[ -d "${squat}" ] && checks_pass=$((checks_pass + 1)) || echo "squat 'sched_${p}.0' vanished"
+	[ -d "${squat}/job_squat" ] && checks_pass=$((checks_pass + 1)) || echo "squat's job cgroup vanished (stolen)"
 
 	# cleanup removes only this instance's own base; the sibling stays intact
 	sched_job_term_cgroup cleanup reaped
 	cleanup_rv=$?
 
-	[ "${cleanup_rv}" = 0 ] || { checks_ok=; echo "cleanup rv=${cleanup_rv} (want 0)"; }
-	[ -z "${reaped}" ] || { checks_ok=; echo "cleanup reaped '${reaped}' (want empty)"; }
-	[ -d "${newbase}" ] && { checks_ok=; echo "own base 'sched_${p}.1' not removed by cleanup"; }
-	[ -d "${squat}/job_squat" ] || { checks_ok=; echo "cleanup removed the sibling's cgroup"; }
+	[ "${cleanup_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "cleanup rv=${cleanup_rv} (want 0)"
+	[ -z "${reaped}" ] && checks_pass=$((checks_pass + 1)) || echo "cleanup reaped '${reaped}' (want empty)"
+	[ ! -d "${newbase}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "own base 'sched_${p}.1' not removed by cleanup"
+	[ -d "${squat}/job_squat" ] && checks_pass=$((checks_pass + 1)) || echo "cleanup removed the sibling's cgroup"
 
 	jt_teardown "" "${CG_TEST_BASE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "routed .0 -> .1, sibling untouched, cleanup removed only own base"
 		return 0
 	else
@@ -704,23 +706,26 @@ test_job_termination_full_12() {
 # ppid mechanism: the sched_use_job_term probe. Selects it on a normal system,
 #   and reports it unavailable when awk cannot be found.
 test_job_termination_full_13() {
-	local TEST_ID=job_termination_full_13 JOB_TERM_CB checks_ok=1
+	local TEST_ID=job_termination_full_13 JOB_TERM_CB checks_pass=0 checks_exp=4
 
 	print_test_header "${TEST_ID}" "ppid: sched_use_job_term probe (selected here; fails without awk)" "(no jobs)"
 
 	require_variant full || return 2
 
-	sched_use_job_term -q ppid ||
-		{ checks_ok=; echo "sched_use_job_term ppid returned non-zero on a normal system"; }
-	[ "${JOB_TERM_CB}" = sched_job_term_ppid ] ||
-		{ checks_ok=; echo "JOB_TERM_CB='${JOB_TERM_CB}' (want sched_job_term_ppid)"; }
+	sched_use_job_term -q ppid && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_use_job_term ppid returned non-zero on a normal system"
+	[ "${JOB_TERM_CB}" = sched_job_term_ppid ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_TERM_CB='${JOB_TERM_CB}' (want sched_job_term_ppid)"
 
-	SCHED_AWK_CMD=/nonexistent/nope sched_use_job_term -q ppid &&
-		{ checks_ok=; echo "sched_use_job_term ppid selected the mechanism with awk missing"; }
-	[ -z "${JOB_TERM_CB}" ] ||
-		{ checks_ok=; echo "JOB_TERM_CB='${JOB_TERM_CB}' after a failed selection (want empty)"; }
+	if SCHED_AWK_CMD=/nonexistent/nope sched_use_job_term -q ppid; then
+		echo "sched_use_job_term ppid selected the mechanism with awk missing"
+	else
+		checks_pass=$((checks_pass + 1))
+	fi
+	[ -z "${JOB_TERM_CB}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_TERM_CB='${JOB_TERM_CB}' after a failed selection (want empty)"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "supported here, unsupported without awk"
 		return 0
 	else
@@ -767,9 +772,10 @@ test_job_termination_full_15() {
 
 	local \
 		TEST_ID=job_termination_full_15 \
-		sched_pid sched_rv checks_ok=1 \
+		sched_pid sched_rv checks_pass=0 checks_exp=13 \
 		rec sub args idx=0 \
-		init_cnt=0 setup_cnt=0 term_cnt=0 cleanup_cnt=0 \
+		init_cnt=0 setup_cnt=0 term_cnt=0 cleanup_cnt=0 bad_subs=0 \
+		init_noargs=0 setup_wellformed=0 term_wellformed=0 \
 		init_idx=0 setup_idx=0 term_idx=0 cleanup_idx=0 \
 		setup_ids setup_pids term_out term_pids cleanup_args \
 		jobs='block_15a block_15b'
@@ -798,7 +804,7 @@ test_job_termination_full_15() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
 	[ -f "${REC_F}" ] ||
 		{ FAIL "callback was never invoked"; jt_teardown "${PIDS_F}" "" "${REC_F}"; return 1; }
@@ -812,7 +818,7 @@ test_job_termination_full_15() {
 			init)
 				init_cnt=$((init_cnt + 1))
 				init_idx="${idx}"
-				[ -z "${args}" ] || { checks_ok=; echo "init got args '${args}' (want none)"; }
+				[ -z "${args}" ] && init_noargs=$((init_noargs + 1)) || echo "init got args '${args}' (want none)"
 			;;
 
 			setup)
@@ -820,14 +826,14 @@ test_job_termination_full_15() {
 				setup_idx="${idx}"
 				# Exactly '<job_id> <pid>'
 				case "${args}" in
-					*' '*' '*|*' ') checks_ok=; echo "setup args '${args}' (want '<job_id> <pid>')" ;;
+					*' '*' '*|*' ') echo "setup args '${args}' (want '<job_id> <pid>')" ;;
 					*' '*)
 						sch_append setup_ids "${args%% *}"
 						sch_append setup_pids "${args##* }"
-						is_uint "${args##* }" ||
-							{ checks_ok=; echo "setup PID '${args##* }' is not a PID"; }
+						is_uint "${args##* }" && setup_wellformed=$((setup_wellformed + 1)) ||
+							echo "setup PID '${args##* }' is not a PID"
 					;;
-					*) checks_ok=; echo "setup args '${args}' (want '<job_id> <pid>')"
+					*) echo "setup args '${args}' (want '<job_id> <pid>')"
 				esac
 			;;
 
@@ -835,8 +841,12 @@ test_job_termination_full_15() {
 				term_cnt=$((term_cnt + 1))
 				[ "${term_idx}" = 0 ] && term_idx="${idx}"
 				case "${args}" in
-					*' '*) term_out="${args%% *}"; sch_append term_pids "${args#* }" ;;
-					*) checks_ok=; echo "term args '${args}' (want '<out var> <pid>...')"
+					*' '*)
+						term_out="${args%% *}"
+						sch_append term_pids "${args#* }"
+						term_wellformed=$((term_wellformed + 1))
+					;;
+					*) echo "term args '${args}' (want '<out var> <pid>...')"
 				esac
 			;;
 
@@ -846,37 +856,41 @@ test_job_termination_full_15() {
 				cleanup_args="${args}"
 			;;
 
-			*) checks_ok=; echo "unexpected subcommand '${sub}'"
+			*) bad_subs=$((bad_subs + 1)); echo "unexpected subcommand '${sub}'"
 		esac
 	done < "${REC_F}"
 
-	[ "${init_cnt}" = 1 ] || { checks_ok=; echo "init invoked ${init_cnt} time(s) (want 1)"; }
-	[ "${init_idx}" = 1 ] || { checks_ok=; echo "init was invocation #${init_idx} (want the first)"; }
+	[ "${bad_subs}" = 0 ] && checks_pass=$((checks_pass + 1)) || echo "${bad_subs} unexpected subcommand(s)"
 
-	[ "${setup_cnt}" = 2 ] || { checks_ok=; echo "setup invoked ${setup_cnt} time(s) (want 2 - once per job)"; }
-	jt_same_set "${jobs}" "${setup_ids}" ||
-		{ checks_ok=; echo "setup job IDs '${setup_ids}' (want '${jobs}')"; }
+	[ "${init_cnt}" = 1 ] && [ "${init_noargs}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "init invoked ${init_cnt} time(s), ${init_noargs} without args (want 1 and 1)"
+	[ "${init_idx}" = 1 ] && checks_pass=$((checks_pass + 1)) || echo "init was invocation #${init_idx} (want the first)"
 
-	if [ "${term_cnt}" = 1 ]; then
-		[ "${setup_idx}" -lt "${term_idx}" ] ||
-			{ checks_ok=; echo "a setup (#${setup_idx}) came after term (#${term_idx})"; }
-		job_termination_full_15_is_var "${term_out}" ||
-			{ checks_ok=; echo "term out var '${term_out}' is not a usable variable name"; }
-		jt_same_set "${setup_pids}" "${term_pids}" ||
-			{ checks_ok=; echo "term seeds '${term_pids}' (want the setup PIDs '${setup_pids}')"; }
-	else
-		checks_ok=; echo "term invoked ${term_cnt} time(s) (want 1)"
-	fi
+	[ "${setup_cnt}" = 2 ] && [ "${setup_wellformed}" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "setup invoked ${setup_cnt} time(s), ${setup_wellformed} well-formed (want 2 and 2)"
+	jt_same_set "${jobs}" "${setup_ids}" && checks_pass=$((checks_pass + 1)) ||
+		echo "setup job IDs '${setup_ids}' (want '${jobs}')"
 
-	[ "${cleanup_cnt}" = 1 ] || { checks_ok=; echo "cleanup invoked ${cleanup_cnt} time(s) (want 1)"; }
-	[ "${cleanup_idx}" = "${idx}" ] ||
-		{ checks_ok=; echo "cleanup was invocation #${cleanup_idx} of ${idx} (want the last)"; }
-	job_termination_full_15_is_var "${cleanup_args}" ||
-		{ checks_ok=; echo "cleanup args '${cleanup_args}' (want a single out var name)"; }
+	# term_idx stays 0 and term_out/term_pids stay empty if term never ran,
+	#   so the checks below fail on their own in that case
+	[ "${term_cnt}" = 1 ] && [ "${term_wellformed}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "term invoked ${term_cnt} time(s), ${term_wellformed} well-formed (want 1 and 1)"
+	[ "${setup_idx}" -lt "${term_idx}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "a setup (#${setup_idx}) came after term (#${term_idx})"
+	job_termination_full_15_is_var "${term_out}" && checks_pass=$((checks_pass + 1)) ||
+		echo "term out var '${term_out}' is not a usable variable name"
+	jt_same_set "${setup_pids}" "${term_pids}" && checks_pass=$((checks_pass + 1)) ||
+		echo "term seeds '${term_pids}' (want the setup PIDs '${setup_pids}')"
+
+	[ "${cleanup_cnt}" = 1 ] && checks_pass=$((checks_pass + 1)) || echo "cleanup invoked ${cleanup_cnt} time(s) (want 1)"
+	[ "${cleanup_idx}" = "${idx}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "cleanup was invocation #${cleanup_idx} of ${idx} (want the last)"
+	job_termination_full_15_is_var "${cleanup_args}" && checks_pass=$((checks_pass + 1)) ||
+		echo "cleanup args '${cleanup_args}' (want a single out var name)"
 
 	jt_teardown "${PIDS_F}" "" "${REC_F}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "init -> setup x2 -> term (seeded with the setup PIDs) -> cleanup"
 		return 0
 	else
@@ -904,7 +918,7 @@ test_job_termination_full_16() {
 
 	local \
 		TEST_ID=job_termination_full_16 \
-		sched_pid sched_rv checks_ok=1 term_msg_cnt=0 cleanup_msg_cnt=0 \
+		sched_pid sched_rv checks_pass=0 checks_exp=3 term_msg_cnt=0 cleanup_msg_cnt=0 \
 		jobs='block_16a block_16b'
 
 	local \
@@ -932,22 +946,22 @@ test_job_termination_full_16() {
 	sched_rv=${?}
 
 	# A failing term/cleanup must not change the scheduler's own return code
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
 	[ -f "${MSG_FILE}" ] && {
 		term_msg_cnt=$(grep -c "job_termination_full_16_cb term' returned code 42." "${MSG_FILE}")
 		cleanup_msg_cnt=$(grep -c "job_termination_full_16_cb cleanup' returned code 43." "${MSG_FILE}")
 	}
 
-	[ "${term_msg_cnt}" = 1 ] ||
-		{ checks_ok=; echo "term failure reported ${term_msg_cnt} time(s) (want 1)"; }
-	[ "${cleanup_msg_cnt}" = 1 ] ||
-		{ checks_ok=; echo "cleanup failure reported ${cleanup_msg_cnt} time(s) (want 1)"; }
-	[ -n "${checks_ok}" ] || { [ -f "${MSG_FILE}" ] && cat "${MSG_FILE}"; }
+	[ "${term_msg_cnt}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "term failure reported ${term_msg_cnt} time(s) (want 1)"
+	[ "${cleanup_msg_cnt}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "cleanup failure reported ${cleanup_msg_cnt} time(s) (want 1)"
+	[ "${checks_pass}" = "${checks_exp}" ] || { [ -f "${MSG_FILE}" ] && cat "${MSG_FILE}"; }
 
 	jt_teardown "${PIDS_F}" "" "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, both failing subcommands reported with their codes"
 		return 0
 	else
@@ -974,7 +988,7 @@ test_job_termination_full_17() {
 
 	local \
 		TEST_ID=job_termination_full_17 \
-		sched_pid sched_rv checks_ok=1 fin_pids \
+		sched_pid sched_rv checks_pass=0 checks_exp=4 fin_pids \
 		bad_msg_cnt=0 notapid_cnt=0 num_cnt=0 \
 		jobs='block_17a block_17b'
 
@@ -1004,7 +1018,7 @@ test_job_termination_full_17() {
 	wait "${sched_pid}"
 	sched_rv=${?}
 
-	[ "${sched_rv}" = 83 ] || { checks_ok=; echo "sched_rv=${sched_rv} (want 83)"; }
+	[ "${sched_rv}" = 83 ] && checks_pass=$((checks_pass + 1)) || echo "sched_rv=${sched_rv} (want 83)"
 
 	[ -f "${MSG_FILE}" ] && {
 		bad_msg_cnt=$(grep -c "invalid verified PID" "${MSG_FILE}")
@@ -1013,19 +1027,19 @@ test_job_termination_full_17() {
 	}
 
 	# One complaint per junk token, naming it - and no others
-	[ "${bad_msg_cnt}" = 2 ] ||
-		{ checks_ok=; echo "invalid-PID complaints: ${bad_msg_cnt} (want 2)"; }
-	[ "${notapid_cnt}" = 1 ] && [ "${num_cnt}" = 1 ] ||
-		{ checks_ok=; echo "complaints naming 'notapid'/'12x': ${notapid_cnt}/${num_cnt} (want 1/1)"; }
-	[ -n "${checks_ok}" ] || { [ -f "${MSG_FILE}" ] && cat "${MSG_FILE}"; }
+	[ "${bad_msg_cnt}" = 2 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "invalid-PID complaints: ${bad_msg_cnt} (want 2)"
+	[ "${notapid_cnt}" = 1 ] && [ "${num_cnt}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "complaints naming 'notapid'/'12x': ${notapid_cnt}/${num_cnt} (want 1/1)"
+	[ "${checks_pass}" = "${checks_exp}" ] || { [ -f "${MSG_FILE}" ] && cat "${MSG_FILE}"; }
 
 	# The valid PIDs in the same report were still honored
-	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] ||
-		{ checks_ok=; echo "running_pids '${fin_pids}' (want empty - valid PIDs honored)"; }
+	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ -z "${fin_pids}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "running_pids '${fin_pids}' (want empty - valid PIDs honored)"
 
 	jt_teardown "${PIDS_F}" "" "${FINALIZE_F}" "${MSG_FILE}"
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "rv=83, both junk tokens named and skipped, valid PIDs still scrubbed"
 		return 0
 	else

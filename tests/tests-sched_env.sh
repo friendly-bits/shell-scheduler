@@ -582,7 +582,7 @@ test_sched_env_12() {
 	local \
 		TEST_ID=sched_env_12 \
 		sched_rv sched_pid killer_pid msg_cnt warn_cnt \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=3 \
 		SE12_JOB=ok1_se12 \
 		jobs='ok1_se12'
 
@@ -617,15 +617,15 @@ test_sched_env_12() {
 		warn_cnt="$(grep -cF 'Warning: stopping infinite SCHED_FAIL_MSG_CB recursion.' "${ERR_FILE}")"
 	rm -f "${MSG_FILE}" "${ERR_FILE}"
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
 	# The nested message must bypass the callback entirely
-	[ "${msg_cnt}" = 1 ] ||
-		{ checks_ok=; echo "SCHED_FAIL_MSG_CB invocations=${msg_cnt} (want 1)" >&2; }
-	[ "${warn_cnt}" = 1 ] ||
-		{ checks_ok=; echo "recursion warnings on stderr=${warn_cnt} (want 1)" >&2; }
+	[ "${msg_cnt}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_FAIL_MSG_CB invocations=${msg_cnt} (want 1)" >&2
+	[ "${warn_cnt}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "recursion warnings on stderr=${warn_cnt} (want 1)" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, cb_calls=${msg_cnt}, warnings=${warn_cnt}"
 		return 0
 	else
@@ -651,7 +651,7 @@ test_sched_env_13() {
 	local \
 		TEST_ID=sched_env_13 \
 		sched_rv sched_pid killer_pid msg_cnt escaped \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=3 \
 		jobs='ok1_se13'
 
 	local \
@@ -684,15 +684,15 @@ test_sched_env_13() {
 	read_first_line escaped "${FIN_FILE}" || escaped='<finalize never ran>'
 	rm -f "${MSG_FILE}"
 
-	[ "${msg_cnt}" = 1 ] ||
-		{ checks_ok=; echo "SCHED_FAIL_MSG_CB invocations=${msg_cnt} (want 1)" >&2; }
+	[ "${msg_cnt}" = 1 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "SCHED_FAIL_MSG_CB invocations=${msg_cnt} (want 1)" >&2
 	# An escaping 'exit 7' would end the run before SCHED_FINALIZE_CB
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 0)" >&2; }
-	[ "${escaped}" = 'escaped=unset' ] ||
-		{ checks_ok=; echo "finalize saw '${escaped}' (want 'escaped=unset')" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${escaped}" = 'escaped=unset' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "finalize saw '${escaped}' (want 'escaped=unset')" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, cb_calls=${msg_cnt}, ${escaped}"
 		return 0
 	else

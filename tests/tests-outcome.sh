@@ -513,22 +513,23 @@ test_outcome_09() {
 
 	# 1: pass label
 	# 2: expected argument 8
+	# 4 checks per call, called once per pass
 	outcome_09_check() {
-		[ "${argc}" = 8 ] ||
-			{ checks_ok=; echo "${1}: \$#=${argc} (want 8)" >&2; }
+		[ "${argc}" = 8 ] && checks_pass=$((checks_pass + 1)) ||
+			echo "${1}: \$#=${argc} (want 8)" >&2
 		# Set even when empty: the only signal that argument 8 was passed at all
-		[ "${set8}" = x ] ||
-			{ checks_ok=; echo "${1}: \${8+x}='${set8}' (want 'x' - argument 8 was not passed)" >&2; }
-		[ "${nonempty8}" = "${2:+x}" ] ||
-			{ checks_ok=; echo "${1}: \${8:+x}='${nonempty8}' (want '${2:+x}')" >&2; }
-		[ "${arg8}" = "${2}" ] ||
-			{ checks_ok=; echo "${1}: argument 8='${arg8}' (want '${2}')" >&2; }
+		[ "${set8}" = x ] && checks_pass=$((checks_pass + 1)) ||
+			echo "${1}: \${8+x}='${set8}' (want 'x' - argument 8 was not passed)" >&2
+		[ "${nonempty8}" = "${2:+x}" ] && checks_pass=$((checks_pass + 1)) ||
+			echo "${1}: \${8:+x}='${nonempty8}' (want '${2:+x}')" >&2
+		[ "${arg8}" = "${2}" ] && checks_pass=$((checks_pass + 1)) ||
+			echo "${1}: argument 8='${arg8}' (want '${2}')" >&2
 	}
 
 	local \
 		TEST_ID=outcome_09 \
 		sched_rv argc set8 nonempty8 arg8 \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=10 \
 		ABORT_FIRED='' \
 		ABORT_ID=ok5_outcome09b \
 		plain_jobs='instant_outcome09' \
@@ -556,8 +557,8 @@ test_outcome_09() {
 	outcome_09_read
 	rm -f "${ARG_PROBE_PREFIX:?}".*
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "no-abort run: sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "no-abort run: sched_rv=${sched_rv} (want 0)" >&2
 	outcome_09_check 'no-abort run' ''
 
 	# Pass 2: ok1_outcome09 completes and aborts the still-running ok5_outcome09b
@@ -576,11 +577,11 @@ test_outcome_09() {
 	outcome_09_read
 	rm -f "${ARG_PROBE_PREFIX:?}".*
 
-	[ "${sched_rv}" = 0 ] ||
-		{ checks_ok=; echo "abort run: sched_rv=${sched_rv} (want 0)" >&2; }
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "abort run: sched_rv=${sched_rv} (want 0)" >&2
 	outcome_09_check 'abort run' 'ok5_outcome09b'
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "argc=${argc}, arg8='${arg8}'"
 		return 0
 	else
@@ -606,7 +607,7 @@ test_outcome_10() {
 		sched_rv name empty_sets='' \
 		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
 		exp_aborted act_aborted \
-		checks_ok=1 \
+		checks_pass=0 checks_exp=4 \
 		ABORT_ID=ok5_outcome10 \
 		jobs='ok1_outcome10 fail_outcome10 ok5_outcome10 hang_outcome10x hang_outcome10 ok_outcome10a ok_outcome10b'
 
@@ -646,16 +647,16 @@ test_outcome_10() {
 			empty_sets="${empty_sets}${empty_sets:+ }${name}"
 	done
 
-	[ "${sched_rv}" = 82 ] ||
-		{ checks_ok=; echo "sched_rv=${sched_rv} (want 82)" >&2; }
-	verify_id_partition "${jobs}" ||
-		{ checks_ok=; echo "the six ID sets do not partition the ${TEST_ID} job IDs" >&2; }
-	[ -z "${empty_sets}" ] ||
-		{ checks_ok=; echo "empty set(s): ${empty_sets} - the run did not produce all six outcomes" >&2; }
-	verify_id_set exp_aborted act_aborted "${ABORT_ID}" "${aborted_raw}" ||
-		{ checks_ok=; echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2; }
+	[ "${sched_rv}" = 82 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 82)" >&2
+	verify_id_partition "${jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "the six ID sets do not partition the ${TEST_ID} job IDs" >&2
+	[ -z "${empty_sets}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "empty set(s): ${empty_sets} - the run did not produce all six outcomes" >&2
+	verify_id_set exp_aborted act_aborted "${ABORT_ID}" "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
 
-	if [ -n "${checks_ok}" ]; then
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', expired='${expired_raw}'"
 		return 0
 	else

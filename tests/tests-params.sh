@@ -900,7 +900,7 @@ test_params_18() {
 		P1 P2 P3 \
 		explicit_ok=0 \
 		all_ok=0 \
-		noglob_ok=1
+		noglob_ok=0 noglob_exp=2
 	local job_id="${TEST_ID}_job"
 
 	print_test_header "${TEST_ID:?}" "job_get_params() 'all' mode returns the full registered set" \
@@ -921,19 +921,19 @@ test_params_18() {
 	#   caller's set -f/+f state must survive the call unchanged either way.
 	set +f
 	job_get_params "${job_id}" sch_all >/dev/null
-	case "${-}" in *f*) noglob_ok=0 ;; esac
+	case "${-}" in *f*) ;; *) noglob_ok=$((noglob_ok + 1)) ;; esac
 
 	set -f
 	job_get_params "${job_id}" sch_all >/dev/null
-	case "${-}" in *f*) ;; *) noglob_ok=0 ;; esac
+	case "${-}" in *f*) noglob_ok=$((noglob_ok + 1)) ;; esac
 	set +f
 
-	if [ "${explicit_ok}" = 1 ] && [ "${all_ok}" = 1 ] && [ "${noglob_ok}" = 1 ]
+	if [ "${explicit_ok}" = 1 ] && [ "${all_ok}" = 1 ] && [ "${noglob_ok}" = "${noglob_exp}" ]
 	then
 		PASS "P1='${P1}', P2='${P2}', P3='${P3}'"
 		return 0
 	else
-		FAIL "explicit_ok=${explicit_ok}, all_ok=${all_ok}, noglob_ok=${noglob_ok}, P1='${P1}', P2='${P2}', P3='${P3}'"
+		FAIL "explicit_ok=${explicit_ok}, all_ok=${all_ok}, noglob_ok=${noglob_ok}/${noglob_exp}, P1='${P1}', P2='${P2}', P3='${P3}'"
 		return 1
 	fi
 }
