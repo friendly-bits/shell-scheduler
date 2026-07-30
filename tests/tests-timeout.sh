@@ -952,7 +952,7 @@ test_timeout_15() {
 		wait "$!"
 		sched_rv=$?
 
-		read_id_sets "${FINALIZE_SETS_PREFIX}"
+		read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 
 		case " ${expired_raw} " in *" ${target} "*) hits=$((hits + 1)); winner=expired ;; esac
 		case " ${aborted_raw} " in *" ${target} "*) hits=$((hits + 1)); winner=aborted ;; esac
@@ -980,7 +980,7 @@ test_timeout_15() {
 		fi
 
 		[ "${checks_pass}" = "${checks_exp}" ] || print_id_sets >&2
-		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+		rm -f "${MSG_FILE}"
 
 		[ "${checks_pass}" = "${checks_exp}" ]
 	}

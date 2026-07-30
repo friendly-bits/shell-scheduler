@@ -235,16 +235,20 @@ sets_finalize_handler() {
 # Read the six ID-set files written by write_id_sets into fixed var names:
 #   ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw
 # The caller must declare all six local.
+# 0 (optional): '--rm' to remove each file after reading
 # 1: file prefix
 read_id_sets() {
+	local ris_rm=
+	[ "${1}" = '--rm' ] && { ris_rm='--rm'; shift; }
 	local ris_prefix="${1:?}"
 
-	read_first_line ok_raw "${ris_prefix}.ok"
-	read_first_line fail_raw "${ris_prefix}.fail"
-	read_first_line unfinished_raw "${ris_prefix}.unfinished"
-	read_first_line undispatched_raw "${ris_prefix}.undispatched"
-	read_first_line expired_raw "${ris_prefix}.expired"
-	read_first_line aborted_raw "${ris_prefix}.aborted"
+	# unquoted: an empty ${ris_rm} must expand to no argument at all
+	read_first_line ${ris_rm} ok_raw "${ris_prefix}.ok"
+	read_first_line ${ris_rm} fail_raw "${ris_prefix}.fail"
+	read_first_line ${ris_rm} unfinished_raw "${ris_prefix}.unfinished"
+	read_first_line ${ris_rm} undispatched_raw "${ris_prefix}.undispatched"
+	read_first_line ${ris_rm} expired_raw "${ris_prefix}.expired"
+	read_first_line ${ris_rm} aborted_raw "${ris_prefix}.aborted"
 }
 
 # Print the six sets read by read_id_sets, one per line, for a FAIL diagnostic.

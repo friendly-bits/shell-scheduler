@@ -639,8 +639,7 @@ test_outcome_10() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
-	rm -f "${FINALIZE_SETS_PREFIX:?}".*
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 
 	for name in ok fail unfinished undispatched expired aborted; do
 		eval "[ -n \"\${${name}_raw}\" ]" ||

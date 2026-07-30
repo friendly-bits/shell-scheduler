@@ -172,14 +172,13 @@ run_abort_term_scenario() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm term_calls "${TERM_CALLS_FILE}"
 	read_first_line --rm fin_pids "${FIN_PIDS_FILE}"
 	read_job_pid target_pid "${ABORT_TARGETS}"
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* \
-		"${MSG_FILE}" "${ABORT_CALLS_FILE}"
+	rm -f "${PID_FILE_PREFIX:?}".* "${MSG_FILE}" "${ABORT_CALLS_FILE}"
 	:
 }
 
@@ -222,9 +221,8 @@ test_abort_01() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	read_flat --rm abort_calls "${ABORT_CALLS_FILE}"
-	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	# The abort must have been driven by a real callback invocation, not by a
 	#   callback that never ran and an aborted set that was empty anyway
@@ -288,7 +286,7 @@ test_abort_02() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_flat --rm starts "${START_FILE}"
@@ -312,7 +310,7 @@ test_abort_02() {
 	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/expired must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, started='${starts}', undispatched='${undispatched_raw}'"
@@ -373,7 +371,7 @@ test_abort_03() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
 	read_first_line --rm abort_rv "${RV_FILE}"
@@ -401,7 +399,7 @@ test_abort_03() {
 	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/expired must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, jobs_abort rv=${abort_rv}, msg_cnt=${msg_cnt}, aborted='${aborted_raw}', undispatched='${undispatched_raw}'"
@@ -459,7 +457,7 @@ test_abort_04() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm done_calls "${DONE_FILE}"
 	read_flat --rm abort_rvs "${RV_FILE}"
@@ -478,7 +476,7 @@ test_abort_04() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}${aborted_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/undispatched/expired/aborted must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, jobs_abort rvs='${abort_rvs}', ok='${ok_raw}'"
@@ -540,7 +538,7 @@ test_abort_05() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	count_items aborted_cnt "${aborted_raw}"
 	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
@@ -565,7 +563,7 @@ test_abort_05() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, abort rvs='${abort_rvs}', aborted='${aborted_raw}'"
@@ -618,7 +616,7 @@ test_abort_06() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm done_calls "${DONE_FILE}"
 
@@ -636,7 +634,7 @@ test_abort_06() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, ok='${ok_raw}', aborted='${aborted_raw}'"
@@ -689,9 +687,8 @@ test_abort_07() {
 	end_s=$(date +%s)
 	elapsed=$((end_s - start_s))
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
-	rm -f "${FINALIZE_SETS_PREFIX:?}".*
 
 	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
 		echo "sched_rv=${sched_rv} (want 0)" >&2
@@ -796,9 +793,9 @@ test_abort_08() {
 	wait "${sched_pid}"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	read_first_line --rm max_active "${result_file}"
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${fifo}"
+	rm -f "${fifo}"
 
 	count_items aborted_cnt "${aborted_raw}"
 
@@ -861,7 +858,7 @@ test_abort_09() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_flat --rm starts "${START_FILE}"
@@ -886,7 +883,7 @@ test_abort_09() {
 	[ -z "${fail_raw}${unfinished_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/expired must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, started='${starts}', undispatched='${undispatched_raw}'"
@@ -939,7 +936,7 @@ test_abort_10() {
 	end_s=$(date +%s)
 	elapsed=$((end_s - start_s))
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm done_calls "${ABORT_CALLS_FILE}"
 
@@ -960,7 +957,7 @@ test_abort_10() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s, aborted='${aborted_raw}'"
@@ -1013,7 +1010,7 @@ test_abort_11() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_flat --rm done_calls "${DONE_FILE}"
@@ -1039,7 +1036,7 @@ test_abort_11() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/undispatched/expired must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, marks='${marks}', aborted='${aborted_raw}'"
@@ -1100,7 +1097,7 @@ test_abort_12() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 
@@ -1121,7 +1118,7 @@ test_abort_12() {
 	[ -z "${fail_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/undispatched/expired must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, msg_cnt=${msg_cnt}, aborted='${aborted_raw}'"
@@ -1182,7 +1179,7 @@ test_abort_13() {
 	end_s=$(date +%s)
 	elapsed=$((end_s - start_s))
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 
@@ -1204,7 +1201,7 @@ test_abort_13() {
 	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "fail/unfinished/undispatched must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s, aborted='${aborted_raw}', expired='${expired_raw}'"
@@ -1260,7 +1257,7 @@ test_abort_14() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm done_calls "${DONE_FILE}"
 
@@ -1278,7 +1275,7 @@ test_abort_14() {
 	[ -z "${ok_raw}${fail_raw}${unfinished_raw}${undispatched_raw}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "ok/fail/unfinished/undispatched must all be empty" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, expired='${expired_raw}', aborted='${aborted_raw}'"
@@ -1340,7 +1337,7 @@ test_abort_15() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_first_line --rm fin_pids "${FIN_PIDS_FILE}"
@@ -1363,7 +1360,7 @@ test_abort_15() {
 	[ -n "${j_pid}" ] && [ "${fin_pids}" = "${j_pid}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "finalize running_pids='${fin_pids}' (want job 'j' own PID '${j_pid}')" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${PID_FILE_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', ok='${ok_raw}', running_pids='${fin_pids}'"
@@ -1424,7 +1421,7 @@ test_abort_16() {
 	wait "$!"
 	sched_rv=$?
 
-	read_id_sets "${FINALIZE_SETS_PREFIX}"
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
 	count_msgs msg_cnt "${MSG_FILE}"
 	read_flat --rm tick_calls "${ABORT_CALLS_FILE}"
 	read_first_line --rm fin_pids "${FIN_PIDS_FILE}"
@@ -1448,7 +1445,7 @@ test_abort_16() {
 	[ -n "${target_pid}" ] && [ "${fin_pids}" = "${target_pid}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "finalize running_pids='${fin_pids}' (want job '724' own PID '${target_pid}')" >&2
 
-	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${PID_FILE_PREFIX:?}".* "${MSG_FILE}"
+	rm -f "${PID_FILE_PREFIX:?}".* "${MSG_FILE}"
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', ok='${ok_raw}', running_pids='${fin_pids}'"
