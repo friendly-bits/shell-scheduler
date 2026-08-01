@@ -356,26 +356,36 @@ test_sched_env_07() {
 	fi
 }
 
-# Verify SCHED_FIFO: the FIFO is created at exactly that path and removed afterward,
-#   a value with a trailing slash is rejected, and an already existing path is not reused.
+# Verify SCHED_FIFO: a caller-created FIFO is adopted and removed on exit; a missing path
+#   and a path that is not a FIFO are both rejected, the latter left untouched.
+# The rejecting runs use a short global timeout: without the '[ -p ]' check the scheduler
+#   would open a regular file, whose reads never block, and spin until that timeout.
 test_sched_env_08() {
 	local \
 		TEST_ID=sched_env_08 \
 		sched_rv \
-		bad_rv \
-		busy_rv \
+		missing_rv \
+		notfifo_rv \
 		scheduler_pid \
 		custom_fifo \
+		plain_file \
 		fifo_at_path=no \
-		fifo_left=yes \
+		fifo_removed=no \
+		nothing_created=no \
+		plain_file_kept=no \
 		jobs='ok2'
 
 	custom_fifo="/tmp/sched.customfifo.${TEST_ID}.$$"
-	rm -f "${custom_fifo}"
+	plain_file="/tmp/sched.notafifo.${TEST_ID}.$$"
+	rm -f "${custom_fifo}" "${plain_file}"
 
-	print_test_header "${TEST_ID:?}" "SCHED_FIFO: exact path used and cleaned up; trailing slash and existing path rejected" "${jobs}"
+	require_variant full || return 2
 
-	# Sub-check 1: the FIFO is created at the given path, not under /tmp/sched_*
+	print_test_header "${TEST_ID:?}" "SCHED_FIFO: caller-created FIFO adopted and removed; missing path and non-FIFO rejected" "${jobs}"
+
+	# Sub-check 1: the caller creates the FIFO, the scheduler uses it and removes it on exit
+	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
+
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
@@ -394,25 +404,10 @@ test_sched_env_08() {
 	wait "${scheduler_pid}"
 	sched_rv=$?
 
-	# Captured before sub-check 3 re-creates the path
-	[ -e "${custom_fifo}" ] || fifo_left=no
+	[ -e "${custom_fifo}" ] || fifo_removed=yes
 
-	# Sub-check 2: trailing slash -> rejected
-	SCHED_FAIL_MSG_CB=echo \
-	SCHED_FINALIZE_CB=finalize_handler \
-	JOB_DONE_CB=done_handler \
-	DO_JOB_CB=do_job_default \
-	SCHED_MAX_JOBS=1 \
-	SCHED_TIMEOUT_S=5 \
-	SCHED_IDLE_TIMEOUT_S=3 \
-	SCHED_FIFO="${custom_fifo}/" \
-		schedule_jobs 'ok_1' &
-	wait "$!"
-	bad_rv=$?
-
-	# Sub-check 3: a leftover FIFO is not reused
+	# Sub-check 2: missing path -> rejected, and the '<>' open must not create it
 	rm -f "${custom_fifo}"
-	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=finalize_handler \
@@ -424,19 +419,38 @@ test_sched_env_08() {
 	SCHED_FIFO="${custom_fifo}" \
 		schedule_jobs 'ok_1' &
 	wait "$!"
-	busy_rv=$?
-	rm -f "${custom_fifo}"
+	missing_rv=$?
+	[ -e "${custom_fifo}" ] || nothing_created=yes
+
+	# Sub-check 3: not a FIFO -> rejected, and not deleted by the run that rejected it
+	: > "${plain_file}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=1 \
+	SCHED_TIMEOUT_S=5 \
+	SCHED_IDLE_TIMEOUT_S=3 \
+	SCHED_FIFO="${plain_file}" \
+		schedule_jobs 'ok_1' &
+	wait "$!"
+	notfifo_rv=$?
+	[ -f "${plain_file}" ] && plain_file_kept=yes
+	rm -f "${custom_fifo}" "${plain_file}"
 
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${fifo_at_path}" = yes ] &&
-		[ "${fifo_left}" = no ] &&
-		[ "${bad_rv}" = 1 ] &&
-		[ "${busy_rv}" = 1 ]
+		[ "${fifo_removed}" = yes ] &&
+		[ "${missing_rv}" = 1 ] &&
+		[ "${nothing_created}" = yes ] &&
+		[ "${notfifo_rv}" = 1 ] &&
+		[ "${plain_file_kept}" = yes ]
 	then
-		PASS "fifo_at_path=${fifo_at_path}, sched_rv=${sched_rv}, bad_rv=${bad_rv}, busy_rv=${busy_rv}"
+		PASS "sched_rv=${sched_rv}, fifo_removed=${fifo_removed}, missing_rv=${missing_rv}, notfifo_rv=${notfifo_rv}"
 		return 0
 	else
-		FAIL "sched_rv=${sched_rv}, fifo_at_path=${fifo_at_path}, fifo_left=${fifo_left}, bad_rv=${bad_rv}, busy_rv=${busy_rv}"
+		FAIL "sched_rv=${sched_rv}, fifo_at_path=${fifo_at_path}, fifo_removed=${fifo_removed}, missing_rv=${missing_rv}, nothing_created=${nothing_created}, notfifo_rv=${notfifo_rv}, plain_file_kept=${plain_file_kept}"
 		return 1
 	fi
 }
