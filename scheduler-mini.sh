@@ -272,7 +272,12 @@ sch_start_job() {
 
 	job_get_params -export "${sch_job_id}" sch_all || exit 1
 
-	"${DO_JOB_CB:?}" "${sch_job_id}" "${@}"
+	if [ -n "${SCHED_INNER_SUBSHELL}" ]; then
+		( "${DO_JOB_CB:?}" "${sch_job_id}" "${@}" 3>&- )
+	else
+		"${DO_JOB_CB:?}" "${sch_job_id}" "${@}"
+	fi
+
 	exit "${?}"
 }
 
@@ -813,18 +818,26 @@ schedule_jobs() {
 	mkdir -p "${sch_dir}" ||
 		sch_finalize 1 "Failed to create directory '${sch_dir}'."
 
+	# Owner-only: a readable FIFO lets any other local user consume completion
+	#   records. Set in a subshell so the caller's umask is never disturbed.
 	sch_run_n=0
 	while :; do
 		sch_run_dir="${sch_dir}/sched_${SCHED_UID}.${sch_run_n}"
-		mkdir "${sch_run_dir}" 2>/dev/null && break
+		sch_ipc_fifo="${sch_run_dir}/ipc"
+		(
+			umask 077
+			mkdir "${sch_run_dir}" 2>/dev/null &&
+			{
+				mkfifo "${sch_ipc_fifo}" || {
+					rm -rf "${sch_run_dir}"
+					false
+				}
+			}
+		) && break
 		sch_run_n=$((sch_run_n + 1))
 		[ "${sch_run_n}" -lt 16 ] ||
-			sch_finalize 1 "Failed to create run directory under '${sch_dir}'."
+			sch_finalize 1 "Failed to create run directory or FIFO file under '${sch_dir}'."
 	done
-	sch_ipc_fifo="${sch_run_dir}/ipc"
-
-	mkfifo "${sch_ipc_fifo}" ||
-		sch_finalize 1 "Failed to create FIFO '${sch_ipc_fifo}'."
 
 	exec 3<>"${sch_ipc_fifo}" ||
 		sch_finalize 1 "Failed to open FIFO '${sch_ipc_fifo}'."

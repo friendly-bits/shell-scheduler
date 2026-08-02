@@ -9,6 +9,7 @@
 # SCHED_FIFO
 # SCHED_AUTO_PARAMS
 # SCHED_ID
+# SCHED_INNER_SUBSHELL
 
 # Env vars specifying callbacks (see REFERENCE.md):
 # DO_JOB_CB
@@ -26,7 +27,6 @@
 # Neither byte can occur in a payload
 SCH_STX=$'\002'
 SCH_ETX=$'\003'
-
 
 ### Helpers
 
@@ -341,7 +341,12 @@ sch_start_job() {
 	[ "${SCHED_AUTO_PARAMS}" = 1 ] &&
 		{ job_get_params -export "${sch_job_id}" sch_all || exit 1; }
 
-	"${DO_JOB_CB:?}" "${sch_job_id}" "${@}"
+	if [ -n "${SCHED_INNER_SUBSHELL}" ]; then
+		( "${DO_JOB_CB:?}" "${sch_job_id}" "${@}" 3>&- )
+	else
+		"${DO_JOB_CB:?}" "${sch_job_id}" "${@}"
+	fi
+
 	exit "${?}"
 }
 
@@ -879,20 +884,30 @@ schedule_jobs() {
 		mkdir -p "${sch_dir}" ||
 			sch_finalize 1 "Failed to create directory '${sch_dir}'."
 
+		# Owner-only run dir and FIFO: a readable FIFO lets any other local user
+		#   consume completion records meant for this run. The umask is set in a
+		#   subshell so the caller's own is never disturbed - including on the
+		#   failure paths below, which run the caller's completion callback.
 		# Claim a unique run dir. mkdir is atomic: it fails if the name exists,
 		#   so concurrent instances never collide.
 		sch_run_n=0
 		while :; do
 			sch_run_dir="${sch_dir}/sched_${SCHED_UID}.${sch_run_n}"
-			mkdir "${sch_run_dir}" 2>/dev/null && break
+			sch_ipc_fifo="${sch_run_dir}/ipc"
+			(
+				umask 077
+				mkdir "${sch_run_dir}" 2>/dev/null &&
+				{
+					mkfifo "${sch_ipc_fifo}" || {
+						rm -rf "${sch_run_dir}"
+						false
+					}
+				}
+			) && break
 			sch_run_n=$((sch_run_n + 1))
 			[ "${sch_run_n}" -lt 16 ] ||
-				sch_finalize 1 "Failed to create run directory under '${sch_dir}'."
+				sch_finalize 1 "Failed to create run directory or FIFO file under '${sch_dir}'."
 		done
-		sch_ipc_fifo="${sch_run_dir}/ipc"
-
-		mkfifo "${sch_ipc_fifo}" ||
-			sch_finalize 1 "Failed to create FIFO '${sch_ipc_fifo}'."
 	fi
 
 	exec 3<>"${sch_ipc_fifo}" ||
