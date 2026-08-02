@@ -1,27 +1,35 @@
 ## Test suite
 
 ### Instructions
-- tests.sh run <category> takes no number (whole category), a list of numbers, or a range: run params 34-38.
+- `tests.sh run <category>` takes either: no number (whole category), a list of numbers, or a range: `run params 34-38`.
 - Category files are large (tests-params.sh ~1700 lines). To append a test, grep for the highest test_<category>_NN and read one neighbouring test for the house pattern — don't read the file end to end.
+- A test's description comment sits *above* its function definition, so tracking the last-seen `test_<category>_NN()` header while grepping misattributes hits that fall in the next test's leading comment. Confirm the enclosing function before editing.
 - When you need to run a certain test, run it as `bash tests/tests.sh run <category> <test_num>` (or `busybox ash tests.sh ...`).
 - When writing tests, check which shared helpers are defined in tests/tests.sh (see its commented header) and use them where relevant. When adding a new shared helper, update the list of shared helpers in that commented header.
-- Every test runs `schedule_jobs &`; the only foreground call sites are the TTY-gated SIGINT sub-cases of scheduler_termination 07/09. Since the scheduler replaces the caller's EXIT trap, anything sharing a process with a foreground run cannot use its own EXIT trap for cleanup - those two hand the killer pid out through a file and reap it after the subshell exits.
-- When adding tests, give every test its own unique job ID unless the test specifically needs shared/repeated IDs (e.g. an isolation test comparing two IDs). Job-registered params persist for a job ID across the whole test run (no teardown), so reused IDs silently accumulate state from other tests.
+- Every test runs `schedule_jobs &`; the only foreground call sites are the TTY-gated SIGINT sub-cases of scheduler_termination 07/09. A run replaces the caller's EXIT trap and does not restore it, so anything sharing a process with a foreground run cannot use its own EXIT trap for cleanup - those two hand the killer pid out through a file and reap it after the subshell exits.
+- When adding tests, give every test its own unique job ID unless the test specifically needs shared/repeated IDs (e.g. an isolation test comparing two IDs). Job-registered params and per-job timeouts persist for a job ID until `jobs_init` clears them, so reused IDs silently accumulate state from other tests.
 - Put a new test helper in the category file when only that category uses it; put it in tests.sh only when tests in more than one category call it.
 - Tests must observe behavior only through public interfaces - return codes of `schedule_jobs`/`jobs_init`/helpers, callback outputs, `job_get_params` results, and `SCHED_FAIL_MSG_CB` messages. Never read or assert on internal `SCH_*`/`sch_*` variables; internal names and mechanisms may change.
+- Jobs are trusted, so guards exist to catch mistakes rather than attacks. Do not write tests pinning forgery or privilege-escalation scenarios.
 - An ad-hoc script that sources tests.sh must live in tests/ and take no positional arguments — tests.sh resolves its sibling/parent sources from $0 and parses "$@" at source time.
 - Glob-safety tests must use a *live* glob: one that matches a file guaranteed to exist (create a sentinel in a controlled dir the code runs in — e.g. `( cd "$WORK" && ... schedule_jobs 'zzsentinel*' )` with `$WORK/zzsentinelJOB` present). Make the sentinel's filename a valid job ID so expansion would produce a dispatchable id (a clean rejected-vs-dispatched signal). A non-matching glob (e.g. `*.txt` in a dir with no `.txt` files) stays literal whether or not it was expanded.
 - When writing a new test, prefer passing values to helpers called by the test via arguments rather than via global variables.
 - A test's outcome must start as failure and only become success once every check has passed: declare `checks_pass=0 checks_exp=<number of checks>`, write each check as `<success condition> && checks_pass=$((checks_pass + 1)) || <failure message>` (`if`/`else` when the failure branch has side effects), and gate the verdict on `[ "${checks_pass}" = "${checks_exp}" ]`. Adding a check means bumping `checks_exp`; forgetting to fails the test, which is the safe direction.
 - Checks that run a variable number of times (inside a loop, or in a helper called once per sub-case) get their own counter compared against the iteration count, and that comparison is the single check counted in `checks_exp` - a later passing iteration must not be able to mask an earlier failing one.
 - When every sub-case of a test is skipped, report SKIP and `return 2` rather than passing vacuously.
+- `tests.sh` sources the scheduler by hardcoded filename, so the suite cannot be pointed at a copy. Mutation testing therefore has to edit the real `scheduler.sh` in place: never run it concurrently with any other test run (including other agents'), restore from a pristine copy afterwards, and verify the restore.
 
 ### Verified facts
+
+These are facts about the suite. Keep them to suite behavior and to the minimum scheduler behavior a test author has to know - scheduler design rationale is documented separately and should not be restated here.
+
 - tests.sh auto-discovers tests by scanning each `tests-<category>.sh` for `test_<category>_NN()` functions (NN two digits), so a new test only needs a correctly-named function. `do_job_default` selects a job's behavior from its ID prefix (text before the first `_`): e.g. `instant`=sleep 0, `ok`/`ok1`=1s, `ok2`=2s, `ok5`=5s, `hang`=30s, `fail`=1s then return 17 (also `crash`, `malformed`); name jobs accordingly to reuse it as `DO_JOB_CB`.
 - A test function returns 0=pass, 1=fail, 2=skip; the runner counts anything else as a fail. A helper failure that only prints to stderr and falls through will still report PASS.
 - `DEFAULT_IFS` starts with a tab, so `"$*"` in a callback joins its arguments with tabs, not spaces. A helper that must produce a space-joined line needs `local IFS=' '`.
-- An aborted job leaves the running-jobs count immediately, so the scheduler can finish and exit before that job's own completion record arrives. A test that needs to observe the late record must keep a separate, longer-running job alive.
-- schedule_jobs()'s capacity-wait while loop only calls process_done_record() until running_jobs_cnt drops below SCHED_MAX_JOBS — it drains exactly one completion, not all pending ones. A second already-finished job can stay unread in the FIFO. To get multiple jobs fully classified (OK/FAIL) before a later timeout/abort, use SCHED_MAX_JOBS=1 for strict sequential dispatch instead of relying on this loop to drain everything.
+- `get_test_pid` inside a job yields the same PID the scheduler tracks in running_pids and passes to `JOB_TERM_CB` as a seed, because the job execution callback runs in the job's own wrapper process.
+- A test that needs to observe a late completion record must keep a separate, longer-running job alive: an aborted or expired job releases its slot at once, so the run can finish and exit before that job's own record arrives.
+- Variant-specific tests are gated with `require_variant full|mini || return 2`, placed just above `print_test_header`; the runner reports them as SKIP on the other variant.
+- Records are drained eagerly, but a completion record is only acted on once capacity is full or nothing is left to dispatch. For tests this means a job is not classified (OK/FAIL) the instant its record arrives; note that `JOB_DONE_CB` *does* fire while other jobs are still pending whenever the slots are full, so do not write a test assuming otherwise. To have jobs fully classified before a later timeout/abort, use SCHED_MAX_JOBS=1 for strict sequential dispatch: each dispatch fills the only slot, so the next iteration classifies before dispatching again.
 
 ### Test categories
 

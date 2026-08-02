@@ -281,8 +281,7 @@ test_sched_env_04() {
 		run_generic_test
 }
 
-# Verify SCHED_FINALIZE_CB may be empty and the scheduler still completes normally
-#   (test_sched_env_04).
+# Verify SCHED_FINALIZE_CB may be empty and the scheduler still completes normally.
 test_sched_env_05() {
 	SCHED_FINALIZE_CB='' \
 	JOB_DONE_CB=done_handler \
@@ -294,8 +293,7 @@ test_sched_env_05() {
 		run_generic_test
 }
 
-# Verify SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S may be left unset, falling back to defaults
-#   (test_sched_env_07).
+# Verify SCHED_TIMEOUT_S/SCHED_IDLE_TIMEOUT_S may be left unset, falling back to defaults.
 test_sched_env_06() {
 	local \
 		TEST_ID=sched_env_06 \
@@ -356,8 +354,8 @@ test_sched_env_07() {
 	fi
 }
 
-# Verify SCHED_FIFO: a caller-created FIFO is adopted and removed on exit; a missing path
-#   and a path that is not a FIFO are both rejected, the latter left untouched.
+# Verify SCHED_FIFO: a caller-created FIFO is adopted and removed on exit;
+#   a missing path and a path that is not a FIFO are both rejected, the latter left untouched.
 # The rejecting runs use a short global timeout: without the '[ -p ]' check the scheduler
 #   would open a regular file, whose reads never block, and spin until that timeout.
 test_sched_env_08() {
@@ -379,9 +377,9 @@ test_sched_env_08() {
 	plain_file="/tmp/sched.notafifo.${TEST_ID}.$$"
 	rm -f "${custom_fifo}" "${plain_file}"
 
-	require_variant full || return 2
-
 	print_test_header "${TEST_ID:?}" "SCHED_FIFO: caller-created FIFO adopted and removed; missing path and non-FIFO rejected" "${jobs}"
+
+	require_variant full || return 2
 
 	# Sub-check 1: the caller creates the FIFO, the scheduler uses it and removes it on exit
 	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }

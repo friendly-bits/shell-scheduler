@@ -742,11 +742,14 @@ test_job_termination_full_14() {
 	_jt_forkrace_scenario job_termination_full_14 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" forkrace_14 full
 }
 
-# Custom (user-defined) termination command: the core drives the whole documented
-#   subcommand sequence (test_11 covers the out-var report itself).
-# Asserts: 'init' once, first, no args; 'setup <job_id> <pid>' once per job, before
-#   any 'term'; 'term <out var> <pid>...' once, seeded with exactly the PIDs 'setup'
-#   was given; 'cleanup <out var>' once, last.
+# Custom (user-defined) termination command:
+#   the core drives the whole documented subcommand sequence.
+# The out-var report itself is not checked here.
+# Asserts:
+#   'init' once, first, no args;
+#   'setup <job_id> <pid>' once per job, before any 'term';
+#   'term <out var> <pid>...' once, seeded with exactly the PIDs 'setup' was given;
+#   'cleanup <out var>' once, last.
 # Runs in any environment.
 test_job_termination_full_15() {
 	# Records '<subcmd>|<args>'. 'setup' runs in the job process and the rest in the

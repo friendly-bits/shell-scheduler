@@ -114,11 +114,14 @@ mark_done_job() {
 # 1: out var
 # 2: list
 count_items() {
-	local ci_item ci_n=0
+	local ci_out="${1:?}" ci_had_f
 
-	for ci_item in ${2}; do ci_n=$((ci_n + 1)); done
+	case "${-}" in *f*) ci_had_f=1 ;; esac
+	set -f
+	set -- ${2}
+	[ -n "${ci_had_f}" ] || set +f
 
-	export -n "${1:?}=${ci_n}"
+	export -n "${ci_out}=${#}"
 }
 
 # Print every message recorded by record_fail_msg, numbered, for a FAIL diagnostic.
@@ -357,8 +360,10 @@ test_abort_03() {
 
 	print_test_header "${TEST_ID:?}" "One jobs_abort call mixing pending, running, completed, unknown and invalid IDs" "${jobs}"
 
-	# SCHED_MAX_JOBS=2: when instant_abort03 completes, ok5_abort03b is running
-	#   and ok5_abort03c is still pending
+	# SCHED_MAX_JOBS=2: when instant_abort03 completes, ok5_abort03b is running and ok5_abort03c is still pending.
+	# Relies on the priority ladder:
+	#   instant_abort03's record is only queued while a slot is free,
+	#   so JOB_DONE_CB cannot fire before ok5_abort03b is dispatched
 	SCHED_FAIL_MSG_CB=record_fail_msg \
 	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=ab03_done_cb \
@@ -730,8 +735,8 @@ test_abort_08() {
 	}
 
 	# Retire the completed job, then abort the youngest job still live.
-	# The youngest is the least likely to have already finished unread, which
-	#   keeps the abort path exercised rather than silently no-opping.
+	# The youngest is the least likely to have been classified already,
+	#   which keeps the abort path exercised rather than silently no-opping.
 	ab08_done_cb() {
 		local ab_id ab_target=
 
@@ -920,7 +925,10 @@ test_abort_10() {
 
 	start_s=$(date +%s)
 
-	# instant_abort10 completes first and aborts the three 5 s jobs
+	# instant_abort10 completes first and aborts the three 5 s jobs.
+	# Relies on the priority ladder: its record is only queued while slots are free,
+	#   so JOB_DONE_CB cannot fire until all four are dispatched -
+	#   otherwise the targets would still be pending and report undispatched, not aborted
 	SCHED_FAIL_MSG_CB=record_fail_msg \
 	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=abort_on_first_cb \
@@ -1523,8 +1531,8 @@ test_abort_17() {
 	fi
 }
 
-# Verify the mini-variant counterpart of test_17: mini keeps no verified-kill
-#   record, so the aborted job's PID is present in SCHED_FINALIZE_CB arg 2.
+# Verify that on the mini variant the aborted job's PID is present in SCHED_FINALIZE_CB
+#   arg 2: mini keeps no verified-kill record, so nothing is subtracted for a job proven dead.
 test_abort_18() {
 	# Mini protocol: '<cb> <pids...>'
 	ab18_term_cb() {
@@ -1576,6 +1584,277 @@ test_abort_18() {
 
 	if [ "${checks_pass}" = "${checks_exp}" ]; then
 		PASS "sched_rv=${sched_rv}, killed PID ${target_pid}, running_pids='${fin_pids}'"
+		return 0
+	else
+		FAIL
+		print_id_sets >&2
+		return 1
+	fi
+}
+
+# Verify an abort record already queued on ${SCHED_FIFO} when the run starts is applied before dispatch:
+#   its target is still pending, so it is never dispatched, and reported as undispatched.
+test_abort_19() {
+	local \
+		TEST_ID=abort_19 \
+		sched_rv \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_ok act_ok exp_undisp act_undisp \
+		checks_pass=0 checks_exp=4 \
+		custom_fifo \
+		jobs='ok1_abort19 ok2_abort19b'
+
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
+
+	custom_fifo="/tmp/sched.extfifo.${TEST_ID:?}.$$"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${custom_fifo}"
+
+	require_variant full || return 2
+
+	print_test_header "${TEST_ID:?}" "Abort record queued before the run leaves its job undispatched" "${jobs}"
+
+	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
+
+	# Read-write: never blocks, and holds the record until the scheduler reads it
+	exec 6<>"${custom_fifo}"
+	printf '\002abort %s\003\n' 'ok1_abort19' >&6
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+	SCHED_FIFO="${custom_fifo}" \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	exec 6>&-
+	rm -f "${custom_fifo}"
+
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	verify_id_set exp_undisp act_undisp 'ok1_abort19' "${undispatched_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "undispatched: expected='${exp_undisp}' actual='${act_undisp}'" >&2
+	verify_id_set exp_ok act_ok 'ok2_abort19b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${expired_raw}${aborted_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/expired/aborted must all be empty" >&2
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "sched_rv=${sched_rv}, undispatched='${undispatched_raw}', ok='${ok_raw}'"
+		return 0
+	else
+		FAIL
+		print_id_sets >&2
+		return 1
+	fi
+}
+
+# Verify an abort record that arrives while slots are still free is applied before the
+#   next job is dispatched, so its target never starts and lands in the undispatched
+#   set rather than the aborted one.
+# The record is written from SCHED_DISPATCH_TICK_CB purely to time it deterministically:
+#   the callback fires in the scheduler's process, which inherits fd 6.
+test_abort_20() {
+	abort20_tick() {
+		[ "${1}" = ok1_abort20 ] || return 0
+		printf '\002abort %s\003\n' 'ok1_abort20c' >&6
+	}
+
+	local \
+		TEST_ID=abort_20 \
+		sched_rv \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_ok act_ok exp_undisp act_undisp \
+		checks_pass=0 checks_exp=4 \
+		custom_fifo \
+		jobs='ok1_abort20 ok1_abort20b ok1_abort20c'
+
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
+
+	custom_fifo="/tmp/sched.extfifo.${TEST_ID:?}.$$"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${custom_fifo}"
+
+	require_variant full || return 2
+
+	print_test_header "${TEST_ID:?}" "Abort probed between dispatches stops the job from starting" "${jobs}"
+
+	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
+	exec 6<>"${custom_fifo}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	SCHED_DISPATCH_TICK_CB=abort20_tick \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=3 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+	SCHED_FIFO="${custom_fifo}" \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	exec 6>&-
+	rm -f "${custom_fifo}"
+
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	verify_id_set exp_undisp act_undisp 'ok1_abort20c' "${undispatched_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "undispatched: expected='${exp_undisp}' actual='${act_undisp}'" >&2
+	verify_id_set exp_ok act_ok 'ok1_abort20 ok1_abort20b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${expired_raw}${aborted_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/expired/aborted must all be empty" >&2
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "sched_rv=${sched_rv}, undispatched='${undispatched_raw}', ok='${ok_raw}'"
+		return 0
+	else
+		FAIL
+		print_id_sets >&2
+		return 1
+	fi
+}
+
+# Verify an abort record that arrives after its target is already running lands the job
+#   in the aborted set, not the undispatched one.
+# Both jobs are dispatched at once, so the record written a second later cannot race
+#   dispatch; the target is still running when it arrives.
+test_abort_21() {
+	local \
+		TEST_ID=abort_21 \
+		sched_rv \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_ok act_ok exp_aborted act_aborted \
+		checks_pass=0 checks_exp=4 \
+		custom_fifo \
+		jobs='ok5_abort21 ok2_abort21b'
+
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
+
+	custom_fifo="/tmp/sched.extfifo.${TEST_ID:?}.$$"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${custom_fifo}"
+
+	require_variant full || return 2
+
+	print_test_header "${TEST_ID:?}" "Abort record for a running job lands in the aborted set" "${jobs}"
+
+	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
+	exec 6<>"${custom_fifo}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+	SCHED_FIFO="${custom_fifo}" \
+		schedule_jobs "${jobs}" &
+
+	# Both jobs are running by now
+	sleep 1
+	printf '\002abort %s\003\n' 'ok5_abort21' >&6
+
+	wait "$!"
+	sched_rv=$?
+
+	exec 6>&-
+	rm -f "${custom_fifo}"
+
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	verify_id_set exp_aborted act_aborted 'ok5_abort21' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'ok2_abort21b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', ok='${ok_raw}'"
+		return 0
+	else
+		FAIL
+		print_id_sets >&2
+		return 1
+	fi
+}
+
+# Verify an abort record wins over a completion record drained in the same batch,
+#   whichever was queued first: both are written back to back, completion first,
+#   and the target still lands in the aborted set rather than the ok set.
+# Records are written from SCHED_DISPATCH_TICK_CB to queue them deterministically
+#   before the scheduler's next read; the callback runs in the scheduler's process,
+#   which inherits fd 6.
+# The target is a 5s job that outlives the run, so its own completion record
+#   never arrives to consume the abort's discard.
+test_abort_22() {
+	abort22_tick() {
+		[ "${1}" = ok5_abort22b ] || return 0
+		printf '\002%s %s\003\n' 0 'ok5_abort22b' >&6
+		printf '\002abort %s\003\n' 'ok5_abort22b' >&6
+	}
+
+	local \
+		TEST_ID=abort_22 \
+		sched_rv \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_ok act_ok exp_aborted act_aborted \
+		checks_pass=0 checks_exp=4 \
+		custom_fifo \
+		jobs='ok1_abort22 ok5_abort22b'
+
+	local FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$"
+
+	custom_fifo="/tmp/sched.extfifo.${TEST_ID:?}.$$"
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${custom_fifo}"
+
+	require_variant full || return 2
+
+	print_test_header "${TEST_ID:?}" "Abort beats a completion record drained in the same batch" "${jobs}"
+
+	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
+	exec 6<>"${custom_fifo}"
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	SCHED_DISPATCH_TICK_CB=abort22_tick \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+	SCHED_FIFO="${custom_fifo}" \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	exec 6>&-
+	rm -f "${custom_fifo}"
+
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	verify_id_set exp_aborted act_aborted 'ok5_abort22b' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'ok1_abort22' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ -z "${fail_raw}${unfinished_raw}${undispatched_raw}${expired_raw}" ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fail/unfinished/undispatched/expired must all be empty" >&2
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "sched_rv=${sched_rv}, aborted='${aborted_raw}', ok='${ok_raw}'"
 		return 0
 	else
 		FAIL

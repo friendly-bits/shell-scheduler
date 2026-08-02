@@ -647,7 +647,7 @@ test_scheduler_termination_11() {
 	fi
 }
 
-# Verify the global timeout can fire inside schedule_jobs()'s initial dispatch loop.
+# Verify the global timeout can fire while schedule_jobs() is still dispatching.
 # SCHED_DISPATCH_TICK_CB stalls past SCHED_TIMEOUT_S so the second job is never dispatched.
 test_scheduler_termination_12() {
 	scheduler_termination_12_do_job() {

@@ -696,7 +696,7 @@ test_params_12() {
 }
 
 # Verify job_set_params() rejects a call with a valid job ID but zero key=value pairs -
-#   symmetric with equivalent guard above (test_params_12).
+#   symmetric with the equivalent guard above.
 test_params_13() {
 	params_13_fail_msg() { printf '%s\n' "$*" >> "${MSG_FILE:?}"; }
 
@@ -1596,9 +1596,8 @@ test_params_32() {
 #   a 2020-char param name is accepted, 2021 rejected; a 2021-char job ID is rejected;
 #   one message per rejection.
 # Long names round-trip their values through the 'var=param' alias form.
-# The job-ID limit here is the same 2020 that schedule_jobs()/jobs_init() accept
-#   (test_security_13), despite the internal 'SCH_JOB_PARAMS_<job_id>' name being
-#   validated too.
+# The job-ID limit here is the same 2020 that schedule_jobs()/jobs_init() accept,
+#   despite the internal 'SCH_JOB_PARAMS_<job_id>' name being validated too.
 # Direct calls, no scheduler run.
 test_params_33() {
 	params_33_check_rejected() {

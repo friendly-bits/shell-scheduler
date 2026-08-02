@@ -234,7 +234,7 @@ test_outcome_04() {
 }
 
 # Verify a malformed-completion-record abort
-#   (sch_finalize called directly from inside process_done_record, not from the normal loop exits)
+#   (sch_finalize called directly from inside sch_drain_fifo_records, not from the normal loop exit)
 #   still preserves an already-completed job's ok status;
 #   the malformed job itself is unfinished.
 test_outcome_05() {
@@ -409,10 +409,8 @@ test_outcome_07() {
 }
 
 # Verify the union of ok/fail/unfinished/undispatched/expired delivered to SCHED_FINALIZE_CB
-#   equals the full job-ID list passed to schedule_jobs(),
-#   and every job ID appears in exactly one bucket.
-#   Bucket-agnostic: asserts the partition invariant,
-#   not which bucket each ID lands in (test_outcome_06 checks specific membership).
+#   equals the full job-ID list passed to schedule_jobs(), and every job ID appears in exactly one bucket.
+# Bucket-agnostic: asserts the partition invariant, not which bucket each ID lands in.
 test_outcome_08() {
 	local \
 		TEST_ID=outcome_08 \
@@ -478,10 +476,10 @@ test_outcome_08() {
 	fi
 }
 
-# Verify the SCHED_FINALIZE_CB argument contract over two runs, one with an abort
-#   and one without: exactly 8 arguments both times, and argument 8 is the aborted
-#   set. With no aborts, only '${8+x}' separates an empty argument 8 from an absent
-#   one - '${8:+x}' is empty either way, so both are recorded.
+# Verify the SCHED_FINALIZE_CB argument contract over two runs, one with an abort and one without:
+#   exactly 8 arguments both times, and argument 8 is the aborted set.
+# With no aborts, only '${8+x}' separates an empty argument 8 from an absent one -
+#   '${8:+x}' is empty either way, so both are recorded.
 test_outcome_09() {
 	# SCHED_FINALIZE_CB recording the argument contract; passes the scheduler rv through
 	outcome_09_finalize() {
@@ -590,9 +588,9 @@ test_outcome_09() {
 	fi
 }
 
-# Verify the six outcome sets partition the job list over a single run producing
-#   all six outcomes: every job ID in exactly one set, no unlisted IDs, and every
-#   set non-empty so the run really did mix all six.
+# Verify the six outcome sets partition the job list over a single run producing all six outcomes:
+#   every job ID in exactly one set, no unlisted IDs,
+#   and every set non-empty so the run really did mix all six.
 test_outcome_10() {
 	# SCHED_DISPATCH_TICK_CB aborting the job it was just called for, when that
 	#   job is ${ABORT_ID}. The tick runs after dispatch, so the job is running.
@@ -619,9 +617,9 @@ test_outcome_10() {
 
 	job_set_timeout hang_outcome10x 1 || { FAIL "job_set_timeout failed"; return 1; }
 
-	# SCHED_MAX_JOBS=1 dispatches strictly in order, so each job is fully
-	#   classified before the next starts:
-	#   ok1_outcome10 -> ok; fail_outcome10 -> fail;
+	# SCHED_MAX_JOBS=1 dispatches strictly in order, so each job is fully classified before the next starts:
+	#   ok1_outcome10 -> ok;
+	#   fail_outcome10 -> fail;
 	#   ok5_outcome10 aborted on its own dispatch tick, freeing its slot at once;
 	#   hang_outcome10x expires on its 1 s budget;
 	#   hang_outcome10 is still running when SCHED_TIMEOUT_S fires -> unfinished;

@@ -448,9 +448,9 @@ test_timeout_06() {
 	fi
 }
 
-# Verify slot reclamation: with SCHED_MAX_JOBS=1,
-#   a hung job's expiry inside the capacity-wait loop frees the slot and the queued job gets dispatched.
-# Also guards the deadline cap on the completion-wait read timeout: without the cap,
+# Verify slot reclamation: with SCHED_MAX_JOBS=1, the hung job's expiry frees the slot
+#   and the queued job gets dispatched.
+# Also guards the deadline cap on the read timeout: without the cap,
 #   the wait would sleep past the 1s deadline and hit the 3s idle timeout (rv 81).
 test_timeout_07() {
 	timeout_07_finalize() {
@@ -468,7 +468,7 @@ test_timeout_07() {
 	local FIN_FILE="/tmp/sched.t07.fin.$$"
 	rm -f "${FIN_FILE}"
 
-	print_test_header "${TEST_ID:?}" "Expiry in the capacity-wait loop reclaims the slot (SCHED_MAX_JOBS=1)" "${jobs}"
+	print_test_header "${TEST_ID:?}" "Expiry reclaims the slot for a queued job (SCHED_MAX_JOBS=1)" "${jobs}"
 
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=timeout_07_finalize \
@@ -894,12 +894,13 @@ test_timeout_14() {
 	fi
 }
 
-# Verify abort and expiry cannot both claim the same job. Two passes put the abort
-#   on either side of the deadline sweep - one from the dispatch tick at the very
-#   moment the deadline falls due, one from the completion callback the sweep itself
-#   invokes. Neither pass assumes a winner: each asserts only that the job is
-#   classified in exactly one of expired/aborted, that the six sets still partition
-#   the job list, and that the running-job counter stays sound.
+# Verify abort and expiry cannot both claim the same job.
+# Two passes put the abort on either side of the deadline sweep -
+#   one from the dispatch tick at the very moment the deadline falls due,
+#   one from the completion callback the sweep itself invokes.
+# Neither pass assumes a winner:
+#   each asserts only that the job is classified in exactly one of expired/aborted,
+#   that the six sets still partition the job list, and that the running-job counter stays sound.
 test_timeout_15() {
 	# SCHED_DISPATCH_TICK_CB: on the target's dispatch, sleep until its deadline
 	#   falls due, then abort it - the sweep has had no chance to run yet
@@ -987,7 +988,7 @@ test_timeout_15() {
 
 	local \
 		TEST_ID=timeout_15 \
-		winners= \
+		winners \
 		passes_ok=0 \
 		TO15_DEADLINE_S=2 \
 		jobs='hang_to15a ok2_to15a / hang_to15b ok2_to15b'
