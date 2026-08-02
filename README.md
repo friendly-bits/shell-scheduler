@@ -6,7 +6,7 @@ The goal of this project is to implement a reliable, reusable, flexible and reas
 
 ## Motivation
 This library is designed to solve the following problems:
-1. Separate parallelization orchestration code from application-specific code.
+1. Separate parallelization code from application-specific code.
 2. Allow implementing jobs as shell functions.
 3. Provide application-specific context to jobs.
 4. Easily track job completions (and timeouts) and act on them in real time.
@@ -18,11 +18,12 @@ This library is designed to solve the following problems:
 - **Callback-based API** facilitates easy integration with a shell-based application while keeping parallelization orchestration code separate from application-specific code
 - **Configurable per-job parameters**
 - **Configurable global, idle and per-job timeouts**
+- **Job cancellation**: abort specific running or queued jobs mid-flight
 - **Validity checks and error handling** of everything that can go wrong, including configuration, callback definitions and internal scheduler state
 - Optional **automatic job termination**
 - **Extensive test suite** validates that every promise made by the API holds in practice
 - **Negligible performance overhead** for almost any feasible use case. Very few invocations of external binaries, very few filesystem operations, and minimum spawned subshells
-- Supports running **multiple scheduler instances** in parallel on the same machine
+- Supports running **multiple scheduler instances** in parallel on the same machine, including fun stuff like multiple levels of schedulers nested inside each other.
 
 ## Dependencies
 
@@ -34,11 +35,11 @@ This library is designed to solve the following problems:
 
 shell-scheduler comes in two variants: full (`scheduler.sh`) and mini (`scheduler-mini.sh`). The differences are listed below:
 
-- **Job termination**: the full variant delegates to a pluggable helper library (`job-term.sh`) which implements three selectable job termination mechanisms (cgroup, `/proc` children-walk, `/proc` PPID-walk); the mini variant comes with the `/proc` PPID-walk mechanism built in, does not support the job termination callback protocol implemented in the helper library or the other two mechanisms.
+- **Job termination**: the full variant hands this off to a separate helper library (`job-term.sh`), which implements three selectable job termination mechanisms (cgroup, children-walk, PPID-walk). The mini variant has the PPID-walk mechanism built in and uses a simplified job termination callback protocol, which makes it incompatible with the helper library.
 - **Per-job parameters**: the full variant exports registered params to jobs and to the job completion callback only when you opt in with `SCHED_AUTO_PARAMS=1`; the mini variant always exports them.
 - **Code comments**: the mini version removes a lot of them to reduce the size.
 
-Everything else is identical (callbacks, timeouts, per-job parameters and helpers) is identical. Pick mini if file size is important and the PPID-walk job termination mechanism is sufficient for your application; or if you prefer a single file. Pick full when you want to have all three job termination mechanisms available or gate parameter delivery to jobs.
+Everything else (callbacks, timeouts, per-job parameters and helpers) is identical. Pick mini if file size is important and the PPID-walk job termination mechanism is sufficient for your application; or if you prefer a single file. Pick full if you want all three job termination mechanisms available, or want control over whether parameters are automatically passed to jobs.
 
 ## Quick start
 
@@ -99,7 +100,7 @@ Your code can hook in five places by implementing **callbacks**. Each callback c
 - For **job implementation**, specify the **job execution callback** as the value of `${DO_JOB_CB}`. When invoking this callback, the scheduler passes the corresponding job ID in the first argument.
 - When a **job completes**, the scheduler calls your optional **job completion callback** (`JOB_DONE_CB`) with the job ID and its return code.
 - If a **job hangs** and hits a per-job timeout, or when either the **global scheduler timeout** or the **idle timeout** is exceeded, the scheduler calls your optional **job termination callback** (`JOB_TERM_CB`).
-- Before the scheduler **exits**, it calls your optional **scheduler completion callback** (`SCHED_FINALIZE_CB`).
+- Before the scheduler **exits**, it calls your optional **scheduler completion callback** (`SCHED_FINALIZE_CB`), which reports every job ID in exactly one outcome category: succeeded, failed, unfinished, undispatched (never started), expired or aborted.
 - When the scheduler **encounters an error**, it calls your optional **error reporting callback** (`SCHED_FAIL_MSG_CB`) - if not defined, errors are printed to STDERR.
 
 For example, for the **job execution callback**, implement the callback function and set the environment variable `DO_JOB_CB` to the name of that function before calling `schedule_jobs`:
@@ -115,7 +116,7 @@ schedule_jobs "<job_ids>" &
 
 -----
 
-Before setting per-job parameters and timeouts, and particularly before reconfiguring and re-running jobs in the same process, a good practice is to **reset jobs configuration** via `jobs_init`.
+Before setting per-job parameters and timeouts - and especially before reconfiguring and re-running jobs in the same process - it is good practice to **reset the job configuration** via `jobs_init`.
 
 ```sh
 jobs_init "<job_id_list>"
@@ -155,65 +156,32 @@ If your application needs to run more than one scheduler instance, see [Schedule
 
 -----
 
+You can terminate the scheduler when needed by sending it a signal: USR1 or TERM or INT (the latter only works if the scheduler is running in the foreground). See [Signal handling](REFERENCE.md#signal-handling)
+
+To **abort specific jobs** while the batch is running without terminating the scheduler, you can implement logic in the **job completion callback** which would conditionally call the helper `jobs_abort`. See [Aborting specific jobs from a callback](REFERENCE.md#aborting-specific-jobs-from-a-callback).
+
+In order to be able to abort specific jobs **from outside the scheduler**, create a FIFO with `mkfifo` and set `SCHED_FIFO` to its path before starting the scheduler. Then when your code wants to abort specific jobs, it can write an abort record to that FIFO. See [Aborting specific jobs externally](REFERENCE.md#aborting-specific-jobs-externally).
+
+Note that job's processes are only killed if the **job termination callback** is configured.
+
+-----
+
 **Note**: The scheduler is intended to run in a separate process. This may be a background process (with the `&` after `schedule_jobs`), or a foreground subshell, e.g.:
 ```sh
 ( DO_JOB_CB=my_exec SCHED_MAX_JOBS=10 schedule_jobs "1 2 3" )
 ```
 
-While technically you *can* run the scheduler in the same process as your application, that would make your script exit when the scheduler does and interfere with any `trap`s your application might have set up. So as a general rule, avoid that.
+While technically you *can* run the scheduler in the same process as your application, that would make your script exit when the scheduler does and replace any `USR1`/`INT`/`TERM`/`EXIT` `trap`s your application might have set up. So as a general rule, avoid that.
 
 ## Security
 
-The implementation uses `eval` in a few places to emulate associative arrays functionality. Expressions passed to `eval` are carefully constructed to avoid command injection vulnerabilities: variable names are vetted, and values are expanded via parameter expansion rather than interpolated into the code string, so they cannot be interpreted as code. E.g.:
+The implementation uses `eval` in a few places to emulate associative array functionality and for code compactness, following the [recommendation](https://www.shellcheck.net/wiki/SC2082) by shellcheck for getting values via indirection on POSIX shells. To avoid command injection vulnerabilities, the code validates variable names passed to `eval` and makes sure that untrusted values can not be interpreted as code.
 
-```sh
-# Vet the ${SCHED_ID} namespace and the value of ${sch_job_id}
-sch_get_ns sch_ns "${sch_me}" || return 1
-sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || return 1
-...
-# Get parameters list for job ${sch_job_id}
-eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_ns}${sch_job_id}}\""
-```
+Job IDs, parameter names and destination variable names are validated on the way in, which is where the character-set restrictions documented in [Job parameters](REFERENCE.md#job-parameters) come from.
 
-(`sch_get_ns()` and `sch_check_name()` perform string safety validation)
+The implementation is likewise careful about **globbing**. When any unquoted word split is required, this is done with the `noglob` shell option turned on (i.e. filename expansion is disabled), so a value containing `*` or `?` cannot expand into filenames. The original `noglob` value is restored afterwards.
 
-This follows the [recommendation](https://www.shellcheck.net/wiki/SC2082) by shellcheck for getting values via indirection on POSIX shells.
-
-This mechanism and all relevant code has been checked, double-checked and triple-checked by the author and by various AIs.
-
-The test suite includes tests which specifically check for command injection vulnerabilities (`tests/tests-security.sh`).
-
-The author firmly believes that these precautions are sufficient.
-
------
-
-The implementation is careful about **globbing**. Every place which might be subject to unwanted/unsafe globbing uses the following construct:
-
-```sh
-# Save earlier noglob state
-local had_f
-sch_has_f && had_f=1
-
-# Disable globbing
-set -f
-
-# Do something which is subject to unwanted globbing, e.g. a "for" loop
-# ...
-
-# Restore noglob state
-[ -n "${had_f}" ] || set +f
-```
-
-where `sch_has_f()` is:
-
-```sh
-sch_has_f() {
-	case "${-}" in
-		*f*) return 0 ;;
-		*) return 1
-	esac
-}
-```
+The test suite includes tests which specifically check for command injection and forgery resistance (`tests/tests-security.sh`), and for correct noglob behavior.
 
 ## Full reference
 
@@ -235,3 +203,15 @@ Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md]
 For a complete integration example, see [`EXAMPLE-HAGEZI-FETCH.md`](EXAMPLE-HAGEZI-FETCH.md) - a concurrent downloader for DNS blocklists. It demonstrates per-job parameters, signal forwarding, cleanup of orphaned child processes, and bookkeeping across callbacks.
 
 For another complete (and quite involved) integration example, see [`test-matrix.sh`](tests/test-matrix.sh) - a script which runs multiple instances of the test suite in parallel with Bash and Busybox ash, across the full and mini variants of the scheduler, using the scheduler itself to orchestrate the parallelization.
+
+## Code authorship and the use of generative AI
+
+TL;DR: AI was used as an assistant when developing this project, but it is not vibe-coded.
+
+This project started as a generalizing refactor of code I wrote for [adblock-lean](https://github.com/lynxthecat/adblock-lean). That code was entirely written by hand. I am planning to contribute this generalized and refactored code back to adblock-lean and to re-integrate it into that project. While working on the refactor and further development, I used AI for correctness verification, bug detection and initial documentation. Later, while working on some especially tricky features, I co-developed them with AI. Specifically: some parts of the timeout handling code were co-developed with AI; some parts of the job termination code were initially implemented by AI with my supervision, then I rewrote some of it, again using AI as code reviewer and bug-checker.
+
+**Every line of code and every command** in the three main scripts (scheduler.sh, scheduler-mimi.sh and job-termination.sh) was either written by me or checked by me.
+
+Testing infrastructure was co-developed with AI. Tests themselves were written by AI following my prompts and, for the most part, verified by me and, where bugs were discovered, manually fixed.
+
+Documentation was initially written by AI and later mostly re-written by me, using AI as a grammar and correctness checker.

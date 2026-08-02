@@ -16,7 +16,7 @@ The scheduler reads elapsed time from `/proc/uptime` with centisecond (0.01 s) r
 
 Timeout *enforcement* is coarser than the accounting resolution:
 
-- While waiting for job completions, the scheduler sleeps in `read -t` with a timeout in whole seconds (rounded up from the remaining time). A timeout is therefore never declared early, but may be declared up to about one second late.
+- While waiting for job completions, the scheduler uses a timeout set in whole seconds (rounded up from the remaining time). A timeout is therefore never declared early, but may be declared up to about one second late. The wait is capped by whichever of the global remaining time, the idle remaining time and the nearest per-job deadline comes first, so no deadline is ever slept through.
 - All callbacks except the **job execution callback** run synchronously in the scheduler process. While such a callback runs, the scheduler cannot register completions or declare timeouts - see the note in [Callbacks](REFERENCE.md#callbacks). Keep synchronous callbacks fast. Remaining time is recomputed from a fresh clock reading after each callback returns, so a slow callback delays timeout detection by at most its own duration.
 
 ## Global timeout
@@ -78,22 +78,14 @@ Like per-job parameters, an individual timeout is stored under the namespace sel
    ```
 
    The **presence of the third argument** marks a scheduler-synthesized timeout (vs similar return code received directly from the job). If a job itself genuinely exits with code `124`, this third argument will not be present. The `<pid>` enables application-side cleanup at the moment of expiry.
-4. **Completion record arrival wins over expiry.** On each scheduler wake-up, a received completion record is processed before deadlines are checked.
+4. **Completion record arrival wins over expiry.** On each scheduler wake-up, every record received on that wake-up is processed before deadlines are checked.
 5. **Job expiries do not count as progress.** The idle timeout is reset when the scheduler starts a job or processes a genuine completion record - never when it processes an expiry.
 6. **Late completion records are discarded.** If an abandoned job's completion record arrives after its expiry was processed, the record is silently dropped; the job's classification (timed out, code `124`) stands. The job's PID is removed from the list of `<running_pids>`.
 7. **Final accounting.** Timed-out job IDs appear in the dedicated `<expired_job_ids>` list passed to the **scheduler completion callback** - not in `<fail_job_ids>`. Abandoned jobs whose process never reported back before scheduler exit have their PIDs included in `<running_pids>`; abandoned jobs whose late record was discarded do not, and neither do jobs whose kill was verified by the [job termination callback](REFERENCE.md#job-termination-callback---full).
 
-### Implementation notes (internal)
-
-- Deadlines are tracked in the scheduler process only.
-- Deadline entries are encoded as `<pid>:<deadline_cs>:<job_id>`. The first two fields are unsigned integers and job IDs contain neither `:` nor whitespace, so the job ID is parsed unambiguously as the trailing remainder.
-- All integration lives in the completion-wait path (`process_done_record()`): the `read -t` wait is capped by min(global remaining, idle remaining, nearest deadline remaining); expired deadlines are swept unconditionally at the end of every wake, after any received completion record has been fully processed (rule 4).
-- Late-record handling (rule 7): a record whose PID is in the running list is processed normally; otherwise, if its PID **and** job ID match a recorded expiry, it is discarded and the expiry entry is delisted; otherwise it is malformed (fatal). Checking the running list first is what makes PID reuse safe: a reused PID always belongs to a currently-running job.
-- Deadline bookkeeping (splitting off expired entries, slot reclamation, completion synthesis) and the record-classification decision (normal / discard / malformed) are inlined in `process_done_record()`. By test-suite policy, all of it is covered by behavior tests through the public interface only (`schedule_jobs()`, the documented helpers, environment variables and callbacks), so internal restructuring requires no test changes. The discard arm is tested deterministically by having a test `JOB_DONE_CB` forge the timed-out job's late completion record into the FIFO at the moment of the timeout notification.
-
 ## Reliable delays in callbacks
 
-Every scheduler callback except the **job execution callback** runs inside the scheduler process, which continuously has child processes exiting as jobs complete. On BusyBox builds where `sleep` is a NOFORK shell builtin (e.g. with `CONFIG_FEATURE_SH_STANDALONE` enabled), an in-process `sleep` in such a callback can be silently cut short by the `SIGCHLD` of an exiting job.
+Every scheduler callback runs inside the scheduler process except the **job execution callback** and the **job termination callback**'s `setup` subcommand, which run in the job's own wrapper process. The scheduler process continuously has child processes exiting as jobs complete. On BusyBox builds where `sleep` is a NOFORK shell builtin (e.g. with `CONFIG_FEATURE_SH_STANDALONE` enabled), an in-process `sleep` in a callback that runs there can be silently cut short by the `SIGCHLD` of an exiting job.
 
 If a callback needs a reliable delay, force a forked sleep, which is immune to this:
 
