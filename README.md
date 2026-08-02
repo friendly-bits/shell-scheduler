@@ -4,6 +4,20 @@ The goal of this project is to implement a reliable, reusable, flexible and reas
 
 > If you find this niche little project useful, please take a second to give it a star on GitHub - this helps other people to find it.
 
+## Contents
+
+- [Motivation](#motivation)
+- [Features](#features)
+- [Dependencies](#dependencies)
+- [Variants](#variants)
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Security](#security)
+	- [Running untrusted jobs](#running-untrusted-jobs)
+- [Full reference](#full-reference)
+- [Real-world examples](#real-world-examples)
+- [Code authorship and the use of generative AI](#code-authorship-and-the-use-of-generative-ai)
+
 ## Motivation
 This library is designed to solve the following problems:
 1. Separate parallelization code from application-specific code.
@@ -175,13 +189,30 @@ While technically you *can* run the scheduler in the same process as your applic
 
 ## Security
 
-The implementation uses `eval` in a few places to emulate associative array functionality and for code compactness, following the [recommendation](https://www.shellcheck.net/wiki/SC2082) by shellcheck for getting values via indirection on POSIX shells. To avoid command injection vulnerabilities, the code validates variable names passed to `eval` and makes sure that untrusted values can not be interpreted as code.
+By default, shell-scheduler assumes that your application and jobs specified by your application are trusted code. It performs validity checks where it makes sense and tries to resist user mistakes, but it can not prevent you from running untrusted code and if you tell shell-scheduler to run such code, it will. Such untrusted code could, in theory, mess with scheduler's internal state: to a larger degree when this happens in scheduler's main process, and to a lesser degree when this happens in a callback which runs in a subshell (e.g. the **job execution callback**). See [REFERENCE.md](REFERENCE.md#callbacks) for a list of callbacks and a table showing which process each callback runs in. See [Running untrusted jobs](#running-untrusted-jobs) below for additional information.
 
-Job IDs, parameter names and destination variable names are validated on the way in, which is where the character-set restrictions documented in [Job parameters](REFERENCE.md#job-parameters) come from.
+**File permissions**: when the scheduler creates its own working directory and the FIFO inside it, both are made accessible to the owner only (i.e. the user under which your application is running). A FIFO you supply yourself via `SCHED_FIFO` is created by you, so you control its permissions. To restrict access to your user only, create the FIFO file with permissions `600`, e.g. `mkfifo -m 600 /tmp/myfifo` if `mkfifo` supports the `-m` switch, or `( umask 077; mkfifo /tmp/myfifo )` if not (the subshell + `umask` guarantees atomicity).
 
-The implementation is likewise careful about **globbing**. When any unquoted word split is required, this is done with the `noglob` shell option turned on (i.e. filename expansion is disabled), so a value containing `*` or `?` cannot expand into filenames. The original `noglob` value is restored afterwards.
+### Running untrusted jobs
 
-The test suite includes tests which specifically check for command injection and forgery resistance (`tests/tests-security.sh`), and for correct noglob behavior.
+If some of your jobs run code you do not fully trust, the practical way to contain it is to run that code as a different user with fewer privileges.
+
+To implement this, run untrusted commands inside your **job execution callback** via one of the common utilites that can start a process under another user: `su`, `sudo`, `doas`, `setpriv`, `runuser` or `start-stop-daemon`. Dropping permissions should restrict the job's ability to kill the scheduler via signals, or to access sensitive files, including the FIFO file used for scheduler's communication with the job wrappers.
+
+Besides file permissions, a job inherits the file descriptor which the scheduler creates to access the FIFO file, and its ability to write and read to/from this file descriptor is not affected by the permissions it runs with. So it can disrupt this communication channel, abort jobs or report job completions which never happened.
+
+To close all the mentioned gaps, in addition to running untrusted code with reduced permissions, it is important to get two things right:
+
+- **Set `SCHED_INNER_SUBSHELL=1`** in order to prevent untrusted commands from being able to read and write to/from the file descriptor opened by the scheduler. With this variable set, the jobs are started inside a second subshell and this allows the scheduler to close that file descriptor before the **job execution callback** runs, so jobs will not be able to reuse the file descriptor. Setting the same environment variable also frees up fd 3 for legitimate use by the jobs (otherwise you should avoid using that file descriptor).
+- **Mind the FIFO's permissions if you supply your own.** The scheduler's own FIFO is owner-only, so a process running as another user can not open it by path. One you create yourself is only as protected as you make it.
+
+It is also worth clearing the environment for the untrusted command, with `env -i` or by unsetting the variables you care about. This does not protect the scheduler - its state lives in its own process, not in variables a child could reach - but per-job parameters are handed to jobs as environment variables (always in the mini variant, and with `SCHED_AUTO_PARAMS=1` in the full one), so any command the job starts inherits all of them, along with whatever else your application keeps in its environment. If any of that is sensitive, an untrusted command has no business seeing it. Note that `env -i` clears *everything*, so the command may need `PATH` and a few others put back explicitly.
+
+**Notes**:
+- The implementation uses `eval` in a few places to emulate associative array functionality and for code compactness. To avoid command injection vulnerabilities, the code validates variable names passed to `eval` and makes sure that untrusted values can not be interpreted as code.
+- Job IDs, parameter names and destination variable names are validated by the helper that receives them, before they are ever used to build an internal variable name, and separately before every use in `eval`.
+- The implementation is likewise careful about **globbing**. When any unquoted word split is required, this is done with the `noglob` shell option turned on (i.e. filename expansion is disabled), so a value containing `*` or `?` cannot expand into filenames. The original `noglob` value is restored afterwards.
+- The test suite includes tests which specifically check for command injection and forgery resistance (`tests/tests-security.sh`), and for correct noglob behavior.
 
 ## Full reference
 
@@ -210,7 +241,7 @@ TL;DR: AI was used as an assistant when developing this project, but it is not v
 
 This project started as a generalizing refactor of code I wrote for [adblock-lean](https://github.com/lynxthecat/adblock-lean). That code was entirely written by hand. I am planning to contribute this generalized and refactored code back to adblock-lean and to re-integrate it into that project. While working on the refactor and further development, I used AI for correctness verification, bug detection and initial documentation. Later, while working on some especially tricky features, I co-developed them with AI. Specifically: some parts of the timeout handling code were co-developed with AI; some parts of the job termination code were initially implemented by AI with my supervision, then I rewrote some of it, again using AI as code reviewer and bug-checker.
 
-**Every line of code and every command** in the three main scripts (scheduler.sh, scheduler-mimi.sh and job-termination.sh) was either written by me or checked by me.
+**Every line of code and every command** in the three main scripts (scheduler.sh, scheduler-mini.sh and job-term.sh) was either written by me or checked by me.
 
 Testing infrastructure was co-developed with AI. Tests themselves were written by AI following my prompts and, for the most part, verified by me and, where bugs were discovered, manually fixed.
 

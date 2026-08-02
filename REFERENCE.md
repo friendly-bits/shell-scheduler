@@ -101,9 +101,20 @@ All callbacks are specified by assigning the callback name to the corresponding 
 
 shell-scheduler expects each callback to be implemented in your script as a shell function. If you want to use external commands for your callbacks, wrap them in a shell function.
 
-> **Note**: All callbacks, except the **job execution callback**, are invoked synchronously (in the foreground, from the scheduler's perspective). Synchronous callbacks block scheduler execution, bookkeeping and time-keeping. Previously started jobs do continue to run, but the scheduler will not launch new jobs or register job completions until the callback returns control to the scheduler. Avoid including commands which may stall for a prolonged time in such callbacks.
->
-> Because synchronous callbacks run in the scheduler's own shell process, they are able to change the values of scheduler's internal variables. Hence the API reserves variables whose names start with `sch_`, `_sch_`, `SCH_` or `SCHED_` for internal use: callbacks must not assign values to them. Best practice for callbacks is to declare their own working variables `local` in order to avoid any namespacing issues altogether. If your code ignores this advice and changes values of the scheduler's internal variables, strange things may happen.
+> **Note**: Because certain callbacks run in the scheduler's own shell process, they are able to change the values of scheduler's internal variables. Hence the API reserves variables whose names start with `sch_`, `_sch_`, `SCH_` or `SCHED_` for internal use: callbacks must not assign values to them. Best practice for callbacks is to declare their own working variables `local` in order to avoid any namespacing issues altogether. If your code ignores this advice and changes values of the scheduler's internal variables, strange things may happen.
+
+Which process each callback runs in, and whether it can therefore change the scheduler's internal variables:
+
+| Callback | Runs in | Can change scheduler's internal variables |
+| -------- | ------- | :---------------------------: |
+| **Job execution** | the job's own process, or a subshell of that process when `SCHED_INNER_SUBSHELL=1` | no |
+| **Job termination**: `setup` command (only supported by the full variant) | the job's own process | no |
+| **Job termination**: `init` / `term` / `cleanup` commands | the scheduler's process | yes |
+| **Job completion** | the scheduler's process | yes |
+| **Scheduler completion** | the scheduler's process | yes |
+| **Error reporting** | a subshell of whichever process reported the error | no |
+
+> **Note**: All callbacks, except the **job execution callback** and the **job termination callback**'s `setup` command, are invoked synchronously (in the foreground, from the scheduler's perspective). Synchronous callbacks block scheduler execution, bookkeeping and time-keeping. Previously started jobs do continue to run, but the scheduler will not launch new jobs or register job completions until the callback returns control to the scheduler. Avoid including commands which may stall for a prolonged time in such callbacks.
 
 ### Job execution callback (required)
 
