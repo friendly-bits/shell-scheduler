@@ -451,12 +451,12 @@ sch_read_rec() {
 
 # Drain the records queued on the IPC FIFO. Abort records act at once - ahead of
 #   dispatch and of every completion record, including ones queued by an earlier call.
-#   Completion records are only appended to the batch, for process_done_batch().
-# Waits for a record only when a record could still arrive and the run has nothing
-#   else to do: no queued completion to act on, and no free slot to dispatch into.
-# 1: FIFO path
-# 2: name of the completion record batch var to append to
-drain_fifo_records() {
+#   Completion records are only appended to the batch, for sch_process_done_batch().
+# Waits only when a record could still arrive and there is nothing else to do
+# 1: name of the completion record batch var to append to
+# 2: current value of that batch var
+# 3: FIFO path
+sch_drain_fifo_records() {
 	local \
 		sch_cs \
 		sch_dl_min \
@@ -556,7 +556,7 @@ drain_fifo_records() {
 # Act on a batch of drained completion records, then sweep expired job deadlines.
 # 1: completion record batch, '<rv>:<job ID>' entries
 # 2: job completion callback
-process_done_batch() {
+sch_process_done_batch() {
 	local \
 		sch_cs \
 		sch_now_cs \
@@ -932,7 +932,7 @@ schedule_jobs() {
 
 		# Waits for a wake-up only when nothing else could progress; otherwise takes
 		#   what is queued and returns. Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}
-		drain_fifo_records sch_done_batch "${sch_done_batch}" "${sch_ipc_fifo}"
+		sch_drain_fifo_records sch_done_batch "${sch_done_batch}" "${sch_ipc_fifo}"
 
 		# Picked after the drain: an abort may have dropped the previous head
 		sch_job_id="${SCH_PENDING_IDS%% *}"
@@ -969,7 +969,7 @@ schedule_jobs() {
 		fi
 
 		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}; ${SCH_LAST_PROGRESS_TIME_CS}
-		process_done_batch "${sch_done_batch}" "${JOB_DONE_CB}"
+		sch_process_done_batch "${sch_done_batch}" "${JOB_DONE_CB}"
 		sch_done_batch=
 	done
 
@@ -1017,6 +1017,7 @@ jobs_init() {
 # Extra args: any number of <param=value> pairs
 job_set_params() {
 	local sch_me=job_set_params \
+		IFS=" "$'\t'$'\n' \
 		sch_param \
 		sch_val \
 		sch_cur_params \
@@ -1064,6 +1065,7 @@ job_get_params() {
 	[ "${1}" = '-export' ] && { sch_export="export "; shift; }
 
 	local sch_me=job_get_params \
+		IFS=" "$'\t'$'\n' \
 		sch_param \
 		sch_var \
 		sch_had_f \
@@ -1110,6 +1112,7 @@ job_get_params() {
 # 2: timeout in seconds (uint >= 1)
 job_set_timeout() {
 	local sch_me=job_set_timeout \
+		IFS=" "$'\t'$'\n' \
 		sch_val="${2}" \
 		sch_ns \
 		sch_job_id="${1}"
@@ -1122,8 +1125,6 @@ job_set_timeout() {
 		return 1
 	}
 	sch_tr_leading sch_val "0"
-	# Not SCH_JOB_TIMEOUT_<id>: that would collide with the internal
-	# ${SCH_JOB_TIMEOUT_S} copy of ${SCHED_JOB_TIMEOUT_S} for a job named 'S'
 	export -n "SCH_TIMEOUT_JOB_${sch_ns}${sch_job_id}=${sch_val}"
 }
 
