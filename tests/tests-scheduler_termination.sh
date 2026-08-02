@@ -710,12 +710,14 @@ test_scheduler_termination_13() {
 		run_generic_test
 }
 # Verify the scheduler treats malformed completion records as an error.
+# The 'malformed' job writes on fd 3, which SCHED_INNER_SUBSHELL closes.
 test_scheduler_termination_14() {
 	TEST_ID=scheduler_termination_14 \
 	TEST_NAME='Malformed completion record' \
 	TEST_JOBS='malformed' \
 	TEST_EXPECT_RV=1 \
 	TEST_SCHED_MAX_JOBS=1 \
+	SCHED_INNER_SUBSHELL='' \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
 		run_generic_test

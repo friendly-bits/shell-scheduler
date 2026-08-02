@@ -119,12 +119,14 @@ do_job_term() {
 			wait "${!}"
 		;;
 
-		# Live child (recorded) that forks recorded children only after this
-		#   process has been SIGSTOPped, then blocks; the wrapper blocks on it.
-		# The child polls this process's /proc state (bounded, ~20k reads ~= 2.7 s)
+		# Live child (recorded) that forks recorded children only after the wrapper
+		#   has been SIGSTOPped, then blocks; the wrapper blocks on it.
+		# The wrapper is the mechanism's seed, so the first STOP pass freezes it
+		#   before any descendant scan - which is the window being exercised.
+		# The child polls the wrapper's /proc state (bounded, ~20k reads ~= 2.7 s)
 		#   and forks nothing if it never observes state 'T'.
 		forkrace)
-			get_test_pid fr_seed || return 1
+			get_job_wrapper_pid fr_seed || return 1
 			(
 				fr_i=0
 				while [ "${fr_i}" -lt 20000 ]; do

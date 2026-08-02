@@ -547,7 +547,7 @@ ap_run_variants() {
 }
 
 do_job_default() {
-	local self_pid job_name="${1%%_*}"
+	local wrapper_pid job_name="${1%%_*}"
 
 	case "${job_name}" in
 		instant) sleep 0 ;;
@@ -556,9 +556,10 @@ do_job_default() {
 		ok5) sleep 5 ;;
 		hang) sleep 30 ;;
 
+		# Kills the process holding the record-writing EXIT trap, so no record is sent
 		crash)
-			get_test_pid self_pid || return 1
-			kill -9 "${self_pid}"
+			get_job_wrapper_pid wrapper_pid || return 1
+			kill -9 "${wrapper_pid}"
 		;;
 
 		fail)
@@ -579,14 +580,16 @@ do_job_default() {
 	return 0
 }
 
+# 1: out var
+# 2: numeric /proc/self/status field to read (optional, default 'Pid')
 get_test_pid() {
-	local __pid line
+	local __pid line field="${2:-Pid}"
 
 	export -n "${1:?}="
 
 	while IFS= read -r line; do
 		case "${line}" in
-			Pid:*)
+			"${field}":*)
 				__pid="${line##*[^0-9]}"
 				break
 			;;
@@ -595,6 +598,18 @@ get_test_pid() {
 
 	is_uint "${__pid}" || return 1
 	export -n "${1}=${__pid}"
+}
+
+# PID of the wrapper process the scheduler tracks for the running job - the PID it
+#   reports in running_pids and seeds ${JOB_TERM_CB} with.
+# Job-side only: with ${SCHED_INNER_SUBSHELL} the job callback runs one process
+#   below the wrapper, so the tracked PID is the parent.
+# 1: out var
+get_job_wrapper_pid() {
+	local field=Pid
+
+	[ -n "${SCHED_INNER_SUBSHELL}" ] && field=PPid
+	get_test_pid "${1:?}" "${field}"
 }
 
 # Resolve the scheduler's per-run FIFO path.

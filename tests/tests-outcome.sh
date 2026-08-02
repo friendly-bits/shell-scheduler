@@ -252,10 +252,12 @@ test_outcome_05() {
 
 	# SCHED_MAX_JOBS=1 forces sequential execution:
 	#   "ok" must fully complete and be recorded before "malformed" is even dispatched.
+	# The 'malformed' job writes on fd 3, which SCHED_INNER_SUBSHELL closes
 	SCHED_FAIL_MSG_CB=echo \
 	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=do_job_default \
+	SCHED_INNER_SUBSHELL='' \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=10 \
 	SCHED_IDLE_TIMEOUT_S=10 \

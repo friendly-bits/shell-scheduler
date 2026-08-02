@@ -175,10 +175,12 @@ test_security_02() {
 
 		rm -f "${INJECT_FILE:?}"
 
+		# The job forges the record on fd 3, which SCHED_INNER_SUBSHELL closes
 		SCHED_FINALIZE_CB=finalize_handler \
 		JOB_DONE_CB=done_handler \
 		DO_JOB_CB=security_02_do_job \
 		SCHED_FAIL_MSG_CB=security_02_fail_msg_handler \
+		SCHED_INNER_SUBSHELL='' \
 		SPOOF_DONE_ID="${spoof_id}" \
 		SCHED_MAX_JOBS=1 \
 		SCHED_TIMEOUT_S=5 \
@@ -1398,10 +1400,13 @@ test_security_20() {
 
 	print_test_header "${TEST_ID:?}" "Stray completion record for a running sibling misclassifies it" "${jobs}"
 
+	# The stray record goes out on fd 3, which SCHED_INNER_SUBSHELL closes - with
+	#   that option set this accident cannot happen at all
 	SCHED_FAIL_MSG_CB=record_fail_msg \
 	SCHED_FINALIZE_CB=sets_finalize_handler \
 	JOB_DONE_CB=security_20_done \
 	DO_JOB_CB=spoof_done_job_from \
+	SCHED_INNER_SUBSHELL='' \
 	SCHED_MAX_JOBS=3 \
 	SCHED_TIMEOUT_S=20 \
 	SCHED_IDLE_TIMEOUT_S=15 \

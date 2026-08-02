@@ -228,10 +228,12 @@ test_misc_04() {
 
 	print_test_header "${TEST_ID:?}" "Completion record for a job that is not running is rejected" "${jobs}"
 
+	# The job forges the record on fd 3, which SCHED_INNER_SUBSHELL closes
 	SCHED_FAIL_MSG_CB=misc_04_fail_msg \
 	SCHED_FINALIZE_CB=finalize_handler \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=misc_04_do_job \
+	SCHED_INNER_SUBSHELL='' \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=5 \
 	SCHED_IDLE_TIMEOUT_S=5 \

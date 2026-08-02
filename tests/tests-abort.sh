@@ -72,12 +72,14 @@ pids_finalize_handler() {
 	sets_finalize_handler "${@}"
 }
 
-# Record the running job's own PID in '${PID_FILE_PREFIX}.<job ID>'.
+# Record the PID the scheduler tracks for the running job in
+#   '${PID_FILE_PREFIX}.<job ID>', so it can be matched against the PIDs the
+#   scheduler itself reports.
 # 1: job ID
 record_job_pid() {
 	local rjp_pid
 
-	get_test_pid rjp_pid || return 1
+	get_job_wrapper_pid rjp_pid || return 1
 
 	printf '%s\n' "${rjp_pid}" > "${PID_FILE_PREFIX:?}.${1:?}"
 }
@@ -1092,11 +1094,13 @@ test_abort_12() {
 	# ok2_abort12 is aborted on its own dispatch tick, freeing the slot while it
 	#   still runs; instant_abort12b then forges its record and completes, letting
 	#   instant_abort12c run before ok2_abort12 reports for real at ~2s
+	# The forge goes out on fd 3, which SCHED_INNER_SUBSHELL closes
 	SCHED_FAIL_MSG_CB=record_fail_msg \
 	SCHED_FINALIZE_CB=sets_finalize_handler \
 	SCHED_DISPATCH_TICK_CB=abort_on_first_cb \
 	JOB_DONE_CB=done_handler \
 	DO_JOB_CB=spoof_done_job_from \
+	SCHED_INNER_SUBSHELL='' \
 	SCHED_MAX_JOBS=1 \
 	SCHED_TIMEOUT_S=15 \
 	SCHED_IDLE_TIMEOUT_S=10 \
