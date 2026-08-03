@@ -494,6 +494,8 @@ What happens to a job depends on its state when the call is made:
 
 ## Aborting specific jobs externally
 
+**(Full variant only**. Aborting from a callback with [`jobs_abort()`](#aborting-specific-jobs-from-a-callback) works in both.**)**
+
 An external process (rather than a callback) can abort specific jobs by writing an **abort record** to the scheduler's FIFO - the same FIFO the running jobs use to report their completion.
 
 Set `SCHED_FIFO` to a path of your choosing before the run, so the outside process knows where to write. **You must create the FIFO yourself**: with `SCHED_FIFO` set, the scheduler adopts an existing path and never creates one. A path that does not exist, or exists but is not a FIFO, is rejected: no job starts, the path is left untouched, and the failure is reported with code `1` through the **scheduler completion callback** and the **scheduler error reporting callback**.
@@ -567,7 +569,7 @@ The scheduler is configured entirely through environment variables. Required var
 | SCHED_TIMEOUT_S           |          |  `900`  | Global scheduler timeout in seconds ( integer >= 1 ).                                                                            |
 | SCHED_IDLE_TIMEOUT_S      |          |  `300`  | Maximum allowed time, in seconds, without any job starts or completions ( integer >= 1 ).                                        |
 | SCHED_JOB_TIMEOUT_S       |          |  unset  | Default per-job timeout in seconds ( integer >= 1 ); override per job via `job_set_timeout()`. See [TIMEKEEPING.md](TIMEKEEPING.md#per-job-timeouts). |
-| SCHED_FIFO                |          |  unset  | Path to the FIFO file used for the scheduler's internal communication and for abort records externally. (see Notes below). |
+| SCHED_FIFO                |          |  unset  | **(full variant only)** Path to the FIFO file used for the scheduler's internal communication and for abort records externally. (see Notes below). |
 | SCHED_ID                  |          |  unset  | Namespace for per-job params and timeouts, letting schedulers driven from one shell process reuse job IDs without overwriting each other's values ( same character and length rules as a job ID ). Unset or empty selects the default namespace. See [Scheduler namespace](#scheduler-namespace-sched_id). |
 | SCHED_AUTO_PARAMS         |          |  unset  | **(full variant only)** Whether to export job-specific params before invoking the job execution and job completion callbacks for each job ( 1 to enable, any other value to disable ). The mini variant always delivers registered params and ignores this. |
 | SCHED_CGROUP_BASE         |          |  unset  | **(full variant only)** Read by the `job-term.sh` library's cgroup mechanism, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
@@ -577,7 +579,7 @@ Notes:
 - Callback variables must contain command names only. Arguments are not allowed.
 - Invalid value of any required or optional variable causes `schedule_jobs()` to fail before starting any jobs.
 - Timeout behavior is documented in detail in [TIMEKEEPING.md](TIMEKEEPING.md).
-- `SCHED_FIFO`: This option requires you to create the FIFO file via `mkfifo` before the run. The scheduler adopts the FIFO you created, deletes it when the run ends, and rejects a path that is missing or not a FIFO. When unset, the scheduler instead creates the FIFO itself, inside a uniquely named per-run subdirectory under `/tmp`, so concurrent scheduler instances never collide. Set it when a process outside the run needs to reach the batch; see [Aborting specific jobs externally](#aborting-specific-jobs-externally). If using multiple concurrent scheduler instances, give each one a unique FIFO path.
+- `SCHED_FIFO`: This option requires you to create the FIFO file via `mkfifo` before the run. The scheduler adopts the FIFO you created, deletes it when the run ends, and rejects a path that is missing or not a FIFO. When unset, the scheduler instead creates the FIFO itself, inside a uniquely named per-run subdirectory under `/tmp`, so concurrent scheduler instances never collide. Set it when a process outside the run needs to reach the batch; see [Aborting specific jobs externally](#aborting-specific-jobs-externally). If using multiple concurrent scheduler instances, give each one a unique FIFO path. The mini variant always creates its own FIFO and ignores this.
 - `SCHED_UID` is **set by the scheduler, not by you**. It identifies the process running the current batch and is how the scheduler recognises calls made from its own process, such as [`jobs_abort()`](#aborting-specific-jobs-from-a-callback). It is inherited by job processes, so it is readable from a job, but changing its value - or that of any variable prefixed with `SCHED_`, `SCH_`, `sch_` or `_sch_` and not listed in the table above - is unsupported and may break the run.
 
 ## Return codes

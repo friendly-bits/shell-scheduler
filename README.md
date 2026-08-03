@@ -51,9 +51,10 @@ shell-scheduler comes in two variants: full (`scheduler.sh`) and mini (`schedule
 
 - **Job termination**: the full variant hands this off to a separate helper library (`job-term.sh`), which implements three selectable job termination mechanisms (cgroup, children-walk, PPID-walk). The mini variant has the PPID-walk mechanism built in and uses a simplified job termination callback protocol, which makes it incompatible with the helper library.
 - **Per-job parameters**: the full variant exports registered params to jobs and to the job completion callback only when you opt in with `SCHED_AUTO_PARAMS=1`; the mini variant always exports them.
+- **Aborting jobs from outside**: only the full variant can do this. Both variants can abort jobs from the job completion callback.
 - **Code comments**: the mini version removes a lot of them to reduce the size.
 
-Everything else (callbacks, timeouts, per-job parameters and helpers) is identical. Pick mini if file size is important and the PPID-walk job termination mechanism is sufficient for your application; or if you prefer a single file. Pick full if you want all three job termination mechanisms available, or want control over whether parameters are automatically passed to jobs.
+Everything else (callbacks, timeouts, per-job parameters and helpers) is identical. Pick mini if file size is important and the PPID-walk job termination mechanism is sufficient for your application; or if you prefer a single file. Pick full if you want all three job termination mechanisms available, want to abort jobs from outside the scheduler, or want control over whether parameters are automatically passed to jobs.
 
 ## Quick start
 
@@ -174,7 +175,7 @@ You can terminate the scheduler when needed by sending it a signal: USR1 or TERM
 
 To **abort specific jobs** while the batch is running without terminating the scheduler, you can implement logic in the **job completion callback** which would conditionally call the helper `jobs_abort`. See [Aborting specific jobs from a callback](REFERENCE.md#aborting-specific-jobs-from-a-callback).
 
-In order to be able to abort specific jobs **from outside the scheduler**, create a FIFO with `mkfifo` and set `SCHED_FIFO` to its path before starting the scheduler. Then when your code wants to abort specific jobs, it can write an abort record to that FIFO. See [Aborting specific jobs externally](REFERENCE.md#aborting-specific-jobs-externally).
+In order to be able to abort specific jobs **from outside the scheduler** (full variant only), create a FIFO with `mkfifo` and set `SCHED_FIFO` to its path before starting the scheduler. Then when your code wants to abort specific jobs, it can write an abort record to that FIFO. See [Aborting specific jobs externally](REFERENCE.md#aborting-specific-jobs-externally).
 
 Note that job's processes are only killed if the **job termination callback** is configured.
 

@@ -33,6 +33,8 @@ If the global timeout is reached, the scheduler reports an error, invokes the **
 
 The idle timeout (`${SCHED_IDLE_TIMEOUT_S}`) limits the maximum time the scheduler may go without making progress. The timeout is reset whenever the scheduler starts a job or successfully processes a job completion.
 
+The value it resets to is the moment the scheduler woke up and collected the records, read before any of your callbacks run. So when a single wake-up brings several completions, the time their callbacks spend is charged against the idle budget rather than excused from it.
+
 This timeout is useful for detecting situations where no progress is being made, for example because one or more jobs became stuck.
 
 If the idle timeout is reached, the scheduler reports an error, invokes the **scheduler completion callback** (if defined), and exits with return code `81` - unless the callback returns a different code.
