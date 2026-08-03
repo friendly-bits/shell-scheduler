@@ -461,6 +461,7 @@ sch_read_rec() {
 # 1: name of the completion record batch var to append to
 # 2: current value of that batch var
 # 3: FIFO path
+# 4: current time (centiseconds)
 sch_drain_fifo_records() {
 	local \
 		sch_cs \
@@ -476,7 +477,8 @@ sch_drain_fifo_records() {
 		\
 		sch_batch_var="${1:?}" \
 		sch_queued="${2}" \
-		sch_ipc_fifo="${3:?}"
+		sch_ipc_fifo="${3:?}" \
+		sch_cur_time_cs="${4:?}"
 
 	sch_has_f && sch_had_f=1
 
@@ -544,7 +546,6 @@ sch_drain_fifo_records() {
 
 # Act on a batch of drained completion records, then sweep expired job deadlines.
 # 1: completion record batch, '<rv>:<job ID>' entries
-# 2: job completion callback
 sch_process_done_batch() {
 	local \
 		sch_now_cs \
@@ -557,8 +558,7 @@ sch_process_done_batch() {
 		sch_had_f \
 		sch_e \
 		\
-		sch_batch="${1}" \
-		sch_job_done_cb="${2}"
+		sch_batch="${1}"
 
 	sch_has_f && sch_had_f=1
 
@@ -594,8 +594,8 @@ sch_process_done_batch() {
 			# Only a genuine completion is progress; a discarded late record is not
 			SCH_LAST_PROGRESS_TIME_CS="${sch_now_cs}"
 
-			[ -z "${sch_job_done_cb}" ] ||
-			sch_run_done_cb "${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
+			[ -z "${JOB_DONE_CB}" ] ||
+			sch_run_done_cb "${JOB_DONE_CB}" "${sch_done_id}" "${sch_done_rv}" ||
 				sch_finalize ${?}
 		else
 			sch_finalize 1 "Unexpected completion record for job ID '${sch_done_id}'."
@@ -630,8 +630,8 @@ sch_process_done_batch() {
 				# Kill the timed-out job's whole process tree (wrapper included)
 				[ -n "${SCH_TERM_ACTIVE}" ] && sch_term_run term "${sch_job_pid}"
 
-				[ -z "${sch_job_done_cb}" ] ||
-				sch_run_done_cb "${sch_job_done_cb}" "${sch_job_id}" 124 "${sch_job_pid}" ||
+				[ -z "${JOB_DONE_CB}" ] ||
+				sch_run_done_cb "${JOB_DONE_CB}" "${sch_job_id}" 124 "${sch_job_pid}" ||
 					sch_finalize ${?}
 			else
 				sch_append SCH_DEADLINES "${sch_e}"
@@ -929,7 +929,7 @@ schedule_jobs() {
 		# Waits for a wake-up only when nothing else could progress.
 		# Otherwise takes what is queued and returns.
 		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}
-		sch_drain_fifo_records sch_done_batch "${sch_done_batch}" "${sch_ipc_fifo}"
+		sch_drain_fifo_records sch_done_batch "${sch_done_batch}" "${sch_ipc_fifo}" "${sch_cur_time_cs}"
 
 		# Picked after the drain: an abort may have dropped the previous head
 		sch_job_id="${SCH_PENDING_IDS%% *}"
@@ -966,7 +966,7 @@ schedule_jobs() {
 		fi
 
 		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}; ${SCH_LAST_PROGRESS_TIME_CS}
-		sch_process_done_batch "${sch_done_batch}" "${JOB_DONE_CB}"
+		sch_process_done_batch "${sch_done_batch}"
 		sch_done_batch=
 	done
 
