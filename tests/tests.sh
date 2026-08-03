@@ -358,13 +358,25 @@ msgs_have() {
 	return 1
 }
 
+# Write a completion record on fd 3, framed as the selected variant expects
+#   (full wraps records in sentinel bytes, mini reads them unframed).
+# 1: job rv
+# 2: job ID
+write_done_rec() {
+	if [ -n "${SCHED_IS_MINI}" ]; then
+		printf '%s %s\n' "${1}" "${2}" >&3
+	else
+		printf '\002%s %s\003\n' "${1}" "${2}" >&3
+	fi
+}
+
 # DO_JOB_CB where only the job whose ID is ${SPOOF_FROM_ID} forges a completion
 #   record for another job on fd 3; every other job runs do_job_default unchanged.
 # Reads ${SPOOF_DONE_ID} for the forged job ID, and ${SPOOF_DONE_RV} for the
 #   forged rv (default 0).
 spoof_done_job_from() {
 	[ "${1}" = "${SPOOF_FROM_ID:?}" ] &&
-		printf '\002%s %s\003\n' "${SPOOF_DONE_RV:-0}" "${SPOOF_DONE_ID:?}" >&3
+		write_done_rec "${SPOOF_DONE_RV:-0}" "${SPOOF_DONE_ID:?}"
 
 	do_job_default "${@}"
 }

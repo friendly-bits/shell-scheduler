@@ -318,7 +318,7 @@ test_timeout_04() {
 test_timeout_05() {
 	timeout_05_done() {
 		[ "${2}" = 124 ] && [ -n "${3:-}" ] &&
-			printf '\002%s %s\003\n' 0 "${1}" >&3
+			write_done_rec 0 "${1}"
 		printf '%s|%s|%s|%s\n' "$#" "$1" "$2" "${3:-}" >> "${DONE_FILE:?}"
 		return 0
 	}

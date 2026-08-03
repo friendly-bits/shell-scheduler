@@ -211,7 +211,7 @@ test_misc_04() {
 	misc_04_do_job() {
 		# Forge a well-formed record for a registered job that has not been dispatched yet.
 		# SCHED_MAX_JOBS=1 keeps pending_m04 undispatched while realjob_m04 runs.
-		printf '\002%s %s\003\n' 0 pending_m04 >&3
+		write_done_rec 0 pending_m04
 		sleep 1
 		return 0
 	}
