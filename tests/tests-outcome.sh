@@ -234,7 +234,7 @@ test_outcome_04() {
 }
 
 # Verify a malformed-completion-record abort
-#   (sch_finalize called directly from inside sch_drain_fifo_records, not from the normal loop exit)
+#   (sch_finalize called directly from the FIFO record drain, not from the normal loop exit)
 #   still preserves an already-completed job's ok status;
 #   the malformed job itself is unfinished.
 test_outcome_05() {
