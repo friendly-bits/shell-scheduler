@@ -1015,3 +1015,100 @@ test_timeout_15() {
 		return 1
 	fi
 }
+
+# Verify every completion of one wake-up shares a single idle budget:
+#   the idle timeout resets to the moment the records were collected,
+#   read before any callback runs, so the time those callbacks spend is charged against it.
+# Two instant jobs are drained into one batch;
+#   the first callback stalls 6s against a 5s budget, ending the run at ~7s.
+# A per-record reset would stamp ~7s instead and the run would last ~12s,
+#   so elapsed time is the discriminator here, not the return code.
+test_timeout_16() {
+	# Stall the last dispatch, so both instant records are queued
+	#   before dispatch is exhausted and are therefore acted on in one batch.
+	# Forked sleep: an in-process NOFORK builtin sleep can be cut short by SIGCHLD
+	timeout_16_tick() {
+		[ "${1}" = hang_t16c ] || return 0
+
+		sleep 1 & wait "$!"
+	}
+
+	# Stall on the first record only; runs in the scheduler's process, so the flag persists
+	timeout_16_done() {
+		printf '%s:%s\n' "${1}" "${2}" >> "${DONE_FILE:?}"
+
+		[ -n "${T16_STALLED}" ] && return 0
+		T16_STALLED=1
+
+		sleep 6 & wait "$!"
+	}
+
+	local \
+		TEST_ID=timeout_16 \
+		sched_rv start_s end_s elapsed \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_ok act_ok exp_unfin act_unfin \
+		exp_done act_done exp_done_cnt act_done_cnt \
+		checks_pass=0 checks_exp=7 \
+		T16_STALLED='' \
+		jobs='instant_t16a instant_t16b hang_t16c'
+
+	local \
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		DONE_FILE="/tmp/sched.done.${TEST_ID:?}.$$" \
+		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
+
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${DONE_FILE}" "${MSG_FILE}"
+
+	print_test_header "${TEST_ID:?}" "One wake-up's completion callbacks share one idle budget" "${jobs}"
+
+	start_s=$(date +%s)
+
+	SCHED_FAIL_MSG_CB=record_fail_msg \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	SCHED_DISPATCH_TICK_CB=timeout_16_tick \
+	JOB_DONE_CB=timeout_16_done \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=3 \
+	SCHED_TIMEOUT_S=30 \
+	SCHED_IDLE_TIMEOUT_S=5 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	end_s=$(date +%s)
+	elapsed=$((end_s - start_s))
+
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+
+	[ "${sched_rv}" = 81 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 81)" >&2
+	# ~12s means the stamp was refreshed per record instead of once per wake-up
+	{ [ "${elapsed}" -ge 5 ] && [ "${elapsed}" -le 9 ]; } && checks_pass=$((checks_pass + 1)) ||
+		echo "elapsed=${elapsed}s (want 5..9)" >&2
+	# Both records in one batch: two callbacks, no duplicates. A split batch stalls
+	#   twice and the second job never reaches its callback
+	verify_recorded_set exp_done act_done exp_done_cnt act_done_cnt "${DONE_FILE}" \
+		'instant_t16a:0 instant_t16b:0' && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls: expected(${exp_done_cnt})='${exp_done}' actual(${act_done_cnt})='${act_done}'" >&2
+	verify_id_set exp_ok act_ok 'instant_t16a instant_t16b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	verify_id_set exp_unfin act_unfin 'hang_t16c' "${unfinished_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "unfinished: expected='${exp_unfin}' actual='${act_unfin}'" >&2
+	verify_id_partition "${jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "the six ID sets do not partition '${jobs}'" >&2
+	msgs_have "${MSG_FILE}" 'Idle timeout' && checks_pass=$((checks_pass + 1)) ||
+		echo "no 'Idle timeout' message recorded" >&2
+
+	rm -f "${DONE_FILE}" "${MSG_FILE}"
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "sched_rv=${sched_rv}, elapsed=${elapsed}s"
+		return 0
+	else
+		FAIL
+		print_id_sets >&2
+		return 1
+	fi
+}

@@ -1866,3 +1866,87 @@ test_abort_22() {
 		return 1
 	fi
 }
+
+# Verify a job aborted from the expiry sweep's JOB_DONE_CB stays classified as aborted,
+#   even though its own deadline is still pending:
+#   the sweep rebuilds the deadline list as it walks,
+#   so an abort naming a job whose entry has not been reached yet cannot retire that entry,
+#   and the leftover must be dropped when it comes due rather than reported as an expiry.
+# hang_ab23a's 2s deadline precedes hang_ab23b's 4s one in dispatch order,
+#   so the abort lands while the rebuilt list is still empty; ok5_ab23c keeps the run alive past 4s.
+# The single-target case (a job aborting itself from its own rv-124 callback) is abort_14.
+test_abort_23() {
+	# Abort the second hung job from the first one's synthesized timeout callback.
+	# '${3:+pid}' records only whether the pid argument was present, keeping the expected call list deterministic
+	ab23_done_cb() {
+		printf '%s:%s:%s\n' "${1}" "${2}" "${3:+pid}" >> "${DONE_FILE:?}"
+
+		[ "${1}" = hang_ab23a ] || return 0
+
+		jobs_abort hang_ab23b
+	}
+
+	local \
+		TEST_ID=abort_23 \
+		sched_rv msg_cnt \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_ok act_ok exp_expired act_expired exp_aborted act_aborted \
+		exp_done act_done exp_done_cnt act_done_cnt \
+		checks_pass=0 checks_exp=7 \
+		jobs='hang_ab23a hang_ab23b ok5_ab23c'
+
+	local \
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		DONE_FILE="/tmp/sched.done.${TEST_ID:?}.$$" \
+		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
+
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${DONE_FILE}" "${MSG_FILE}"
+
+	print_test_header "${TEST_ID:?}" "A job aborted from the expiry sweep keeps its aborted classification" "${jobs}"
+
+	job_set_timeout hang_ab23a 2 &&
+	job_set_timeout hang_ab23b 4 || { FAIL "job_set_timeout failed"; return 1; }
+
+	SCHED_FAIL_MSG_CB=record_fail_msg \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	JOB_DONE_CB=ab23_done_cb \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=3 \
+	SCHED_TIMEOUT_S=20 \
+	SCHED_IDLE_TIMEOUT_S=15 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+	count_msgs msg_cnt "${MSG_FILE}"
+
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	# The leftover entry must produce no callback of its own for hang_ab23b
+	verify_recorded_set exp_done act_done exp_done_cnt act_done_cnt "${DONE_FILE}" \
+		'hang_ab23a:124:pid ok5_ab23c:0:' && checks_pass=$((checks_pass + 1)) ||
+		echo "JOB_DONE_CB calls: expected(${exp_done_cnt})='${exp_done}' actual(${act_done_cnt})='${act_done}'" >&2
+	verify_id_set exp_expired act_expired 'hang_ab23a' "${expired_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "expired: expected='${exp_expired}' actual='${act_expired}'" >&2
+	verify_id_set exp_aborted act_aborted 'hang_ab23b' "${aborted_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "aborted: expected='${exp_aborted}' actual='${act_aborted}'" >&2
+	verify_id_set exp_ok act_ok 'ok5_ab23c' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	verify_id_partition "${jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "the six ID sets do not partition '${jobs}'" >&2
+
+	rm -f "${DONE_FILE}" "${MSG_FILE}"
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "sched_rv=${sched_rv}, expired='${expired_raw}', aborted='${aborted_raw}'"
+		return 0
+	else
+		FAIL
+		print_id_sets >&2
+		return 1
+	fi
+}

@@ -723,3 +723,311 @@ test_sched_env_13() {
 		return 1
 	fi
 }
+
+# Verify an 'exit' from a callback running in the scheduler's own process
+#   still ends the run through the normal finalize path:
+#   the scheduler cleans up and invokes SCHED_FINALIZE_CB with the code handed to exit,
+#   and jobs still in flight are reported unfinished rather than lost.
+# The ID sets carry these checks, not the return code:
+#   SCHED_FINALIZE_CB passes its first argument through,
+#   so the rv looks right even if that callback never ran at all.
+# Three passes: exit 7 and exit 0 from JOB_DONE_CB,
+#   then exit 7 from SCHED_DISPATCH_TICK_CB -
+#   the behavior belongs to the process, not to one callback.
+test_sched_env_14() {
+	se14_exit_cb() {
+		exit "${SE14_EXIT_RV:?}"
+	}
+
+	# Run one pass and check it. Returns 0 only if every check passed.
+	# 1: pass label
+	# 2: 'done' to exit from JOB_DONE_CB, 'tick' to exit from SCHED_DISPATCH_TICK_CB
+	# 3: code passed to exit
+	# 4: job dispatched first (completes in 1s)
+	# 5: job still in flight ('done') or still pending ('tick') when the exit lands
+	se14_pass() {
+		local \
+			label="${1:?}" shape="${2:?}" first="${4:?}" second="${5:?}" \
+			done_cb=done_handler tick_cb='' \
+			exp_ok exp_unfin exp_undisp \
+			sched_rv msg_cnt checks_pass=0 checks_exp=6 \
+			ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+			e_ok a_ok e_unfin a_unfin e_undisp a_undisp \
+			SE14_EXIT_RV="${3:?}"
+
+		if [ "${shape}" = "done" ]; then
+			# The exit lands on the first job's completion, the second still running
+			done_cb=se14_exit_cb
+			exp_ok="${first}" exp_unfin="${second}" exp_undisp=''
+		else
+			# The exit lands on the first dispatch, before the second job starts
+			tick_cb=se14_exit_cb
+			exp_ok='' exp_unfin="${first}" exp_undisp="${second}"
+		fi
+
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}"
+
+		SCHED_FAIL_MSG_CB=record_fail_msg \
+		SCHED_FINALIZE_CB=sets_finalize_handler \
+		SCHED_DISPATCH_TICK_CB="${tick_cb}" \
+		JOB_DONE_CB="${done_cb}" \
+		DO_JOB_CB=do_job_default \
+		SCHED_MAX_JOBS=2 \
+		SCHED_TIMEOUT_S=20 \
+		SCHED_IDLE_TIMEOUT_S=15 \
+			schedule_jobs "${first} ${second}" &
+
+		wait "$!"
+		sched_rv=$?
+
+		read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+		count_msgs msg_cnt "${MSG_FILE}"
+
+		[ "${sched_rv}" = "${SE14_EXIT_RV}" ] && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: sched_rv=${sched_rv} (want ${SE14_EXIT_RV})" >&2
+		verify_id_set e_ok a_ok "${exp_ok}" "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: ok: expected='${e_ok}' actual='${a_ok}'" >&2
+		verify_id_set e_unfin a_unfin "${exp_unfin}" "${unfinished_raw}" && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: unfinished: expected='${e_unfin}' actual='${a_unfin}'" >&2
+		verify_id_set e_undisp a_undisp "${exp_undisp}" "${undispatched_raw}" && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: undispatched: expected='${e_undisp}' actual='${a_undisp}'" >&2
+		verify_id_partition "${first} ${second}" && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: the six ID sets do not partition '${first} ${second}'" >&2
+		# finalize only reports the reason when the run failed, so exit 0 must stay silent
+		if [ "${SE14_EXIT_RV}" = 0 ]; then
+			[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+				{ echo "${label}: msg_cnt=${msg_cnt} (want 0 after exit 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+		else
+			{ [ "${msg_cnt}" = 1 ] && msgs_have "${MSG_FILE}" 'Scheduler process exited unexpectedly'; } &&
+				checks_pass=$((checks_pass + 1)) ||
+				{ echo "${label}: want one 'exited unexpectedly' message, got ${msg_cnt}" >&2; print_msgs "${MSG_FILE}" >&2; }
+		fi
+
+		[ "${checks_pass}" = "${checks_exp}" ] || print_id_sets >&2
+		rm -f "${MSG_FILE}"
+
+		[ "${checks_pass}" = "${checks_exp}" ]
+	}
+
+	local \
+		TEST_ID=sched_env_14 \
+		passes_ok=0 \
+		jobs='ok1_se14a hang_se14a / ok1_se14b hang_se14b / ok1_se14c hang_se14c'
+
+	local \
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$"
+
+	print_test_header "${TEST_ID:?}" "An exit from a scheduler-process callback still finalizes the run" "${jobs}"
+
+	se14_pass 'JOB_DONE_CB exit 7' "done" 7 ok1_se14a hang_se14a &&
+		passes_ok=$((passes_ok + 1))
+	se14_pass 'JOB_DONE_CB exit 0' "done" 0 ok1_se14b hang_se14b &&
+		passes_ok=$((passes_ok + 1))
+	se14_pass 'SCHED_DISPATCH_TICK_CB exit 7' tick 7 ok1_se14c hang_se14c &&
+		passes_ok=$((passes_ok + 1))
+
+	if [ "${passes_ok}" = 3 ]; then
+		PASS "3/3 passes clean"
+		return 0
+	else
+		FAIL "${passes_ok}/3 passes clean"
+		return 1
+	fi
+}
+
+# Verify SCHED_INNER_SUBSHELL closes the scheduler's fd 3 for the job execution callback
+#   and frees the number for the job's own use:
+#   a record the job writes there never reaches the scheduler, a read fails too,
+#   and the job can reopen fd 3 on a file of its own and use it normally.
+# The forged record names a sibling that is still running.
+# With SCHED_INNER_SUBSHELL unset this is security_20 and it misclassifies that sibling,
+#   failing the run with rv 1; here it must have no effect at all.
+test_sched_env_15() {
+	# Probe the inherited fd 3, then reopen it on a file of the job's own
+	se15_do_job() {
+		local w r o
+
+		[ "${1}" = "${SE15_FORGER:?}" ] || { do_job_default "${@}"; return "${?}"; }
+
+		# The failing redirection is reported by the shell before a per-command
+		#   '2>/dev/null' takes effect, so the whole group needs the redirect
+		{ write_done_rec 0 "${SE15_TARGET:?}"; } 2>/dev/null && w=ok || w=fail
+		{ IFS= read -r _ <&3; } 2>/dev/null && r=ok || r=fail
+
+		{ exec 3>"${SE15_OWN_FILE:?}"; } 2>/dev/null &&
+		printf 'own\n' >&3 2>/dev/null && o=ok || o=fail
+		exec 3>&- 2>/dev/null
+
+		printf 'write=%s read=%s own=%s\n' "${w}" "${r}" "${o}" > "${SE15_PROBE_FILE:?}"
+
+		do_job_default "${@}"
+	}
+
+	local \
+		TEST_ID=sched_env_15 \
+		sched_rv msg_cnt probes own \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_ok act_ok \
+		checks_pass=0 checks_exp=6 \
+		SE15_FORGER=ok1_se15 \
+		SE15_TARGET=ok2_se15b \
+		jobs='ok1_se15 ok2_se15b'
+
+	local \
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$" \
+		SE15_PROBE_FILE="/tmp/sched.probes.${TEST_ID:?}.$$" \
+		SE15_OWN_FILE="/tmp/sched.own.${TEST_ID:?}.$$"
+
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${SE15_PROBE_FILE}" "${SE15_OWN_FILE}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_INNER_SUBSHELL closes fd 3 for the job and frees the number" "${jobs}"
+
+	SCHED_FAIL_MSG_CB=record_fail_msg \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=se15_do_job \
+	SCHED_INNER_SUBSHELL=1 \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=20 \
+	SCHED_IDLE_TIMEOUT_S=15 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+	count_msgs msg_cnt "${MSG_FILE}"
+	read_first_line --rm probes "${SE15_PROBE_FILE}" || probes='<no probe record>'
+	read_first_line --rm own "${SE15_OWN_FILE}" || own='<no file>'
+
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	[ "${probes}" = 'write=fail read=fail own=ok' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "fd 3 probes='${probes}' (want 'write=fail read=fail own=ok')" >&2
+	[ "${own}" = own ] && checks_pass=$((checks_pass + 1)) ||
+		echo "job's own fd 3 file holds '${own}' (want 'own')" >&2
+	# The forged record never arrived, so the sibling is classified on its own merits
+	verify_id_set exp_ok act_ok "${jobs}" "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+	verify_id_partition "${jobs}" && checks_pass=$((checks_pass + 1)) ||
+		echo "the six ID sets do not partition '${jobs}'" >&2
+
+	rm -f "${MSG_FILE}"
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "sched_rv=${sched_rv}, ${probes}"
+		return 0
+	else
+		FAIL
+		print_id_sets >&2
+		return 1
+	fi
+}
+
+# Verify SCHED_INNER_SUBSHELL keeps the job execution callback out of the process the
+#   scheduler tracks, in the two ways that are observable:
+#   the callback's own PID is not the tracked one (its parent is, which is what the
+#   scheduler reports and hands to JOB_TERM_CB), and a callback that disarms its EXIT trap
+#   cannot take the wrapper's completion-record trap with it - the job still reports.
+# The timed-out job supplies the tracked PID: an expiry notification carries it as the
+#   third argument to JOB_DONE_CB.
+test_sched_env_16() {
+	se16_do_job() {
+		local own wrapper
+
+		case "${1}" in
+			"${SE16_TIMED:?}")
+				get_test_pid own && get_job_wrapper_pid wrapper &&
+					printf '%s %s\n' "${own}" "${wrapper}" > "${SE16_PID_FILE:?}"
+			;;
+			*)
+				# In the wrapper this would replace the trap that writes the record
+				trap ':' EXIT
+			;;
+		esac
+
+		do_job_default "${@}"
+	}
+
+	se16_done_cb() {
+		printf '%s %s %s\n' "${1}" "${2}" "${3:-}" >> "${SE16_DONE_FILE:?}"
+	}
+
+	local \
+		TEST_ID=sched_env_16 \
+		sched_rv msg_cnt pid_line own_pid wrapper_pid tracked_pid \
+		ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+		exp_ok act_ok exp_expired act_expired \
+		checks_pass=0 checks_exp=7 \
+		SE16_TIMED=hang_se16 \
+		jobs='hang_se16 ok1_se16b'
+
+	local \
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		MSG_FILE="/tmp/sched.msgs.${TEST_ID:?}.$$" \
+		SE16_PID_FILE="/tmp/sched.pids.${TEST_ID:?}.$$" \
+		SE16_DONE_FILE="/tmp/sched.done.${TEST_ID:?}.$$"
+
+	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${MSG_FILE}" "${SE16_PID_FILE}" "${SE16_DONE_FILE}"
+
+	print_test_header "${TEST_ID:?}" "SCHED_INNER_SUBSHELL keeps the job callback out of the tracked process" "${jobs}"
+
+	# 2s: the other job completes first, so both outcomes are observed
+	job_set_timeout hang_se16 2 || { FAIL "job_set_timeout failed"; return 1; }
+
+	SCHED_FAIL_MSG_CB=record_fail_msg \
+	SCHED_FINALIZE_CB=sets_finalize_handler \
+	JOB_DONE_CB=se16_done_cb \
+	DO_JOB_CB=se16_do_job \
+	SCHED_INNER_SUBSHELL=1 \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=20 \
+	SCHED_IDLE_TIMEOUT_S=15 \
+		schedule_jobs "${jobs}" &
+
+	wait "$!"
+	sched_rv=$?
+
+	read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+	count_msgs msg_cnt "${MSG_FILE}"
+	read_first_line --rm pid_line "${SE16_PID_FILE}" || pid_line=''
+	tracked_pid="$(sed -n "s/^${SE16_TIMED} 124 \([0-9][0-9]*\)\$/\1/p" "${SE16_DONE_FILE}" 2>/dev/null)"
+	rm -f "${SE16_DONE_FILE}"
+
+	# shellcheck disable=SC2086
+	set -- ${pid_line}
+	own_pid="${1:-}" wrapper_pid="${2:-}"
+
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	is_uint "${own_pid}" "${wrapper_pid}" && checks_pass=$((checks_pass + 1)) ||
+		echo "job recorded PIDs='${pid_line}' (want two integers)" >&2
+	# The callback runs one process below the wrapper
+	{ is_uint "${own_pid}" && [ "${own_pid}" != "${wrapper_pid}" ]; } && checks_pass=$((checks_pass + 1)) ||
+		echo "callback PID '${own_pid}' equals the wrapper PID (want a deeper process)" >&2
+	# ... and the wrapper is what the scheduler tracks and reports
+	{ is_uint "${tracked_pid}" && [ "${tracked_pid}" = "${wrapper_pid}" ]; } && checks_pass=$((checks_pass + 1)) ||
+		echo "scheduler tracked PID '${tracked_pid}', job saw wrapper '${wrapper_pid}'" >&2
+	# The disarmed EXIT trap stayed in the subshell, so the record still arrived
+	verify_id_set exp_ok act_ok 'ok1_se16b' "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "ok: expected='${exp_ok}' actual='${act_ok}'" >&2
+	verify_id_set exp_expired act_expired 'hang_se16' "${expired_raw}" && checks_pass=$((checks_pass + 1)) ||
+		echo "expired: expected='${exp_expired}' actual='${act_expired}'" >&2
+	[ "${msg_cnt}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		{ echo "msg_cnt=${msg_cnt} (want 0)" >&2; print_msgs "${MSG_FILE}" >&2; }
+
+	rm -f "${MSG_FILE}"
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "sched_rv=${sched_rv}, callback pid=${own_pid}, tracked wrapper pid=${wrapper_pid}"
+		return 0
+	else
+		FAIL
+		print_id_sets >&2
+		return 1
+	fi
+}

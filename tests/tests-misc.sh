@@ -259,3 +259,94 @@ test_misc_04() {
 		return 1
 	fi
 }
+
+# Verify the run directory and the FIFO the scheduler creates for itself are readable by their owner only.
+# Also verify the umask that makes them owner-only does not outlive their creation:
+#   a file the scheduler completion callback creates must use the caller's umask,
+#   since that callback runs in the scheduler's own process well after the FIFO was made.
+test_misc_05() {
+	misc_05_finalize() {
+		: > "${M05_PROBE_FILE:?}"
+
+		finalize_handler "${1}" "${2}"
+		return "${1}"
+	}
+
+	# Set the out var to the 10-character permission string of a path
+	# 1: out var
+	# 2: path
+	misc_05_mode() {
+		local m05_m
+
+		m05_m="$(ls -ld "${2}" 2>/dev/null)" || return 1
+		m05_m="${m05_m%% *}"
+		# Drop a trailing SELinux/ACL marker
+		export -n "${1:?}=${m05_m%[.+]}"
+	}
+
+	local \
+		TEST_ID=misc_05 \
+		sched_rv scheduler_pid sched_fifo sched_run_dir prev_umask \
+		fifo_mode='<unread>' dir_mode='<unread>' probe_mode='<unread>' \
+		fifo_seen=no \
+		checks_pass=0 checks_exp=5 \
+		jobs='ok2_m05a ok2_m05b'
+
+	local M05_PROBE_FILE="/tmp/sched.umaskprobe.${TEST_ID:?}.$$"
+
+	rm -f "${M05_PROBE_FILE}"
+
+	print_test_header "${TEST_ID:?}" "Run dir and FIFO are owner-only, and the umask does not outlive them" "${jobs}"
+
+	# A known caller umask, so the probe file below has an unambiguous expected mode
+	prev_umask="$(umask)"
+	umask 022
+
+	SCHED_FAIL_MSG_CB=echo \
+	SCHED_FINALIZE_CB=misc_05_finalize \
+	JOB_DONE_CB=done_handler \
+	DO_JOB_CB=do_job_default \
+	SCHED_MAX_JOBS=2 \
+	SCHED_TIMEOUT_S=15 \
+	SCHED_IDLE_TIMEOUT_S=10 \
+		schedule_jobs "${jobs}" &
+
+	scheduler_pid=$!
+
+	# The 2s jobs keep the run alive while the FIFO is inspected
+	sleep 1
+	sched_fifo_path sched_fifo "${scheduler_pid}"
+	sched_run_dir="${sched_fifo%/ipc}"
+	[ -p "${sched_fifo}" ] && fifo_seen=yes
+	misc_05_mode fifo_mode "${sched_fifo}"
+	misc_05_mode dir_mode "${sched_run_dir}"
+
+	wait "${scheduler_pid}"
+	sched_rv=$?
+
+	umask "${prev_umask}"
+
+	misc_05_mode probe_mode "${M05_PROBE_FILE}"
+	rm -f "${M05_PROBE_FILE}"
+
+	[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+		echo "sched_rv=${sched_rv} (want 0)" >&2
+	# Without this, a wrong path would make the mode checks fail for the wrong reason
+	[ "${fifo_seen}" = yes ] && checks_pass=$((checks_pass + 1)) ||
+		echo "FIFO not observed during the run at '${sched_fifo}'" >&2
+	[ "${fifo_mode}" = 'prw-------' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "FIFO mode='${fifo_mode}' (want 'prw-------')" >&2
+	[ "${dir_mode}" = 'drwx------' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "run dir mode='${dir_mode}' (want 'drwx------')" >&2
+	# 0600 here would mean the scheduler kept umask 077 for the rest of the run
+	[ "${probe_mode}" = '-rw-r--r--' ] && checks_pass=$((checks_pass + 1)) ||
+		echo "file created by SCHED_FINALIZE_CB under umask 022 has mode='${probe_mode}' (want '-rw-r--r--')" >&2
+
+	if [ "${checks_pass}" = "${checks_exp}" ]; then
+		PASS "fifo=${fifo_mode}, run dir=${dir_mode}, callback-created file=${probe_mode}"
+		return 0
+	else
+		FAIL
+		return 1
+	fi
+}

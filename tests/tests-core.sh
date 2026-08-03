@@ -419,3 +419,98 @@ test_core_07() {
 	fi
 }
 
+# Verify a DO_JOB_CB that calls 'exit' reports that code as the job's return code,
+#   exactly as returning it does (core_04 covers the 'return' side of the same matrix).
+# Two passes, with SCHED_INNER_SUBSHELL unset and set:
+#   the exit ends the wrapper directly in the first case and only its inner subshell in the second,
+#   and the caller must not be able to tell which.
+test_core_08() {
+	# The job ID carries the code to exit with
+	core_08_do_job() {
+		exit "${1##*_}"
+	}
+
+	core_08_done_cb() {
+		printf '%s:%s\n' "${1}" "${2}" >> "${STATUS_FILE:?}"
+	}
+
+	# Run one pass and check it. Returns 0 only if every check passed.
+	# 1: pass label
+	# 2: ${SCHED_INNER_SUBSHELL} value for the run
+	# 3: job IDs
+	# 4: expected '<job ID>:<rv>' records
+	# 5: expected ok set
+	# 6: expected fail set
+	core_08_pass() {
+		local \
+			label="${1:?}" inner="${2}" c8_jobs="${3:?}" exp_recs="${4:?}" \
+			exp_ok="${5:?}" exp_fail="${6:?}" \
+			sched_rv checks_pass=0 checks_exp=4 \
+			ok_raw fail_raw unfinished_raw undispatched_raw expired_raw aborted_raw \
+			e_ok a_ok e_fail a_fail e_recs a_recs e_cnt a_cnt
+
+		rm -f "${FINALIZE_SETS_PREFIX:?}".* "${STATUS_FILE}"
+
+		SCHED_FAIL_MSG_CB=echo \
+		SCHED_FINALIZE_CB=sets_finalize_handler \
+		JOB_DONE_CB=core_08_done_cb \
+		DO_JOB_CB=core_08_do_job \
+		SCHED_INNER_SUBSHELL="${inner}" \
+		SCHED_MAX_JOBS=3 \
+		SCHED_TIMEOUT_S=20 \
+		SCHED_IDLE_TIMEOUT_S=10 \
+			schedule_jobs "${c8_jobs}" &
+
+		wait "$!"
+		sched_rv=$?
+
+		read_id_sets --rm "${FINALIZE_SETS_PREFIX}"
+
+		# A non-zero job code is not a scheduler failure
+		[ "${sched_rv}" = 0 ] && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: sched_rv=${sched_rv} (want 0)" >&2
+		verify_recorded_set e_recs a_recs e_cnt a_cnt "${STATUS_FILE}" "${exp_recs}" &&
+			checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: JOB_DONE_CB records: expected(${e_cnt})='${e_recs}' actual(${a_cnt})='${a_recs}'" >&2
+		verify_id_set e_ok a_ok "${exp_ok}" "${ok_raw}" && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: ok: expected='${e_ok}' actual='${a_ok}'" >&2
+		verify_id_set e_fail a_fail "${exp_fail}" "${fail_raw}" && checks_pass=$((checks_pass + 1)) ||
+			echo "${label}: fail: expected='${e_fail}' actual='${a_fail}'" >&2
+
+		[ "${checks_pass}" = "${checks_exp}" ] || print_id_sets >&2
+		rm -f "${STATUS_FILE}"
+
+		[ "${checks_pass}" = "${checks_exp}" ]
+	}
+
+	local \
+		TEST_ID=core_08 \
+		passes_ok=0 \
+		jobs_a='c08a_0 c08a_1 c08a_17 c08a_99 c08a_255' \
+		jobs_b='c08b_0 c08b_1 c08b_17 c08b_99 c08b_255' \
+		jobs='c08a_0 c08a_1 c08a_17 c08a_99 c08a_255 / same with a c08b_ prefix'
+
+	local \
+		FINALIZE_SETS_PREFIX="/tmp/sched.finsets.${TEST_ID:?}.$$" \
+		STATUS_FILE="/tmp/sched.status.${TEST_ID:?}.$$"
+
+	print_test_header "${TEST_ID:?}" "DO_JOB_CB exit statuses, with and without SCHED_INNER_SUBSHELL" "${jobs}"
+
+	core_08_pass 'SCHED_INNER_SUBSHELL unset' '' "${jobs_a}" \
+		'c08a_0:0 c08a_1:1 c08a_17:17 c08a_99:99 c08a_255:255' \
+		'c08a_0' 'c08a_1 c08a_17 c08a_99 c08a_255' &&
+		passes_ok=$((passes_ok + 1))
+	core_08_pass 'SCHED_INNER_SUBSHELL=1' 1 "${jobs_b}" \
+		'c08b_0:0 c08b_1:1 c08b_17:17 c08b_99:99 c08b_255:255' \
+		'c08b_0' 'c08b_1 c08b_17 c08b_99 c08b_255' &&
+		passes_ok=$((passes_ok + 1))
+
+	if [ "${passes_ok}" = 2 ]; then
+		PASS "2/2 passes clean, identical results either side of the inner subshell"
+		return 0
+	else
+		FAIL "${passes_ok}/2 passes clean"
+		return 1
+	fi
+}
+
