@@ -327,9 +327,10 @@ sch_read_rec() {
 		IFS= read -t 0 -r _ < "${srr_fifo}" &&
 			IFS= read -t 1 -r srr_tail < "${srr_fifo}"
 
-		[ -n "${srr_rec}" ] || return 1
+		[ -n "${BASH_VERSION}" ] || [ -n "${srr_rec}" ] || srr_tail=
 
 		srr_rec="${srr_rec}${srr_tail}"
+		[ -n "${srr_rec}" ] || return 1
 	}
 
 	[ -n "${srr_rec}" ] || return 0
@@ -340,6 +341,7 @@ sch_read_rec() {
 # Take the completion records queued on the IPC FIFO, act on them, then sweep expired deadlines.
 # Called only when no job can be dispatched, so the wait for a record is unconditional.
 # Wait is capped by the run's remaining time and by the nearest job deadline.
+# 1: current time (centiseconds)
 sch_process_records() {
 	local \
 		sch_cs \
@@ -355,7 +357,8 @@ sch_process_records() {
 		sch_done_rv \
 		sch_done_id \
 		sch_had_f \
-		sch_e
+		sch_e \
+		sch_cur_time_cs="${1:?}"
 
 	sch_has_f && sch_had_f=1
 
@@ -373,7 +376,7 @@ sch_process_records() {
 	# Capped at 100 records per call, so that a sustained writer cannot defer dispatch and the timeout check indefinitely
 	# A deadline already past makes the first read a no-op: count it only if it consumed a record
 	sch_n=0
-	sch_read_rec sch_rec "${sch_ipc_fifo}" "${sch_read_t_s}" && sch_n=1
+	sch_read_rec sch_rec "${SCH_IPC_FIFO}" "${sch_read_t_s}" && sch_n=1
 	while :; do
 		# Empty means a read timeout, or an empty line
 		if [ -n "${sch_rec}" ]; then
@@ -390,9 +393,9 @@ sch_process_records() {
 		[ "${sch_n}" -lt 100 ] || break
 
 		# 'read -t 0' reports whether more data is waiting, consumes nothing
-		IFS= read -t 0 -r _ < "${sch_ipc_fifo}" || break
+		IFS= read -t 0 -r _ < "${SCH_IPC_FIFO}" || break
 		sch_n=$((sch_n+1))
-		sch_read_rec sch_rec "${sch_ipc_fifo}" 1
+		sch_read_rec sch_rec "${SCH_IPC_FIFO}" 1
 	done
 
 	# One reading serves both the progress stamp and the expiry sweep. Taken before any
@@ -630,8 +633,6 @@ schedule_jobs() {
 		IFS=" "$'\t'$'\n' \
 		SCHED_PID \
 		SCHED_UID \
-		SCH_REMAIN_TIME_CS \
-		SCH_INIT_UPTIME_CS \
 		sch_cur_time_cs \
 		sch_idle_remain_time_cs \
 		sch_job_id \
@@ -640,16 +641,18 @@ schedule_jobs() {
 		sch_seen_ids \
 		sch_job_to \
 		sch_dl_now_cs \
-		SCH_RUNNING_JOBS_CNT=0 \
-		sch_ipc_fifo \
 		sch_run_dir \
 		sch_run_n \
 		sch_dir="/tmp" \
 		\
+		SCH_RUNNING_JOBS_CNT=0 \
+		SCH_IPC_FIFO \
 		SCH_HAD_F \
+		SCH_REMAIN_TIME_CS \
+		SCH_INIT_UPTIME_CS \
+		SCH_LAST_PROGRESS_TIME_CS \
 		SCH_IN_FAIL_MSG_CB \
 		SCH_RUNNING \
-		SCH_LAST_PROGRESS_TIME_CS \
 		SCH_MAX_JOBS \
 		SCH_TIMEOUT_S \
 		SCH_IDLE_TIMEOUT_S \
@@ -722,13 +725,13 @@ schedule_jobs() {
 	sch_run_n=0
 	while :; do
 		sch_run_dir="${sch_dir}/sched_${SCHED_UID}.${sch_run_n}"
-		sch_ipc_fifo="${sch_run_dir}/ipc"
+		SCH_IPC_FIFO="${sch_run_dir}/ipc"
 		# Owner-only FIFO and run dir
 		(
 			umask 077
 			mkdir "${sch_run_dir}" 2>/dev/null &&
 			{
-				mkfifo "${sch_ipc_fifo}" || {
+				mkfifo "${SCH_IPC_FIFO}" || {
 					rm -rf "${sch_run_dir}"
 					false
 				}
@@ -739,8 +742,8 @@ schedule_jobs() {
 			sch_finalize 1 "Failed to create run directory or FIFO file under '${sch_dir}'."
 	done
 
-	exec 3<>"${sch_ipc_fifo}" ||
-		sch_finalize 1 "Failed to open FIFO '${sch_ipc_fifo}'."
+	exec 3<>"${SCH_IPC_FIFO}" ||
+		sch_finalize 1 "Failed to open FIFO '${SCH_IPC_FIFO}'."
 
 	trap 'sch_finalize "${SCH_RV_USR1}"' USR1
 	trap 'sch_finalize "${SCH_RV_INT_TERM}"' INT TERM
@@ -749,10 +752,10 @@ schedule_jobs() {
 	# Start jobs
 
 	# Filling a free concurrency slot outranks everything:
-	#   only read the FIFO and sweep deadlines swept once no slot can be filled.
+	#   the FIFO is only read, and deadlines only swept, once no slot can be filled.
 	# ${SCH_PENDING_IDS} shrinks as jobs are dispatched; jobs_abort() may also remove from it
 	while [ -n "${SCH_PENDING_IDS}" ] || [ "${SCH_RUNNING_JOBS_CNT}" -gt 0 ]; do
-		[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
+		[ -e "${SCH_IPC_FIFO}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
 
 		# Check if global or idle timeout is due, update SCH_REMAIN_TIME_CS
 		sch_get_uptime_cs sch_cur_time_cs || sch_finalize 1
@@ -804,7 +807,7 @@ schedule_jobs() {
 
 		# Waits for a completion record.
 		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}; ${SCH_LAST_PROGRESS_TIME_CS}
-		sch_process_records
+		sch_process_records "${sch_cur_time_cs}"
 	done
 
 	sch_finalize 0
