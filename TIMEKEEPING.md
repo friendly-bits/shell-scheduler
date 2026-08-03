@@ -17,7 +17,7 @@ The scheduler reads elapsed time from `/proc/uptime` with centisecond (0.01 s) r
 Timeout *enforcement* is coarser than the accounting resolution:
 
 - While waiting for job completions, the scheduler uses a timeout set in whole seconds (rounded up from the remaining time). A timeout is therefore never declared early, but may be declared up to about one second late. The wait is capped by whichever of the global remaining time, the idle remaining time and the nearest per-job deadline comes first, so no deadline is ever slept through.
-- All callbacks except the **job execution callback** run synchronously in the scheduler process. While such a callback runs, the scheduler cannot register completions or declare timeouts - see the note in [Callbacks](REFERENCE.md#callbacks). Keep synchronous callbacks fast. Remaining time is recomputed from a fresh clock reading after each callback returns, so a slow callback delays timeout detection by at most its own duration.
+- All callbacks except the **job execution callback** run synchronously in the scheduler process. While a synchronous callback runs, the scheduler cannot register completions or declare timeouts. So it's best to avoid slow commands in synchronous callbacks. The clock is read once per wake-up, before any callback runs, and remaining time is not recomputed until everything that wake-up brought has been handled - so a wake-up carrying several completions delays timeout detection by the combined duration of their callbacks, not just the longest one.
 
 ## Global timeout
 
