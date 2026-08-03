@@ -464,8 +464,6 @@ sch_read_rec() {
 sch_drain_fifo_records() {
 	local \
 		sch_cs \
-		sch_dl_min \
-		sch_now_cs \
 		\
 		sch_rec \
 		sch_aborts \
@@ -480,41 +478,27 @@ sch_drain_fifo_records() {
 		sch_queued="${2}" \
 		sch_ipc_fifo="${3:?}"
 
-	[ -e "${sch_ipc_fifo}" ] ||
-		sch_finalize 1 "FIFO file '${sch_ipc_fifo}' does not exist."
-
 	sch_has_f && sch_had_f=1
 
 	if [ -z "${sch_queued}" ] && [ "${SCH_RUNNING_JOBS_CNT}" -gt 0 ] &&
 		{ [ -z "${SCH_PENDING_IDS}" ] || [ "${SCH_RUNNING_JOBS_CNT}" -ge "${SCH_MAX_JOBS}" ]; }
 	then
+		# Cap the wait by the nearest job deadline
 		sch_read_t_cs="${SCH_REMAIN_TIME_CS}"
-
-		# Cap the wait by the nearest job deadline if any
-		[ -n "${SCH_DEADLINES}" ] && {
-			sch_get_uptime_cs sch_now_cs || sch_finalize 1
-
-			set -f
-			for sch_e in ${SCH_DEADLINES}; do
-				sch_cs="${sch_e%%:*}"
-				[ -n "${sch_dl_min}" ] && [ "${sch_cs}" -ge "${sch_dl_min}" ] ||
-					sch_dl_min="${sch_cs}"
-			done
-			[ -n "${sch_had_f}" ] || set +f
-
-			sch_dl_min=$((sch_dl_min - sch_now_cs))
-			[ "${sch_dl_min}" -lt "${sch_read_t_cs}" ] &&
-				sch_read_t_cs="${sch_dl_min}"
-		}
+		set -f
+		for sch_e in ${SCH_DEADLINES}; do
+			sch_cs=$(( ${sch_e%%:*} - sch_cur_time_cs ))
+			[ "${sch_cs}" -lt "${sch_read_t_cs}" ] && sch_read_t_cs="${sch_cs}"
+		done
+		[ -n "${sch_had_f}" ] || set +f
 
 		sch_read_t_s=$(( (sch_read_t_cs + 99) / 100 ))
 	fi
 
 	# Classify each record as abort or completion.
-	# Capped at 100 records per call, so that a sustained writer cannot defer
-	#   dispatch and the timeout check indefinitely
-	sch_n=0
+	# Capped at 100 records per call, so that a sustained writer cannot defer dispatch and the timeout check indefinitely
 	# The first read is a no-op when polling: count it only if it consumed a record
+	sch_n=0
 	sch_read_rec sch_rec "${sch_ipc_fifo}" "${sch_read_t_s}" && sch_n=1
 	while :; do
 		# Empty means read -t timeout, or a record that deframed to nothing
@@ -563,10 +547,8 @@ sch_drain_fifo_records() {
 # 2: job completion callback
 sch_process_done_batch() {
 	local \
-		sch_cs \
 		sch_now_cs \
 		sch_dl_prev \
-		sch_expired \
 		sch_job_pid \
 		sch_job_id \
 		sch_done_rv \
@@ -580,8 +562,13 @@ sch_process_done_batch() {
 
 	sch_has_f && sch_had_f=1
 
-	# Arrival wins over expiry: records are handled before deadlines are swept
-	# ${sch_batch} is glob-safe: unsigned return codes and validated job IDs
+	# One reading serves both the progress stamp and the expiry sweep. Taken before any
+	#   callback runs, so time a callback spends counts against the idle timeout
+	sch_get_uptime_cs sch_now_cs || sch_finalize 1
+
+	# Arrival wins over expiry: records are handled before deadlines are swept.
+	# ${sch_batch} is local to this call and holds only validated fields,
+	#   so unlike the run-state list swept below it needs no noglob guard
 	for sch_e in ${sch_batch}; do
 		sch_done_rv="${sch_e%%:*}"
 		sch_done_id="${sch_e#*:}"
@@ -604,7 +591,8 @@ sch_process_done_batch() {
 				sch_append SCH_FAIL_IDS "${sch_done_id}"
 			fi
 
-			sch_get_uptime_cs SCH_LAST_PROGRESS_TIME_CS || sch_finalize 1
+			# Only a genuine completion is progress; a discarded late record is not
+			SCH_LAST_PROGRESS_TIME_CS="${sch_now_cs}"
 
 			[ -z "${sch_job_done_cb}" ] ||
 			sch_run_done_cb "${sch_job_done_cb}" "${sch_done_id}" "${sch_done_rv}" ||
@@ -619,38 +607,35 @@ sch_process_done_batch() {
 	# Abandoned jobs are recorded in ${SCH_UNREAPED}, so that
 	#   their completion records can be recognized and discarded if they arrive later.
 	[ -n "${SCH_DEADLINES}" ] && {
-		sch_get_uptime_cs sch_now_cs || sch_finalize 1
-
-		# Split the deadline list into expired (deadline <= now) and pending
+		# Rebuild the list, acting on entries that expired (deadline <= now).
+		# Carries run state a callback can reach, so the split runs with globbing off
 		sch_dl_prev="${SCH_DEADLINES}"
 		SCH_DEADLINES=
 		set -f
 		for sch_e in ${sch_dl_prev}; do
-			sch_cs="${sch_e%%:*}"
-			if [ "${sch_cs}" -le "${sch_now_cs}" ]; then
-				sch_append sch_expired "${sch_e}"
+			# Restored per iteration: the expiry path calls into user code
+			[ -n "${sch_had_f}" ] || set +f
+
+			if [ "${sch_e%%:*}" -le "${sch_now_cs}" ]; then
+				sch_job_id="${sch_e#*:}"
+
+				# Gone from SCH_RUNNING: a callback above aborted it - drop the entry,
+				#   the job is already classified
+				sch_pid_of_id sch_job_pid "${sch_job_id}" "${SCH_RUNNING}" || continue
+				sch_rm_elem SCH_RUNNING "${sch_job_pid}:${sch_job_id}" "${SCH_RUNNING}"
+				SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
+				sch_append SCH_EXPIRED_IDS "${sch_job_id}"
+				sch_append SCH_UNREAPED "${sch_job_pid}:${sch_job_id}"
+
+				# Kill the timed-out job's whole process tree (wrapper included)
+				[ -n "${SCH_TERM_ACTIVE}" ] && sch_term_run term "${sch_job_pid}"
+
+				[ -z "${sch_job_done_cb}" ] ||
+				sch_run_done_cb "${sch_job_done_cb}" "${sch_job_id}" 124 "${sch_job_pid}" ||
+					sch_finalize ${?}
 			else
 				sch_append SCH_DEADLINES "${sch_e}"
 			fi
-		done
-
-		# ${sch_expired} is glob-safe
-		for sch_e in ${sch_expired}; do
-			[ -n "${sch_had_f}" ] || set +f
-			sch_job_id="${sch_e#*:}"
-
-			sch_pid_of_id sch_job_pid "${sch_job_id}" "${SCH_RUNNING}" || continue
-			sch_rm_elem SCH_RUNNING "${sch_job_pid}:${sch_job_id}" "${SCH_RUNNING}"
-			SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
-			sch_append SCH_EXPIRED_IDS "${sch_job_id}"
-			sch_append SCH_UNREAPED "${sch_job_pid}:${sch_job_id}"
-
-			# Kill the timed-out job's whole process tree (wrapper included)
-			[ -n "${SCH_TERM_ACTIVE}" ] && sch_term_run term "${sch_job_pid}"
-
-			[ -z "${sch_job_done_cb}" ] ||
-			sch_run_done_cb "${sch_job_done_cb}" "${sch_job_id}" 124 "${sch_job_pid}" ||
-				sch_finalize ${?}
 		done
 		[ -n "${sch_had_f}" ] || set +f
 	}
@@ -884,16 +869,13 @@ schedule_jobs() {
 		mkdir -p "${sch_dir}" ||
 			sch_finalize 1 "Failed to create directory '${sch_dir}'."
 
-		# Owner-only run dir and FIFO: a readable FIFO lets any other local user
-		#   consume completion records meant for this run. The umask is set in a
-		#   subshell so the caller's own is never disturbed - including on the
-		#   failure paths below, which run the caller's completion callback.
 		# Claim a unique run dir. mkdir is atomic: it fails if the name exists,
 		#   so concurrent instances never collide.
 		sch_run_n=0
 		while :; do
 			sch_run_dir="${sch_dir}/sched_${SCHED_UID}.${sch_run_n}"
 			sch_ipc_fifo="${sch_run_dir}/ipc"
+			# Owner-only FIFO and run dir
 			(
 				umask 077
 				mkdir "${sch_run_dir}" 2>/dev/null &&
@@ -913,8 +895,7 @@ schedule_jobs() {
 	exec 3<>"${sch_ipc_fifo}" ||
 		sch_finalize 1 "Failed to open FIFO '${sch_ipc_fifo}'."
 
-	# Gates cleanup. Set only past the open: a caller-supplied path that failed
-	#   validation is not ours to delete
+	# Gates cleanup. Set only past the open: a caller-supplied path that failed validation is not ours to delete
 	sch_fifo_owned=1
 
 	trap 'sch_finalize "${SCH_RV_USR1}"' USR1
@@ -923,9 +904,9 @@ schedule_jobs() {
 
 	# Start jobs
 
-	# Priority ladder, highest first: abort records, then filling a free concurrency
-	#   slot, then completion records and expiries. Aborts are applied by the drain
-	#   itself; a completion record only queues up, so it can never preempt a dispatch.
+	# Priority ladder, highest first:
+	#   abort records, then filling a free concurrency slot, then completion records and expiries.
+	# Aborts are applied by the drain itself; a completion record only queues up, so it can never preempt a dispatch.
 	# ${SCH_PENDING_IDS} shrinks as jobs are dispatched; jobs_abort() may also remove from it
 	while [ -n "${SCH_PENDING_IDS}" ] || [ "${SCH_RUNNING_JOBS_CNT}" -gt 0 ]; do
 		[ -e "${sch_ipc_fifo}" ] || sch_finalize 1 "Scheduler FIFO disappeared."
@@ -945,8 +926,9 @@ schedule_jobs() {
 			SCH_REMAIN_TIME_CS="${sch_idle_remain_time_cs}"
 		fi
 
-		# Waits for a wake-up only when nothing else could progress; otherwise takes
-		#   what is queued and returns. Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}
+		# Waits for a wake-up only when nothing else could progress.
+		# Otherwise takes what is queued and returns.
+		# Updates ${SCH_RUNNING_JOBS_CNT}; ${SCH_RUNNING}
 		sch_drain_fifo_records sch_done_batch "${sch_done_batch}" "${sch_ipc_fifo}"
 
 		# Picked after the drain: an abort may have dropped the previous head
