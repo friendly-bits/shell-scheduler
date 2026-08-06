@@ -61,24 +61,6 @@ sch_rm_elem() {
 	export -n "${sre_out_var}=${sre_l}"
 }
 
-# Look up PID of a job in list of '<pid>:<job ID>' entries
-# Job IDs contain no whitespace, so ":<job ID> " can only match at an entry boundary
-# 1: out var
-# 2: job ID
-# 3: cur list
-sch_pid_of_id() {
-	local spi_l=" ${3} " spi_p
-	export -n "${1:?}="
-
-	case "${spi_l}" in
-		*":${2} "*) ;;
-		*) return 1
-	esac
-
-	spi_p="${spi_l%%":${2} "*}"
-	export -n "${1}=${spi_p##* }"
-}
-
 sch_is_uint() {
 	local _v
 	for _v; do
@@ -151,6 +133,24 @@ sch_has_f() {
 		*f*) return 0 ;;
 		*) return 1
 	esac
+}
+
+# Look up PID of a job in list of '<pid>:<job ID>' entries
+# Job IDs contain no whitespace, so ":<job ID> " can only match at an entry boundary
+# 1: out var
+# 2: job ID
+# 3: cur list
+sch_pid_of_id() {
+	local spi_l=" ${3} " spi_p
+	export -n "${1:?}="
+
+	case "${spi_l}" in
+		*":${2} "*) ;;
+		*) return 1
+	esac
+
+	spi_p="${spi_l%%":${2} "*}"
+	export -n "${1}=${spi_p##* }"
 }
 
 # Get reuse-proof identity '<pid>_<starttime>' of current shell process
