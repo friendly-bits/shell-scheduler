@@ -1142,7 +1142,7 @@ test_security_17() {
 	if [ "${sched_rv}" = 0 ] &&
 		[ "${abort_rv}" = 1 ] &&
 		[ "${msg_cnt}" = 1 ] &&
-		msgs_have "${MSG_FILE}" 'SCHED_UID is not set or scheduler is not running in this process' &&
+		msgs_have "${MSG_FILE}" 'Scheduler is not running in this process or SCHED_UID' &&
 		verify_id_set exp act "${jobs}" "${ok_raw}" &&
 		[ -z "${aborted_raw}" ] &&
 		verify_id_partition "${jobs}"
@@ -1280,7 +1280,7 @@ test_security_18() {
 		[ "${rv_in_job}" = 1 ] &&
 		[ "${msg_cnt_pre}" = 2 ] &&
 		[ "${msg_cnt}" = 3 ] &&
-		msgs_have "${MSG_FILE}" 'SCHED_UID is not set or scheduler is not running in this process' &&
+		msgs_have "${MSG_FILE}" 'Scheduler is not running in this process or SCHED_UID' &&
 		verify_id_set exp act "${jobs}" "${ok_raw}" &&
 		[ -z "${aborted_raw}" ] &&
 		verify_id_partition "${jobs}"
@@ -1346,7 +1346,7 @@ test_security_19() {
 		[ "${rv_noargs}" = 1 ] &&
 		[ "${rv_stale}" = 1 ] &&
 		[ "${msg_cnt}" = 3 ] &&
-		msgs_have "${MSG_FILE}" 'SCHED_UID is not set or scheduler is not running in this process' &&
+		msgs_have "${MSG_FILE}" 'Scheduler is not running in this process or SCHED_UID' &&
 		[ "${sched_rv}" = 0 ] &&
 		verify_id_set exp act "${jobs}" "${ok_raw}" &&
 		[ -z "${aborted_raw}" ] &&
@@ -1496,7 +1496,7 @@ test_security_21() {
 		[ "${fin_rv}" = "${sched_rv}" ] &&
 		[ "${abort_rv}" = 1 ] &&
 		[ "${msg_cnt}" = 1 ] &&
-		msgs_have "${MSG_FILE}" 'SCHED_UID is not set or scheduler is not running in this process' &&
+		msgs_have "${MSG_FILE}" 'Scheduler is not running in this process or SCHED_UID' &&
 		verify_id_set exp act "${jobs}" "${ok_raw}" &&
 		[ -z "${aborted_raw}" ] &&
 		verify_id_partition "${jobs}"
@@ -1580,9 +1580,9 @@ test_security_22() {
 		[ "${abort_rv}" = 1 ] &&
 		[ "${msg_cnt}" = 1 ] &&
 		msgs_have "${MSG_FILE}" "jobs_abort: unknown job ID '${UNKNOWN_ID}'." &&
-		! msgs_have "${MSG_FILE}" 'SCHED_UID is not set or scheduler is not running in this process' &&
+		! msgs_have "${MSG_FILE}" 'Scheduler is not running in this process or SCHED_UID' &&
 		[ "${err_cnt}" = 2 ] &&
-		msgs_have "${ERR_FILE}" 'jobs_abort: SCHED_UID is not set or scheduler is not running in this process.' &&
+		msgs_have "${ERR_FILE}" 'jobs_abort: Scheduler is not running in this process or SCHED_UID' &&
 		msgs_have "${ERR_FILE}" 'Warning: stopping infinite SCHED_FAIL_MSG_CB recursion.' &&
 		verify_id_set exp act "${jobs}" "${ok_raw}" &&
 		[ -z "${aborted_raw}" ] &&

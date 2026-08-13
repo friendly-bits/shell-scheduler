@@ -7,7 +7,7 @@
 # Category: job termination - variant-shared tests and shared infrastructure.
 #   Tests here run against whichever variant is selected: they drive the
 #   variant's default termination callback via ${SCHED_TERM_CB_DEFAULT}
-#   (full: sched_job_term_ppid; mini: sched_job_term_mini) and gate on
+#   (full: sched_job_term_ppid; mini: sch_job_term_ppid) and gate on
 #   term_default_capable. Full-only library tests live in
 #   tests-job_termination_full.sh; mini-only tests in tests-job_termination_mini.sh.
 #   The job-termination library is sourced by tests.sh (full variant only).
@@ -564,8 +564,8 @@ test_job_termination_02() {
 	fi
 }
 
-# ppid library: per-job timeout kills the job's process tree at expiry; unverified,
-#   so the expired PID stays in running_pids.
+# ppid library: per-job timeout kills the job's process tree at expiry.
+# Unverified, so the expired PID stays in running_pids.
 test_job_termination_03() {
 	_jt_timeout_scenario job_termination_03 "${SCHED_TERM_CB_DEFAULT}" term_default_capable "${TERM_DEFAULT_SKIP_REASON}" block_03
 }

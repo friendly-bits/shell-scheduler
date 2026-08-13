@@ -16,7 +16,7 @@
 #   'mini' (scheduler-mini.sh). The *_full / *_mini categories hold tests specific
 #   to one variant and SKIP under the other; the plain categories run against both.
 
-script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+script_dir="${SCRIPT_DIR:-$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)}"
 
 # Select scheduler variant: full (scheduler.sh) or mini (scheduler-mini.sh)
 SCHEDULER_VARIANT="${SCHEDULER_VARIANT:-full}"
@@ -28,8 +28,8 @@ esac
 
 . "${script_dir}/../${SCHEDULER_LIB}"
 
-# The full variant uses the standalone job-termination library; the mini
-#   variant has its own built-in mechanism (sched_job_term_mini).
+# The full variant uses the standalone job-termination library.
+# The mini variant has its own built-in mechanism (sch_job_term_ppid).
 if [ -z "${SCHED_IS_MINI}" ]; then
 	. "${script_dir}/../job-term.sh"
 	SCHED_TERM_CB_DEFAULT=sched_job_term_ppid
@@ -47,7 +47,7 @@ if [ -z "${SCHED_IS_MINI}" ]; then
 
 	term_default_capable() { jt_mech_capable ppid; }
 else
-	SCHED_TERM_CB_DEFAULT=sched_job_term_mini
+	SCHED_TERM_CB_DEFAULT=sch_job_term_ppid
 	term_default_capable() { sch_is_cmd "${SCHED_AWK_CMD:-awk}" && [ -r /proc/self/stat ]; }
 fi
 TERM_DEFAULT_SKIP_REASON="default termination mechanism unsupported here - /proc or awk unavailable"
@@ -65,14 +65,14 @@ FAIL() {
 	printf '%s\n' "Result: ${FAIL}${1:+" ("}${1}${1:+")"}"
 }
 
-# For environment-gated tests: print a skip result line. The test must then
-# 'return 2', which the run loop counts as a skip (separately in the summary).
+# For environment-gated tests: print a skip result line.
+# The test must then 'return 2', which the run loop counts as a skip (separately in the summary).
 SKIP() {
 	printf '%s\n' "Result: ${SKIP_C}${1:+" ("}${1}${1:+")"}"
 }
 
-# Skip a test that only applies to the other variant: prints a skip line and
-# returns non-zero so the caller can 'return 2' (counted as a skip).
+# Skip a test that only applies to the other variant:
+#   prints a skip line and returns non-zero so the caller can 'return 2' (counted as a skip).
 # Usage: require_variant full|mini || return 2
 require_variant() {
 	[ "${SCHEDULER_VARIANT}" = "${1}" ] ||
@@ -602,7 +602,7 @@ get_test_pid() {
 	while IFS= read -r line; do
 		case "${line}" in
 			"${field}":*)
-				__pid="${line##*[^0-9]}"
+				__pid="${line##*[!0-9]}"
 				break
 			;;
 		esac
@@ -697,7 +697,7 @@ TEST_CATEGORIES="dispatch core scheduler_termination sched_env params params_ful
 
 is_valid_cat() {
 	case " ${TEST_CATEGORIES} " in
-		*" ${1} "*) ;;
+		*" ${1} "*) : ;;
 		*) printf '%s\n' "Unknown category '${1}'. Valid categories: ${TEST_CATEGORIES}" >&2; return 1 ;;
 	esac
 }

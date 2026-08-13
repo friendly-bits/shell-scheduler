@@ -1613,9 +1613,9 @@ test_abort_19() {
 	custom_fifo="/tmp/sched.extfifo.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${custom_fifo}"
 
-	require_variant full || return 2
-
 	print_test_header "${TEST_ID:?}" "Abort record queued before the run leaves its job undispatched" "${jobs}"
+
+	require_variant full || return 2
 
 	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
 
@@ -1684,9 +1684,9 @@ test_abort_20() {
 	custom_fifo="/tmp/sched.extfifo.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${custom_fifo}"
 
-	require_variant full || return 2
-
 	print_test_header "${TEST_ID:?}" "Abort probed between dispatches stops the job from starting" "${jobs}"
+
+	require_variant full || return 2
 
 	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
 	exec 6<>"${custom_fifo}"
@@ -1747,9 +1747,9 @@ test_abort_21() {
 	custom_fifo="/tmp/sched.extfifo.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${custom_fifo}"
 
-	require_variant full || return 2
-
 	print_test_header "${TEST_ID:?}" "Abort record for a running job lands in the aborted set" "${jobs}"
+
+	require_variant full || return 2
 
 	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
 	exec 6<>"${custom_fifo}"
@@ -1823,9 +1823,9 @@ test_abort_22() {
 	custom_fifo="/tmp/sched.extfifo.${TEST_ID:?}.$$"
 	rm -f "${FINALIZE_SETS_PREFIX:?}".* "${custom_fifo}"
 
-	require_variant full || return 2
-
 	print_test_header "${TEST_ID:?}" "Abort beats a completion record drained in the same batch" "${jobs}"
+
+	require_variant full || return 2
 
 	mkfifo "${custom_fifo}" || { FAIL "could not create '${custom_fifo}'"; return 1; }
 	exec 6<>"${custom_fifo}"

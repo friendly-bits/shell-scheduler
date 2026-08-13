@@ -7,7 +7,7 @@
 # Category: job termination, mini-variant only.
 #   The mini variant uses a simplified JOB_TERM_CB protocol - the callback is
 #   invoked as 'CB <pid>...' (no init/setup/term/cleanup subcommands, no
-#   out-var) - and ships a built-in ppid-walk mechanism, sched_job_term_mini.
+#   out-var) - and ships a built-in ppid-walk mechanism, sch_job_term_ppid.
 #   Shared infrastructure (do_job_default, is_uint, ...) comes from tests.sh.
 
 # This file is sourced by tests.sh; it defines test_job_termination_mini_NN functions only.
@@ -81,7 +81,7 @@ test_job_termination_mini_01() {
 	fi
 }
 
-# sched_job_term_mini ignores invalid (non-uint) PID args with a warning and
+# sch_job_term_ppid ignores invalid (non-uint) PID args with a warning and
 #   still kills the valid seed. Direct helper call - no scheduler run.
 test_job_termination_mini_02() {
 	local \
@@ -93,14 +93,14 @@ test_job_termination_mini_02() {
 
 	mini_02_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
 
-	print_test_header "${TEST_ID}" "mini: sched_job_term_mini warns on invalid PID, kills valid seed" "(no jobs)"
+	print_test_header "${TEST_ID}" "mini: sch_job_term_ppid warns on invalid PID, kills valid seed" "(no jobs)"
 
 	require_variant mini || return 2
 
 	sleep 30 &
 	victim=${!}
 
-	SCHED_FAIL_MSG_CB=mini_02_fail_msg sched_job_term_mini notanumber "${victim}"
+	SCHED_FAIL_MSG_CB=mini_02_fail_msg sch_job_term_ppid notanumber "${victim}"
 
 	sleep 1
 	if kill -0 "${victim}" 2>/dev/null; then
@@ -124,7 +124,7 @@ test_job_termination_mini_02() {
 	fi
 }
 
-# With the /proc scan disabled (awk missing), sched_job_term_mini reports the
+# With the /proc scan disabled (awk missing), sch_job_term_ppid reports the
 #   scan failure but still kills the seed PIDs. Direct helper call - no scheduler run.
 test_job_termination_mini_03() {
 	local \
@@ -136,7 +136,7 @@ test_job_termination_mini_03() {
 
 	mini_03_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
 
-	print_test_header "${TEST_ID}" "mini: sched_job_term_mini kills seeds even when /proc scan fails" "(no jobs)"
+	print_test_header "${TEST_ID}" "mini: sch_job_term_ppid kills seeds even when /proc scan fails" "(no jobs)"
 
 	require_variant mini || return 2
 
@@ -144,7 +144,7 @@ test_job_termination_mini_03() {
 	victim=${!}
 
 	SCHED_AWK_CMD=/nonexistent/nope SCHED_FAIL_MSG_CB=mini_03_fail_msg \
-		sched_job_term_mini "${victim}"
+		sch_job_term_ppid "${victim}"
 
 	sleep 1
 	if kill -0 "${victim}" 2>/dev/null; then
