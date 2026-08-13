@@ -99,6 +99,83 @@ sch_tr_trailing() {
 	eval "${1}=\"\${${1}%\"\${${1}##*[!\"\${2}\"]}\"}\""
 }
 
+# Args: job PIDs
+sch_job_term_ppid() {
+	local \
+		me=sch_job_term_ppid \
+		sch_had_f \
+		sch_p sch_seeds sch_all sch_prev sch_found sch_try
+
+	sch_seeds=
+	for sch_p in "${@}"; do
+		sch_is_uint "${sch_p}" ||
+			{ sch_fail_msg "${me}: ignoring invalid PID '${sch_p}'."; continue; }
+		sch_append sch_seeds "${sch_p}"
+	done
+	[ -n "${sch_seeds}" ] || return 0
+
+	# Freeze, re-scan to fixpoint, kill
+	sch_all="${sch_seeds}"
+	sch_prev=
+
+	sch_has_f && sch_had_f=1
+	set -f
+
+	for sch_try in 1 2 3; do
+		kill -STOP ${sch_all} 2>/dev/null
+
+		# Get all live descendant PIDs (space-separated, seeds excluded).
+		sch_found="$(
+			set +f
+			cat /proc/[0-9]*/stat 2>/dev/null | {
+				set -f
+				# shellcheck disable=SC2016
+				${SCHED_AWK_CMD:-awk} -v seeds="${sch_all}" '
+				/^[0-9]+ \(/ {
+					pid = $1
+					s = $0
+					# Strip "pid (comm) X " (X = single state char).
+					# comm may contain spaces and parens - the greedy match handles those;
+					#   a line that does not match is a fragment of a newline-containing comm - skip
+					if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
+					split(s, f, " ")
+					if (f[1] !~ /^[0-9]+$/) next
+					ppid[pid] = f[1]
+					valid++
+				}
+				END {
+					if (!valid) exit 1
+					n = split(seeds, a, " ")
+					for (i = 1; i <= n; i++)
+						if (a[i] ~ /^[0-9]+$/) {
+							seed[a[i]] = 1
+							want[a[i]] = 1
+						}
+					do {
+						changed = 0
+						for (p in ppid)
+							if (!(p in want) && (ppid[p] in want)) { want[p] = 1; changed = 1 }
+					} while (changed)
+					for (p in want) if (!(p in seed)) printf "%s ", p
+				}'
+			}
+		)" || {
+			sch_fail_msg "${me}: /proc scan failed."
+			break
+		}
+
+		sch_append sch_all "${sch_found}"
+		sch_tr_trailing sch_all " "
+		[ "${sch_all}" = "${sch_prev}" ] && break
+		sch_prev="${sch_all}"
+	done
+
+	kill -KILL ${sch_all} 2>/dev/null
+
+	[ -n "${sch_had_f}" ] || set +f
+	:
+}
+
 sch_has_f() {
 	case "${-}" in
 		*f*) return 0 ;;
@@ -186,13 +263,18 @@ sch_check_var_name() {
 }
 
 # 1: caller
+# any extra args attached to err msg
 sch_in_main_process() {
-	local sip_uid
-	sch_get_uid sip_uid &&
-	[ "${sip_uid}" = "${SCHED_UID}" ] &&
-	eval "[ -n \"\${SCH_STARTED_${sip_uid}}\" ]" &&
+	local uid args caller="${1}"
+	sch_get_uid uid &&
+	[ "${uid}" = "${SCHED_UID}" ] &&
+	eval "[ -n \"\${SCH_STARTED_${uid}}\" ]" &&
 		return 0
-	sch_fail_msg "${1}: SCHED_UID is not set or scheduler is not running in this process."
+	[ "${#}" -ge 1 ] && shift
+	for arg in "${@}"; do
+		args="${args}${args:+, }'${arg}'"
+	done
+	sch_fail_msg "${caller}: Scheduler is not running in this process or SCHED_UID '${SCHED_UID}' doesn't match this process UID '${uid}'.${args:+" args: ${args}"}"
 	return 1
 }
 
@@ -298,7 +380,6 @@ sch_run_done_cb() {
 	sch_has_f && sch_had_f=1
 	set -f
 
-	# 'local' with invalid name aborts busybox ash
 	for sch_p in ${sch_names}; do
 		sch_check_var_name "${sch_p}" "${sch_me}" || { sch_names=; break; }
 	done
@@ -496,88 +577,6 @@ sch_term_run() {
 }
 
 #
-# Job termination functions
-#
-
-# Job termination callback (ppid-walk mechanism)
-# Args: job PIDs
-sched_job_term_mini() {
-	local \
-		me=sched_job_term_mini \
-		sjt_had_f \
-		sjt_p sjt_seeds sjt_all sjt_prev sjt_found sjt_try
-
-	sjt_seeds=
-	for sjt_p in "${@}"; do
-		sch_is_uint "${sjt_p}" ||
-			{ sch_fail_msg "${me}: ignoring invalid PID '${sjt_p}'."; continue; }
-		sch_append sjt_seeds "${sjt_p}"
-	done
-	[ -n "${sjt_seeds}" ] || return 0
-
-	# Freeze, re-scan to fixpoint, kill
-	sjt_all="${sjt_seeds}"
-	sjt_prev=
-
-	sch_has_f && sjt_had_f=1
-	set -f
-
-	for sjt_try in 1 2 3; do
-		kill -STOP ${sjt_all} 2>/dev/null
-
-		# Get all live descendant PIDs (space-separated, seeds excluded).
-		sjt_found="$(
-			set +f
-			cat /proc/[0-9]*/stat 2>/dev/null | {
-				set -f
-				# shellcheck disable=SC2016
-				${SCHED_AWK_CMD:-awk} -v seeds="${sjt_all}" '
-				/^[0-9]+ \(/ {
-					pid = $1
-					s = $0
-					# Strip "pid (comm) X " (X = single state char).
-					# comm may contain spaces and parens - the greedy match handles those;
-					#   a line that does not match is a fragment of a newline-containing comm - skip
-					if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
-					split(s, f, " ")
-					if (f[1] !~ /^[0-9]+$/) next
-					ppid[pid] = f[1]
-					valid++
-				}
-				END {
-					if (!valid) exit 1
-					n = split(seeds, a, " ")
-					for (i = 1; i <= n; i++)
-						if (a[i] ~ /^[0-9]+$/) {
-							seed[a[i]] = 1
-							want[a[i]] = 1
-						}
-					do {
-						changed = 0
-						for (p in ppid)
-							if (!(p in want) && (ppid[p] in want)) { want[p] = 1; changed = 1 }
-					} while (changed)
-					for (p in want) if (!(p in seed)) printf "%s ", p
-				}'
-			}
-		)" || {
-			sch_fail_msg "${me}: /proc scan failed."
-			break
-		}
-
-		sch_append sjt_all "${sjt_found}"
-		sch_tr_trailing sjt_all " "
-		[ "${sjt_all}" = "${sjt_prev}" ] && break
-		sjt_prev="${sjt_all}"
-	done
-
-	kill -KILL ${sjt_all} 2>/dev/null
-
-	[ -n "${sjt_had_f}" ] || set +f
-	:
-}
-
-#
 # User-facing functions
 #
 
@@ -668,7 +667,7 @@ schedule_jobs() {
 
 	sch_has_f && SCH_HAD_F=1
 
-	[ -n "${SCHED_AUTO_JOB_TERM}" ] && JOB_TERM_CB=sched_job_term_mini
+	[ -n "${SCHED_AUTO_JOB_TERM}" ] && JOB_TERM_CB=sch_job_term_ppid
 
 	# Check callbacks
 	sch_check_cb SCHED_FAIL_MSG_CB &&

@@ -221,13 +221,18 @@ sch_check_var_name() {
 # Reject calls from a job wrapper, from SCHED_FINALIZE_CB, or from outside a run.
 #   Also guards sch_finalize() against re-entry: it unsets the started-flag first
 # 1: caller
+# any extra args attached to err msg
 sch_in_main_process() {
-	local sip_uid
-	sch_get_uid sip_uid &&
-	[ "${sip_uid}" = "${SCHED_UID}" ] &&
-	eval "[ -n \"\${SCH_STARTED_${sip_uid}}\" ]" &&
+	local uid args caller="${1}"
+	sch_get_uid uid &&
+	[ "${uid}" = "${SCHED_UID}" ] &&
+	eval "[ -n \"\${SCH_STARTED_${uid}}\" ]" &&
 		return 0
-	sch_fail_msg "${1}: SCHED_UID is not set or scheduler is not running in this process."
+	[ "${#}" -ge 1 ] && shift
+	for arg in "${@}"; do
+		args="${args}${args:+, }'${arg}'"
+	done
+	sch_fail_msg "${caller}: Scheduler is not running in this process or SCHED_UID '${SCHED_UID}' doesn't match this process UID '${uid}'.${args:+" args: ${args}"}"
 	return 1
 }
 
@@ -252,7 +257,7 @@ sch_finalize() {
 		IFS=" "$'\t'$'\n' \
 		sch_rv="${1}"
 
-	sch_in_main_process "${sch_me}" ||
+	sch_in_main_process "${sch_me}" "${@}" ||
 		return "${sch_rv:-1}"
 
 	unset "SCH_STARTED_${SCHED_UID}"
