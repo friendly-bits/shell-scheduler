@@ -46,7 +46,7 @@ Note: `abort` covers `jobs_abort()` - which jobs it acts on, how they are classi
 
 The suite runs against either scheduler variant, selected by the `SCHEDULER_VARIANT` environment variable: `full` (default, `scheduler.sh`) or `mini` (`scheduler-mini.sh`), e.g. `SCHEDULER_VARIANT=mini sh ./tests.sh run`.
 
-The `params` and `job_termination` categories hold variant-shared tests that run under both. The `*_full` categories hold tests for behavior only present in the full variant (e.g. `SCHED_AUTO_PARAMS` gating; the cgroup / children / ppid mechanisms of the helper library and the full `JOB_TERM_CB` protocol); the `*_mini` categories hold tests for mini-only behavior (always-on param auto-delivery; the simplified single-argument `JOB_TERM_CB` protocol and the built-in `sched_job_term_mini` mechanism). Tests specific to the non-selected variant report SKIP.
+The `params` and `job_termination` categories hold variant-shared tests that run under both. The `*_full` categories hold tests for behavior only present in the full variant (e.g. `SCHED_AUTO_PARAMS` gating; the cgroup / children / ppid mechanisms of the helper library and the full `JOB_TERM_CB` protocol); the `*_mini` categories hold tests for mini-only behavior (always-on param auto-delivery; the simplified single-argument `JOB_TERM_CB` protocol and the built-in `sch_job_term_ppid` mechanism). Tests specific to the non-selected variant report SKIP.
 
 Note: the `security` category consolidates the command-injection / forgery-resistance tests (job-ID and completion-record validation, param value/name and callback-value injection, and internal param-key namespace integrity).
 
