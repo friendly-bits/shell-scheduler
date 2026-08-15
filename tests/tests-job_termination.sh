@@ -5,18 +5,20 @@
 # tests-job_termination.sh
 
 # Category: job termination - variant-shared tests and shared infrastructure.
-#   Tests here run against whichever variant is selected: they drive the
-#   variant's default termination callback via ${SCHED_TERM_CB_DEFAULT}
-#   (full: sched_job_term_ppid; mini: sch_job_term_ppid) and gate on
-#   term_default_capable. Full-only library tests live in
-#   tests-job_termination_full.sh; mini-only tests in tests-job_termination_mini.sh.
-#   The job-termination library is sourced by tests.sh (full variant only).
+# Tests here run against whichever variant is selected:
+#   they drive the variant's default termination callback via ${SCHED_TERM_CB_DEFAULT}
+#   (full: sched_job_term_ppid; mini: sch_job_term_ppid)
+#   and gate on term_default_capable.
+# Full-only library tests live in tests-job_termination_full.sh
+# Mini-only tests in tests-job_termination_mini.sh
+# The job-termination library is sourced by tests.sh (full variant only).
 
 # This file is sourced by tests.sh; it defines test_job_termination_NN functions
 #   plus the shared infrastructure used by all three job-termination files.
 
 # All tests exercise the public interface only:
 #   JOB_TERM_CB, schedule_jobs(), environment variables and callbacks.
+
 #
 # Category infrastructure
 #
@@ -121,8 +123,8 @@ do_job_term() {
 
 		# Live child (recorded) that forks recorded children only after the wrapper
 		#   has been SIGSTOPped, then blocks; the wrapper blocks on it.
-		# The wrapper is the mechanism's seed, so the first STOP pass freezes it
-		#   before any descendant scan - which is the window being exercised.
+		# The wrapper is the mechanism's seed, so the first STOP pass freezes it before any descendant scan -
+		#   which is the window being exercised.
 		# The child polls the wrapper's /proc state (bounded, ~20k reads ~= 2.7 s)
 		#   and forks nothing if it never observes state 'T'.
 		forkrace)
@@ -401,8 +403,8 @@ _jt_strag_scenario() {
 }
 
 # "USR1 abort kills processes forked between discovery scans".
-# The job's helper child forks only after the first SIGSTOP pass, so its children
-#   exist from the second scan onward; every recorded PID must end up dead.
+# The job's helper child forks only after the first SIGSTOP pass,
+#   so its children exist from the second scan onward; every recorded PID must end up dead.
 # 1: test id
 # 2: JOB_TERM_CB
 # 3: capability gate fn
@@ -411,9 +413,8 @@ _jt_strag_scenario() {
 # 6: required variant (full|mini), optional - empty means "runs under either"
 _jt_forkrace_scenario() {
 	local \
-		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_job="${5}" \
-		jt_variant="${6}" \
-		sched_pid sched_rv checks_pass=0 checks_exp=3 pid_cnt=0
+		sched_pid sched_rv checks_pass=0 checks_exp=3 pid_cnt=0 \
+		TEST_ID="${1}" jt_cb="${2}" jt_gate="${3}" jt_skip="${4}" jt_job="${5}" jt_variant="${6}"
 
 	local PIDS_F="/tmp/sched.job_termination.pids.${TEST_ID}.$$"
 	rm -f "${PIDS_F}"
