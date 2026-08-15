@@ -109,7 +109,7 @@ SUITE="${script_dir}/tests.sh"
 SUITE_ARGS="${*}"
 
 
-SHELLS="bash"$'\n'"busybox ash"
+SHELLS="bash"$'\n'"busybox ash"$'\n'"shed"
 
 # --- matrix definition ---
 IFS=$'\n'
@@ -174,7 +174,7 @@ DO_JOB_CB=run_combo \
 SCHED_FAIL_MSG_CB=matrix_fail_msg \
 SCHED_FINALIZE_CB=matrix_finalize \
 JOB_TERM_CB=sched_job_term_ppid \
-SCHED_MAX_JOBS=4 \
+SCHED_MAX_JOBS=6 \
 SCHED_TIMEOUT_S="${MATRIX_TIMEOUT_S:-3600}" \
 SCHED_IDLE_TIMEOUT_S="${MATRIX_IDLE_TIMEOUT_S:-3600}" \
 SCHED_JOB_TIMEOUT_S="${MATRIX_JOB_TIMEOUT_S:-1800}" \
