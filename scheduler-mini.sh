@@ -408,7 +408,7 @@ sch_read_rec() {
 		IFS= read -t 0 -r _ < "${srr_fifo}" &&
 			IFS= read -t 1 -r srr_tail < "${srr_fifo}"
 
-		[ -n "${BASH_VERSION}" ] || [ -n "${srr_rec}" ] || srr_tail=
+		[ -n "${BASH_VERSION}" ] || [ -n "${SHED_VERSION}" ] || [ -n "${srr_rec}" ] || srr_tail=
 
 		srr_rec="${srr_rec}${srr_tail}"
 		[ -n "${srr_rec}" ] || return 1
