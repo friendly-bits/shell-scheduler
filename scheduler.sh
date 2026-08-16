@@ -10,6 +10,8 @@
 # SCHED_AUTO_PARAMS
 # SCHED_ID
 # SCHED_INNER_SUBSHELL
+# SCHED_CGROUP_BASE
+# SCHED_AWK_CMD
 
 # Env vars specifying callbacks (see REFERENCE.md):
 # DO_JOB_CB
@@ -1161,4 +1163,583 @@ jobs_abort() {
 	# shellcheck disable=SC2086
 	sch_term_run term ${sch_kill_pids}
 	:
+}
+
+
+#
+# Job termination mechanisms
+#
+
+# Kills each job's whole process tree (background children, orphaned grandchildren)
+#   via one of three mechanisms:
+#   - cgroup: the kernel's cgroup.kill, with kernel-verified kill reporting;
+#       needs cgroup v2 and a writable cgroup subtree (root or a delegated subtree)
+#   - children: walks /proc/<pid>/task/<tid>/children;
+#       needs a kernel built with CONFIG_PROC_CHILDREN, plus awk
+#   - ppid: walks PPID links from /proc/*/stat;
+#       needs only /proc/<pid>/stat and awk - available on essentially any Linux
+#   The /proc mechanisms cannot verify kills and report no verified PIDs.
+# See REFERENCE.md ("Job termination").
+
+# Usage: select the mechanism with
+#   sched_use_job_term <cgroup|children|ppid|auto>
+# which sets JOB_TERM_CB=sched_job_term_<mechanism> on success, or JOB_TERM_CB= and
+#   returns 1 when the requested mechanism is unusable here.
+
+# Alternatively, select the callback manually: JOB_TERM_CB=sched_job_term_ppid
+
+# Reads env vars:
+# SCHED_CGROUP_BASE (optional): writable cgroup2 directory under which the per-run cgroup is created,
+#  skipping base autodetection
+# SCHED_AWK_CMD (optional): awk command to use for the /proc mechanisms
+
+# These functions own variables prefixed SCH_JT_.
+
+### Shared helper
+
+# Collect the valid PIDs from <pid>..., warning about and skipping the invalid ones.
+# 1: out var for the space-separated valid PIDs
+# 2: caller name
+# 3..: candidate PIDs
+sch_collect_valid_pids() {
+	local cvp_out_var="${1:?}" cvp_caller="${2:?}" cvp_p
+	shift 2
+
+	export -n "${cvp_out_var}="
+	for cvp_p in "${@}"; do
+		sch_is_uint "${cvp_p}" ||
+			{ sch_fail_msg "${cvp_caller}: term: ignoring invalid PID '${cvp_p}'."; continue; }
+		sch_append "${cvp_out_var}" "${cvp_p}"
+	done
+	:
+}
+
+
+### /proc mechanisms
+
+# Collect all live descendant PIDs (space-separated, seeds excluded)
+#   by walking /proc/*/stat PPID links
+# Returns 1 if /proc yielded no parseable records
+# 1: out var
+# 2: space-separated seed PIDs
+sch_get_descendants_ppid() {
+	local gd_rv gd_out \
+		gd_out_var="${1:?}" gd_seeds="${2?}"
+
+	# The awk pipeline runs in a subshell either way, so capture it here rather than
+	#   printing to stdout
+	gd_out="$(
+		set +f
+		cat /proc/[0-9]*/stat 2>/dev/null | {
+			set -f
+			# shellcheck disable=SC2016
+			${SCHED_AWK_CMD:-awk} -v seeds="${gd_seeds}" '
+			/^[0-9]+ \(/ {
+				pid = $1
+				s = $0
+				# Strip "pid (comm) X " (X = single state char).
+				# comm may contain spaces and parens - the greedy match handles those;
+				#   a line that does not match is a fragment of a newline-containing comm - skip
+				if (!sub(/^[0-9]+ \(.*\) . /, "", s)) next
+				split(s, f, " ")
+				if (f[1] !~ /^[0-9]+$/) next
+				ppid[pid] = f[1]
+				valid++
+			}
+			END {
+				if (!valid) exit 1
+				n = split(seeds, a, " ")
+				for (i = 1; i <= n; i++)
+					if (a[i] ~ /^[0-9]+$/) {
+						seed[a[i]] = 1
+						want[a[i]] = 1
+					}
+				do {
+					changed = 0
+					for (p in ppid)
+						if (!(p in want) && (ppid[p] in want)) { want[p] = 1; changed = 1 }
+				} while (changed)
+				for (p in want) if (!(p in seed)) printf "%s ", p
+			}'
+		}
+	)"
+	gd_rv=${?}
+
+	export -n "${gd_out_var}=${gd_out}"
+	return ${gd_rv}
+}
+
+# Walk /proc/<pid>/task/<tid>/children breadth-first from the seeds and collect all live descendant PIDs
+#   (space-separated, seeds excluded).
+# Globs task/* so children forked by non-leader threads are found.
+# 1: out var
+# 2: space-separated seed PIDs
+sch_get_descendants_children() {
+	local \
+		gd_had_f gd_rv=0 \
+		gd_frontier gd_next gd_seen gd_files \
+		gd_p gd_f gd_kid \
+		gd_out_var="${1}" gd_seeds="${2}"
+
+	sch_has_f && gd_had_f=1
+
+	gd_seen="${gd_seeds}"
+	gd_frontier="${gd_seeds}"
+	export -n "${gd_out_var}="
+
+	while [ -n "${gd_frontier}" ]; do
+		gd_files=
+		set -f
+		# shellcheck disable=SC2086
+		for gd_p in ${gd_frontier}; do
+			set +f
+			for gd_f in /proc/"${gd_p}"/task/*/children; do
+				sch_append gd_files "${gd_f}"
+			done
+		done
+		set -f
+
+		# getline < file: -1 on missing file (skipped), 0 at EOF
+		gd_next="$(${SCHED_AWK_CMD:-awk} -v paths="${gd_files}" '
+		BEGIN {
+			num_paths = split(paths, path_list, " ")
+			for (i = 1; i <= num_paths; i++) {
+				children_file = path_list[i]
+				while ((getline line < children_file) > 0) {
+					num_kids = split(line, child_pids, " ")
+					for (j = 1; j <= num_kids; j++) printf "%s ", child_pids[j]
+				}
+				close(children_file)
+			}
+		}')" || gd_rv=${?}
+
+		gd_frontier=
+		# shellcheck disable=SC2086
+		for gd_kid in ${gd_next}; do
+			sch_is_included "${gd_kid}" "${gd_seen}" && continue
+			sch_append gd_seen "${gd_kid}"
+			sch_append gd_frontier "${gd_kid}"
+			sch_append "${gd_out_var}" "${gd_kid}"
+		done
+	done
+
+	[ -n "${gd_had_f}" ] || set +f
+
+	return ${gd_rv}
+}
+
+# Shared implementation of the /proc job termination callbacks.
+#   init, setup and cleanup are no-ops: no per-run or per-job state is held.
+#   term freezes, re-scans to a fixpoint and kills.
+# Reports no verified killed PIDs (assigns empty list to <out var>):
+#   kill verification is not possible here.
+# 1: mechanism (ppid|children)
+# 2: subcommand
+# 3..: subcommand args
+sch_term_proc() {
+	local \
+		mech="${1:?}" \
+		caller="sched_job_term_${1}" \
+		had_f \
+		seeds all prev found try \
+		subcmd="${2}"
+
+	shift
+	[ -n "${1}" ] && shift
+
+	case "${subcmd}" in
+		init|setup|cleanup) return 0 ;;
+		term) : ;;
+		*) sch_fail_msg "${caller}: unknown subcommand '${subcmd}'."; return 1
+	esac
+
+	sch_check_name "var" "${1}" "${caller}: term" || return 1
+	export -n "${1}="
+	shift
+
+	sch_collect_valid_pids seeds "${caller}" "${@}"
+	[ -n "${seeds}" ] || return 0
+
+	# Freeze, re-scan to fixpoint, then kill:
+	#   each STOP pass pins down what the previous scan saw,
+	#   while the next scan catches anything forked in between
+	all="${seeds}"
+	prev=
+
+	sch_has_f && had_f=1
+	set -f
+
+	for try in 1 2 3; do
+		# shellcheck disable=SC2086
+		kill -STOP ${all} 2>/dev/null
+		case "${mech}" in
+			ppid) sch_get_descendants_ppid found "${all}" ;;
+			children) sch_get_descendants_children found "${all}" ;;
+			*) false
+		esac ||
+		{
+			sch_fail_msg "${caller}: /proc scan failed."
+			break
+		}
+		sch_append all "${found}"
+		sch_tr_trailing all "${all}" " "
+		[ "${all}" = "${prev}" ] && break
+		prev="${all}"
+	done
+
+	# SIGKILL is delivered to stopped processes; no CONT needed
+	# shellcheck disable=SC2086
+	[ -n "${all}" ] && kill -KILL ${all} 2>/dev/null
+
+	[ -n "${had_f}" ] || set +f
+	:
+}
+
+# Job termination callbacks (see the protocol contract in REFERENCE.md):
+#   sched_job_term_<mech> init|setup             (no-ops)
+#   sched_job_term_<mech> term <out var> <pid>...
+#   sched_job_term_<mech> cleanup <out var>
+sched_job_term_ppid() { sch_term_proc ppid "${@}"; }
+
+sched_job_term_children() { sch_term_proc children "${@}"; }
+
+
+### cgroup mechanism
+
+# Create the per-run base cgroup as a child of <parent dir>
+#
+# mkdir is atomic (fails if the name exists), so concurrent scheduler instances -
+#   even ones sharing <pid> across PID namespaces under a shared SCHED_CGROUP_BASE - claim distinct bases.
+# 1: out var for the created base cgroup path
+# 2: parent dir
+# 3: PID to name the base after
+sch_mk_base_cgroup() {
+	local mbc_n=0 mbc_d
+
+	export -n "${1}="
+	while :; do
+		mbc_d="${2}/sched_${3:?}.${mbc_n}"
+		mkdir "${mbc_d}" 2>/dev/null && { export -n "${1}=${mbc_d}"; return 0; }
+		mbc_n=$((mbc_n + 1))
+		[ "${mbc_n}" -lt 16 ] || return 1
+	done
+}
+
+# Set up the per-run base cgroup which will hold per-job child cgroups. Base autodetection tries,
+#   in order:
+#   - this process's own cgroup: writable when running as root,
+#       or unprivileged inside a delegated subtree (e.g. a systemd user session
+#       or user service, or any command launched via 'systemd-run --user --scope')
+#   - cgroup2 mount root: writable when running as root
+# Validates the whole mechanism by moving a probe subshell into a child cgroup
+sch_cgroup_init() {
+	local \
+		me=sch_cgroup_init \
+		mnt own line fstype cand uid pid \
+		hint="need root or a delegated cgroup subtree, e.g. run via 'systemd-run --user --scope <cmd>'"
+
+	SCH_JT_BASE=
+	SCH_JT_PENDING=
+
+	# Cgroup base names stay PID-keyed; collisions are handled by the '.<n>' retry
+	sch_get_uid uid || return 1
+	pid="${uid%%_*}"
+
+	# Locate the cgroup2 mountpoint
+	mnt=
+	while read -r _ line fstype _; do
+		[ "${fstype}" = cgroup2 ] && { mnt="${line}"; break; }
+	done 2>/dev/null < /proc/mounts
+
+	[ -n "${mnt}" ] ||
+		{ sch_fail_msg "${me}: no cgroup2 mount found."; return 1; }
+
+	if [ -n "${SCHED_CGROUP_BASE}" ]; then
+		# Specified by the user
+		cand="${SCHED_CGROUP_BASE}"
+		sch_tr_trailing cand "${cand}" "/"
+		sch_mk_base_cgroup SCH_JT_BASE "${cand}" "${pid}" || {
+			sch_fail_msg "${me}: cannot create a cgroup under '${SCHED_CGROUP_BASE}'."
+			return 1
+		}
+	else
+		# Own cgroup path: the '0::<path>' (cgroup v2) entry
+		own=
+		while IFS= read -r line; do
+			case "${line}" in
+				0::*) own="${line#0::}"; break
+			esac
+		done 2>/dev/null < /proc/self/cgroup
+
+		cand="${mnt}${own}"
+		sch_tr_trailing cand "${cand}" "/"
+
+		sch_mk_base_cgroup SCH_JT_BASE "${cand}" "${pid}" ||
+		sch_mk_base_cgroup SCH_JT_BASE "${mnt}" "${pid}" || {
+			sch_fail_msg "${me}: cannot create a cgroup under '${cand}' or '${mnt}' (${hint})."
+			return 1
+		}
+	fi
+
+	[ -f "${SCH_JT_BASE}/cgroup.kill" ] || {
+		sch_fail_msg "${me}: no cgroup.kill in '${SCH_JT_BASE}' (kernel >= 5.14 required)."
+		rmdir "${SCH_JT_BASE}" 2>/dev/null
+		SCH_JT_BASE=
+		return 1
+	}
+
+	mkdir "${SCH_JT_BASE}/probe" 2>/dev/null &&
+	{
+		{ printf '0\n' 2>/dev/null > "${SCH_JT_BASE}/probe/cgroup.procs"; } &
+		wait "${!}"
+	} &&
+	rmdir "${SCH_JT_BASE}/probe" 2>/dev/null || {
+		sch_fail_msg "${me}: job processes cannot join cgroups under '${SCH_JT_BASE}' (${hint})."
+		rmdir "${SCH_JT_BASE}/probe" "${SCH_JT_BASE}" 2>/dev/null
+		SCH_JT_BASE=
+		return 1
+	}
+}
+
+# Try to remove the per-job cgroup of the job with wrapper PID <pid>.
+# rmdir succeeds only once the kernel confirmed cgroup empty and fully reaped,
+#   i.e. kill of the job's process tree is verified: append the PID to <out var>
+# Otherwise park the PID in ${SCH_JT_PENDING} for later retries.
+# 1: out var for reaped PID
+# 2: job wrapper PID
+sch_rm_job_cgroup() {
+	export -n "${1:?}="
+	rmdir "${SCH_JT_BASE:?}/job_${2:?}" 2>/dev/null &&
+		{ export -n "${1:?}=${2}"; return 0; }
+	sch_is_included "${2}" "${SCH_JT_PENDING}" ||
+		sch_append SCH_JT_PENDING "${2}"
+	return 1
+}
+
+# Kill all processes remaining in the per-job cgroup of the job with wrapper PID <pid>
+#   and try to remove the cgroup (verifying the kill)
+# 1: out var for reaped PID
+# 2: job wrapper PID
+sch_kill_job_cgroup() {
+	local kj_d="${SCH_JT_BASE:?}/job_${2:?}"
+
+	export -n "${1:?}="
+	[ -d "${kj_d}" ] || return 0
+	printf '1\n' 2>/dev/null > "${kj_d}/cgroup.kill"
+	sch_rm_job_cgroup "${1:?}" "${2}"
+	:
+}
+
+# 'term' body: retry previously unverified removals, then kill the listed jobs.
+#   Always runs the retry pass and always assigns <out var> - no empty-seeds shortcut.
+# 1: out var for kernel-verified killed PIDs (already validated and cleared by the caller)
+# 2..: job wrapper PIDs
+sch_kill_jobs_cgroup() {
+	local \
+		kjs_me=sch_kill_jobs_cgroup \
+		kjs_reaped kjs_seeds kjs_p kjs_prev \
+		kjs_out_var="${1}"
+
+	shift 2>/dev/null
+
+	# Retry previously unverified removals first, then kill
+	kjs_prev="${SCH_JT_PENDING}"
+	SCH_JT_PENDING=
+	export -n "${kjs_out_var}="
+
+	# shellcheck disable=SC2086
+	for kjs_p in ${kjs_prev}; do
+		sch_rm_job_cgroup kjs_reaped "${kjs_p}"
+		sch_append "${kjs_out_var}" "${kjs_reaped}"
+	done
+
+	sch_collect_valid_pids kjs_seeds "${kjs_me}" "${@}"
+	# shellcheck disable=SC2086
+	for kjs_p in ${kjs_seeds}; do
+		sch_kill_job_cgroup kjs_reaped "${kjs_p}"
+		sch_append "${kjs_out_var}" "${kjs_reaped}"
+	done
+
+	:
+}
+
+# 'cleanup' body: sweep all remaining job cgroups, retry unverified removals and remove the base cgroup.
+# 1: out var for kernel-verified killed PIDs (already validated and cleared by the caller)
+sch_cleanup_cgroup() {
+	local \
+		clc_me=sch_cleanup_cgroup \
+		clc_reaped clc_p clc_prev clc_try clc_had_f \
+		clc_out_var="${1}"
+
+	export -n "${clc_out_var}="
+
+	# Sweep all remaining job cgroups - including those of completed jobs that left processes behind:
+	#   nothing a job spawned survives the run.
+	# The glob must expand regardless of the caller's noglob state (the application may run under set -f)
+	[ -n "${SCH_JT_BASE}" ] && {
+		sch_has_f && clc_had_f=1
+		set +f
+		set -- "${SCH_JT_BASE}"/job_*
+		[ -z "${clc_had_f}" ] || set -f
+		for clc_p in "${@}"; do
+			[ -d "${clc_p}" ] || continue
+			clc_p="${clc_p##*/job_}"
+			sch_is_uint "${clc_p}" && {
+				sch_kill_job_cgroup clc_reaped "${clc_p}"
+				sch_append "${clc_out_var}" "${clc_reaped}"
+			}
+		done
+	}
+
+	# Bounded retry for unverified removals:
+	#   rmdir succeeds only once the kernel has fully reaped a cgroup's processes
+	for clc_try in 1 2 3; do
+		[ -n "${SCH_JT_PENDING}" ] || break
+		clc_prev="${SCH_JT_PENDING}"
+		SCH_JT_PENDING=
+		# shellcheck disable=SC2086
+		for clc_p in ${clc_prev}; do
+			sch_rm_job_cgroup clc_reaped "${clc_p}"
+			sch_append "${clc_out_var}" "${clc_reaped}"
+		done
+		[ -n "${SCH_JT_PENDING}" ] || break
+		[ "${clc_try}" = 3 ] || sleep 1
+	done
+	[ -z "${SCH_JT_BASE}" ] || {
+		rmdir "${SCH_JT_BASE}" 2>/dev/null ||
+			sch_fail_msg "${clc_me}: failed to remove cgroup(s) under '${SCH_JT_BASE}'."
+	}
+	SCH_JT_BASE=
+
+	:
+}
+
+# Job termination callback (see the protocol contract in REFERENCE.md):
+#   sched_job_term_cgroup init
+#   sched_job_term_cgroup setup <job_id> <pid>   (runs in the job process)
+#   sched_job_term_cgroup term <out var> <pid>...
+#   sched_job_term_cgroup cleanup <out var>
+# 'term' and 'cleanup' report kernel-verified killed PIDs by assigning
+#   space-separated list to <out var>.
+sched_job_term_cgroup() {
+	local \
+		me=sched_job_term_cgroup \
+		sub="${1}"
+
+	shift 2>/dev/null
+
+	case "${sub}" in
+		init)
+			sch_cgroup_init
+		;;
+
+		setup)
+			# Join a fresh per-job cgroup: writing '0' to cgroup.procs moves the writing process,
+			#   which is the job process since the core invokes 'setup' there;
+			#   all the job's descendants inherit the membership
+			sch_is_uint "${2}" ||
+				{ sch_fail_msg "${me}: setup: invalid PID '${2}'."; return 1; }
+			mkdir "${SCH_JT_BASE:?}/job_${2}" 2>/dev/null &&
+			printf '0\n' 2>/dev/null > "${SCH_JT_BASE}/job_${2}/cgroup.procs" ||
+			{
+				sch_fail_msg "${me}: job '${1}' (PID ${2}): failed to join cgroup '${SCH_JT_BASE}/job_${2}'."
+				return 1
+			}
+		;;
+
+		term)
+			sch_check_name "var" "${1}" "${me}: term" || return 1
+			export -n "${1}="
+			sch_kill_jobs_cgroup "${@}"
+		;;
+
+		cleanup)
+			sch_check_name "var" "${1}" "${me}: cleanup" || return 1
+			export -n "${1}="
+			sch_cleanup_cgroup "${1}"
+		;;
+
+		*)
+			sch_fail_msg "${me}: unknown subcommand '${sub}'."
+			return 1
+	esac
+}
+
+
+### Probes and mechanism selection
+
+# Return 0 if the PPID-walk mechanism can work here:
+#   awk is available and /proc exposes per-process stat records.
+sch_term_probe_ppid() {
+	sch_is_cmd "${SCHED_AWK_CMD:-awk}" && [ -r /proc/self/stat ]
+}
+
+# Return 0 if awk is available and the kernel exposes /proc/<pid>/task/<tid>/children (needs CONFIG_PROC_CHILDREN).
+sch_term_probe_children() {
+	local had_f
+
+	sch_is_cmd "${SCHED_AWK_CMD:-awk}" || return 1
+
+	# Resolve the glob with globbing on; an absent children file leaves the pattern literal,
+	#   so a live glob is the presence test
+	sch_has_f && had_f=1
+	set +f
+	set -- /proc/self/task/*/children
+	[ -n "${had_f}" ] && set -f
+
+	[ -e "${1}" ]
+}
+
+# Return 0 if cgroup v2 job termination is supported in the current environment:
+#   runs the same validation 'sched_job_term_cgroup init' performs, then cleans up after itself.
+# Honors ${SCHED_CGROUP_BASE} if set.
+sch_term_probe_cgroup() {
+	local SCH_JT_BASE SCH_JT_PENDING rv=0
+
+	SCHED_FAIL_MSG_CB=: sch_cgroup_init || rv=1
+
+	[ -n "${SCH_JT_BASE}" ] && rmdir "${SCH_JT_BASE}" 2>/dev/null
+	return "${rv}"
+}
+
+# Select a job termination mechanism: probe it and, on success, arm the matching callback
+#   by assigning JOB_TERM_CB=sched_job_term_<mech>.
+# 'auto' tries cgroup -> children -> ppid.
+# On failure - the mechanism is unusable here, or the argument is outside the closed set -
+#   JOB_TERM_CB is assigned an empty value, so a failed selection never leaves a stale callback armed.
+# Prints errors unless run with '-q'.
+# 0 (optional): '-q' for quiet mode (no errors)
+# 1: cgroup|children|ppid|auto
+# Return codes: 0 - selected; 1 - not selected
+sched_use_job_term() {
+	local q
+	[ "${1}" = '-q' ] && { q=1; shift; }
+	local mech="${1}" arg="${1}"
+
+	export -n JOB_TERM_CB=
+
+	case "${mech}" in
+		auto)
+			if sch_term_probe_cgroup; then mech=cgroup
+			elif sch_term_probe_children; then mech=children
+			elif sch_term_probe_ppid; then mech=ppid
+			else false
+			fi
+		;;
+		cgroup) sch_term_probe_cgroup ;;
+		children) sch_term_probe_children ;;
+		ppid) sch_term_probe_ppid ;;
+		*) false
+	esac 2>/dev/null ||
+	{
+		[ -n "${q}" ] && return 1
+		if [ "${arg}" = auto ]; then
+			sch_fail_msg "Failed to find a functional job termination mechanism for this system."
+		else
+			sch_fail_msg "Job termination mechanism '${arg}' is unavailable."
+		fi
+		return 1
+	}
+
+	JOB_TERM_CB="sched_job_term_${mech}"
 }
