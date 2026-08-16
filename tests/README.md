@@ -1,7 +1,30 @@
 ## Test suite
 
+Tests are mostly written by AI and this document is mostly intended for AI's consumption.
+
+### Testing suite command line options
+
+Usage:
+
+On Busybox ash:
+```sh
+sh ./tests.sh [options]
+```
+
+On Bash:
+```bash
+bash ./tests.sh [options]
+```
+
+Options:
+- `[no arguments]` - do nothing (for sourcing the script)
+- `run` - run all tests, across all categories
+- `run <category>` - run all tests in the given category
+- `run <category> <space_separated_list_of_numbers>` - e.g. 'run params 1 3 5'
+- `run <category> <test_num_start>-<test_num_end>` - run tests in a range, e.g. 'run scheduler_termination 3-6'. Takes either: no number (whole category), a list of numbers, or a range: `run params 34-38`.
+
 ### Instructions
-- `tests.sh run <category>` takes either: no number (whole category), a list of numbers, or a range: `run params 34-38`.
+- To exercise a suite helper in isolation, source tests.sh with SCRIPT_DIR set to the tests directory — it overrides the $0-derived path that otherwise breaks the library lookup from a wrapper. With no arguments tests.sh only defines things.
 - Category files are large (tests-params.sh ~1700 lines). To append a test, grep for the highest test_<category>_NN and read one neighbouring test for the house pattern — don't read the file end to end.
 - A test's description comment sits *above* its function definition, so tracking the last-seen `test_<category>_NN()` header while grepping misattributes hits that fall in the next test's leading comment. Confirm the enclosing function before editing.
 - When you need to run a certain test, run it as `bash tests/tests.sh run <category> <test_num>` (or `busybox ash tests.sh ...`).
@@ -66,24 +89,3 @@ Note: non-interference between concurrent scheduler instances is covered in two 
 - Cross-category shared helpers live in tests/tests.sh
 - When, and only when you need to write or update tests, or understand details of tests implementation, read tests/SHARED-HELPERS.md.
 - The suite's shared `SCHED_FINALIZE_CB` (`finalize_handler` in tests/tests.sh) sends SIGTERM, via a bare `kill`, to every still-running PID the scheduler reports to it.
-
-### Testing suite command line options
-
-Usage:
-
-On Busybox ash:
-```sh
-sh ./tests.sh [options]
-```
-
-On Bash:
-```bash
-bash ./tests.sh [options]
-```
-
-Options:
-- `[no arguments]` - do nothing (for sourcing the script)
-- `run` - run all tests, across all categories
-- `run <category>` - run all tests in the given category
-- `run <category> <space_separated_list_of_numbers>` - e.g. 'run params 1 3 5'
-- `run <category> <test_num_start>-<test_num_end>` - run tests in a range, e.g. 'run scheduler_termination 3-6'

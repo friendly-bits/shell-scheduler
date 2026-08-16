@@ -13,7 +13,6 @@ The goal of this project is to implement a reliable, reusable, flexible and reas
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Security](#security)
-	- [Running untrusted jobs](#running-untrusted-jobs)
 - [Full reference](#full-reference)
 - [Real-world examples](#real-world-examples)
 - [Code authorship and the use of generative AI](#code-authorship-and-the-use-of-generative-ai)
@@ -29,7 +28,7 @@ This library is designed to solve the following problems:
 ## Features
 
 - **Parallel job scheduling**: execute independent jobs concurrently, up to a configurable maximum number of running jobs
-- **Callback-based API** facilitates easy integration with a shell-based application while keeping parallelization orchestration code separate from application-specific code
+- **Callback-based API** facilitates easy integration with a shell-based application
 - **Configurable per-job parameters**
 - **Configurable global, idle and per-job timeouts**
 - **Job cancellation**: abort specific running or queued jobs mid-flight
@@ -42,7 +41,7 @@ This library is designed to solve the following problems:
 ## Dependencies
 
 - **Linux** - required for its reliance on `/proc` to read PIDs and system uptime. Should be not too complicated to port to any other Unix-like system.
-- **Bash or BusyBox ash**. Other shells are not supported. Could be conceivably ported to POSIX-compliant code.
+- **Bash or BusyBox ash or [shed](https://github.com/km-clay/shed)**. Other shells are not supported. Could be conceivably ported to POSIX-compliant code.
 - The utilities `mkfifo`, `mkdir`, and `rm`. No other binary utilities are used by the library.
 
 ## Variants
@@ -234,7 +233,7 @@ Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md]
 
 For a complete integration example, see [`EXAMPLE-HAGEZI-FETCH.md`](EXAMPLE-HAGEZI-FETCH.md) - a concurrent downloader for DNS blocklists. It demonstrates per-job parameters, signal forwarding, cleanup of orphaned child processes, and bookkeeping across callbacks.
 
-For another complete (and quite involved) integration example, see [`test-matrix.sh`](tests/test-matrix.sh) - a script which runs multiple instances of the test suite in parallel with Bash and Busybox ash, across the full and mini variants of the scheduler, using the scheduler itself to orchestrate the parallelization.
+For another complete (and quite involved) integration example, see [`test-matrix.sh`](tests/test-matrix.sh) - a script which runs multiple instances of the test suite in parallel with Bash, Busybox ash and shed, across the full and mini variants of the scheduler, using the scheduler itself to orchestrate the parallelization.
 
 ## Code authorship and the use of generative AI
 
