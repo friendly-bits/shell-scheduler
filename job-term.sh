@@ -216,7 +216,7 @@ sch_jt_proc() {
 			break
 		}
 		sch_append sjtp_all "${sjtp_found}"
-		sch_tr_trailing sjtp_all " "
+		sch_tr_trailing sjtp_all "${sjtp_all}" " "
 		[ "${sjtp_all}" = "${sjtp_prev}" ] && break
 		sjtp_prev="${sjtp_all}"
 	done
@@ -293,7 +293,7 @@ sch_jt_cg_init() {
 	if [ -n "${SCHED_CGROUP_BASE}" ]; then
 		# Specified by the user
 		sjtc_cand="${SCHED_CGROUP_BASE}"
-		sch_tr_trailing sjtc_cand "/"
+		sch_tr_trailing sjtc_cand "${sjtc_cand}" "/"
 		sch_jt_cg_mk_base SCH_JT_BASE "${sjtc_cand}" "${sjtc_pid}" || {
 			sch_fail_msg "${sjtc_lib_name}: cannot create a cgroup under '${SCHED_CGROUP_BASE}'."
 			return 1
@@ -308,7 +308,7 @@ sch_jt_cg_init() {
 		done 2>/dev/null < /proc/self/cgroup
 
 		sjtc_cand="${sjtc_mnt}${sjtc_own}"
-		sch_tr_trailing sjtc_cand "/"
+		sch_tr_trailing sjtc_cand "${sjtc_cand}" "/"
 
 		sch_jt_cg_mk_base SCH_JT_BASE "${sjtc_cand}" "${sjtc_pid}" ||
 		sch_jt_cg_mk_base SCH_JT_BASE "${sjtc_mnt}" "${sjtc_pid}" || {

@@ -54,8 +54,8 @@ sch_rm_elem() {
 		sre_l=" ${sre_l} "
 		local sre_s=" ${sre_e} "
 		sre_l="${sre_l%%"${sre_s}"*} ${sre_l#*"${sre_s}"}"
-		sch_tr_trailing sre_l " "
-		sch_tr_leading sre_l " "
+		sch_tr_trailing sre_l "${sre_l}" " "
+		sch_tr_leading sre_l "${sre_l}" " "
 	}
 
 	export -n "${sre_out_var}=${sre_l}"
@@ -73,32 +73,32 @@ sch_is_uint() {
 
 # 1 - var name for centiseconds output
 sch_get_uptime_cs() {
-	local __uptime i_cs cs s
+	local gup_time gup_cs gup_s
 	export -n "${1}="
 
-	read -r __uptime _ < /proc/uptime &&
-	case "${__uptime}" in
+	read -r gup_time _ < /proc/uptime &&
+	case "${gup_time}" in
 		''|*.*.*) false ;;
 		*.*) ;;
 		*) false ;;
 	esac &&
-	i_cs="${__uptime##*.}" &&
-	case "${i_cs}" in
-		'') cs=00 ;;
-		?) cs="${i_cs}0" ;;
-		??) cs="${i_cs}" ;;
-		??*) cs="${i_cs%"${i_cs#??}"}"
+	gup_cs="${gup_time##*.}" &&
+	case "${gup_cs}" in
+		'') gup_cs=00 ;;
+		?) gup_cs="${gup_cs}0" ;;
+		??) ;;
+		??*) gup_cs="${gup_cs%"${gup_cs#??}"}"
 	esac &&
-	s="${__uptime%.*}" &&
-	sch_is_uint "${s}" "${cs}" ||
+	gup_s="${gup_time%.*}" &&
+	sch_is_uint "${gup_s}" "${gup_cs}" ||
 	{
 		sch_fail_msg "Failed to get uptime from /proc/uptime."
 		export -n "${1}"=0
 		return 1
 	}
-	cs="${s:-0}${cs:-00}"
-	sch_tr_leading cs "0"
-	export -n "${1}=${cs:-0}"
+	gup_cs="${gup_s:-0}${gup_cs:-00}"
+	sch_tr_leading gup_cs "${gup_cs}" "0"
+	export -n "${1}=${gup_cs:-0}"
 }
 
 # The callback runs in a subshell and behind a re-entry flag: a callback that itself
@@ -119,13 +119,11 @@ sch_is_cmd() {
 }
 
 sch_tr_leading() {
-	sch_check_name "var" "${1}" &&
-	eval "${1}=\"\${${1}#\"\${${1}%%[!\"\${2}\"]*}\"}\""
+	export -n "${1:?}=${2#"${2%%[!"${3}"]*}"}"
 }
 
 sch_tr_trailing() {
-	sch_check_name "var" "${1}" &&
-	eval "${1}=\"\${${1}%\"\${${1}##*[!\"\${2}\"]}\"}\""
+	export -n "${1:?}=${2%"${2##*[!"${3}"]}"}"
 }
 
 sch_has_f() {
@@ -750,7 +748,7 @@ schedule_jobs() {
 		[ -z "${val}" ] && [ -z "${3}" ] && return 0
 		sch_is_uint "${val}" && [ "${val}" -ge 1 ] ||
 			{ sch_fail_msg "Invalid value '${val}' of env var SCHED_${1#SCH_}."; return 1; }
-		sch_tr_leading val "0"
+		sch_tr_leading val "${val}" "0"
 		export -n "${1}=${val}"
 	}
 
@@ -1126,7 +1124,7 @@ job_set_timeout() {
 		sch_fail_msg "${sch_me}: invalid timeout value '${sch_val}' for job '${sch_job_id}'."
 		return 1
 	}
-	sch_tr_leading sch_val "0"
+	sch_tr_leading sch_val "${sch_val}" "0"
 	export -n "SCH_TIMEOUT_JOB_${sch_ns}${sch_job_id}=${sch_val}"
 }
 
