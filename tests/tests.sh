@@ -89,6 +89,78 @@ is_uint() {
 	:
 }
 
+has_f() {
+	case "${-}" in
+		*f*) return 0 ;;
+		*) return 1
+	esac
+}
+
+# Uptime in centiseconds. A copy of the library's sch_get_uptime_cs, so the suite's
+#   timing helpers do not reach into scheduler internals.
+# On failure sets the out var to 0 and returns 1.
+# 1: out var
+get_uptime_cs() {
+	local guc_uptime guc_i_cs guc_cs guc_s
+
+	export -n "${1:?}="
+
+	read -r guc_uptime _ < /proc/uptime &&
+	case "${guc_uptime}" in
+		''|*.*.*) false ;;
+		*.*) ;;
+		*) false ;;
+	esac &&
+	guc_i_cs="${guc_uptime##*.}" &&
+	case "${guc_i_cs}" in
+		'') guc_cs=00 ;;
+		?) guc_cs="${guc_i_cs}0" ;;
+		??) guc_cs="${guc_i_cs}" ;;
+		??*) guc_cs="${guc_i_cs%"${guc_i_cs#??}"}"
+	esac &&
+	guc_s="${guc_uptime%.*}" &&
+	is_uint "${guc_s}" "${guc_cs}" ||
+	{
+		echo "Failed to get uptime from /proc/uptime." >&2
+		export -n "${1}=0"
+		return 1
+	}
+
+	# Strip leading zeros: $(( )) would read the concatenation as octal
+	guc_cs="${guc_s:-0}${guc_cs:-00}"
+	guc_cs="${guc_cs#"${guc_cs%%[!0]*}"}"
+	export -n "${1}=${guc_cs:-0}"
+}
+
+# True if item ${1} is one of the whitespace-separated elements of list ${2}.
+# Case-pattern quoting is per-segment, so the item is matched literally even
+#   when it holds a glob character.
+is_included() {
+	case " ${2} " in
+		*" ${1} "*) return 0 ;;
+		*) return 1
+	esac
+}
+
+# List ${2} with element ${3} appended, single-space separated.
+# An empty list or element contributes no separator.
+# Takes the list value rather than a variable name, so no name reaches an eval.
+# 1: out var
+# 2: current list
+# 3: element to append
+append() {
+	export -n "${1:?}=${2}${2:+${3:+ }}${3}"
+}
+
+# Value ${2} with every trailing character in set ${3} removed.
+# Takes the value rather than a variable name, so no name reaches an eval.
+# 1: out var
+# 2: value
+# 3: character set
+tr_trailing() {
+	export -n "${1:?}=${2%"${2##*[!"${3}"]}"}"
+}
+
 # Build a name of exactly <len> chars: <prefix> followed by 'x' filler.
 # Chars are all [a-zA-Z0-9_]-safe.
 # 1: out var
@@ -273,9 +345,8 @@ verify_id_partition() {
 		vip_id vip_name vip_set vip_in vip_hits vip_had_f \
 		vip_ok=0 vip_total=0 vip_extra=0
 
-	case "${-}" in *f*) vip_had_f=1 ;; esac
+	has_f && vip_had_f=1
 	set -f
-
 	for vip_id in ${vip_all}; do
 		vip_total=$((vip_total + 1))
 		vip_in=

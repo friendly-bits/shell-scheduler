@@ -66,8 +66,7 @@ cg_mk_test_base() {
 	done 2>/dev/null < /proc/self/cgroup
 
 	[ -n "${mnt}" ] || return 1
-	CG_TEST_BASE="${mnt}${own}"
-	sch_tr_trailing CG_TEST_BASE "/"
+	tr_trailing CG_TEST_BASE "${mnt}${own}" "/"
 	CG_TEST_BASE="${CG_TEST_BASE}/schtest_${1:?}_$$"
 	rmdir "${CG_TEST_BASE}" 2>/dev/null
 	mkdir "${CG_TEST_BASE}" 2>/dev/null
@@ -831,8 +830,8 @@ test_job_termination_full_15() {
 				case "${args}" in
 					*' '*' '*|*' ') echo "setup args '${args}' (want '<job_id> <pid>')" ;;
 					*' '*)
-						sch_append setup_ids "${args%% *}"
-						sch_append setup_pids "${args##* }"
+						append setup_ids "${setup_ids}" "${args%% *}"
+						append setup_pids "${setup_pids}" "${args##* }"
 						is_uint "${args##* }" && setup_wellformed=$((setup_wellformed + 1)) ||
 							echo "setup PID '${args##* }' is not a PID"
 					;;
@@ -846,7 +845,7 @@ test_job_termination_full_15() {
 				case "${args}" in
 					*' '*)
 						term_out="${args%% *}"
-						sch_append term_pids "${args#* }"
+						append term_pids "${term_pids}" "${args#* }"
 						term_wellformed=$((term_wellformed + 1))
 					;;
 					*) echo "term args '${args}' (want '<out var> <pid>...')"

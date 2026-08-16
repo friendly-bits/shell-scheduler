@@ -1181,7 +1181,7 @@ test_security_18() {
 		# comm can contain ') ' and spaces - strip greedily
 		su_line="${su_line##*") "}"
 
-		case "${-}" in *f*) su_had_f=1 ;; esac
+		has_f && su_had_f=1
 		set -f
 		set -- ${su_line}
 		[ -n "${su_had_f}" ] || set +f

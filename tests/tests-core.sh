@@ -327,6 +327,7 @@ test_core_07() {
 		printf 'ok=[%s] fail=[%s] unfin=[%s]\n' "$3" "$4" "$5" > "${CORE07_REC:?}"
 		return "${1}"
 	}
+
 	# Extract the ok-bucket ids from a record file into <out var>
 	core_07_ok() {
 		local line val
@@ -335,14 +336,19 @@ test_core_07() {
 		val="${val%%]*}"
 		export -n "${1}=${val}"
 	}
+
 	# Return 0 if <actual> and <expected> are equal as sets (order-insensitive)
 	core_07_same_set() {
-		local e cnt_a=0 cnt_b=0
+		local had_f e cnt_a=0 cnt_b=0
+		has_f && had_f=1
+		set -f
 		for e in ${1}; do cnt_a=$((cnt_a + 1)); done
 		for e in ${2}; do
+			[ -n "${had_f}" ] || set +f
 			cnt_b=$((cnt_b + 1))
-			sch_is_included "${e}" "${1}" || return 1
+			is_included "${e}" "${1}" || return 1
 		done
+		[ -n "${had_f}" ] || set +f
 		[ "${cnt_a}" = "${cnt_b}" ]
 	}
 

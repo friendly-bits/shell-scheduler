@@ -43,17 +43,34 @@ jt_assert_dead() {
 	done
 }
 
+# Wait (up to ${2} centiseconds) until record file ${1} holds a non-empty first line.
+jt_wait_recorded() {
+	local cwr_f="${1}" cwr_limit="${2}" cwr_deadline cwr_now cwr_line
+
+	get_uptime_cs cwr_now || return 1
+	cwr_deadline=$((cwr_now + cwr_limit))
+	while :; do
+		read_first_line cwr_line "${cwr_f}" && [ -n "${cwr_line}" ] && return 0
+		get_uptime_cs cwr_now || return 1
+		[ "${cwr_now}" -lt "${cwr_deadline}" ] || return 1
+	done
+}
+
 # Return 0 if every whitespace-separated ID in ${2} is included in list ${1}
 #   and both lists have the same element count
 jt_same_set() {
-	local css_e css_cnt_a=0 css_cnt_b=0
+	local had_f e cnt_a=0 cnt_b=0
 
-	for css_e in ${1}; do css_cnt_a=$((css_cnt_a + 1)); done
-	for css_e in ${2}; do
-		css_cnt_b=$((css_cnt_b + 1))
-		sch_is_included "${css_e}" "${1}" || return 1
+	has_f && had_f=1
+	set -f
+	for e in ${1}; do cnt_a=$((cnt_a + 1)); done
+	for e in ${2}; do
+		[ -n "${had_f}" ] || set +f
+		cnt_b=$((cnt_b + 1))
+		is_included "${e}" "${1}" || return 1
 	done
-	[ "${css_cnt_a}" = "${css_cnt_b}" ]
+	[ -n "${had_f}" ] || set +f
+	[ "${cnt_a}" = "${cnt_b}" ]
 }
 
 # Best-effort teardown so one failing test cannot cascade:
@@ -83,7 +100,7 @@ jt_teardown() {
 # Job execution callback for this category.
 # Record file paths are inherited from the calling test's locals at fork time.
 do_job_term() {
-	local job_name="${1%%_*}" fr_seed fr_i fr_line fr_stopped
+	local job_name="${1%%_*}" fr_seed fr_i fr_line fr_stopped fr_now fr_deadline
 
 	case "${job_name}" in
 		instant) : ;;
@@ -125,18 +142,21 @@ do_job_term() {
 		#   has been SIGSTOPped, then blocks; the wrapper blocks on it.
 		# The wrapper is the mechanism's seed, so the first STOP pass freezes it before any descendant scan -
 		#   which is the window being exercised.
-		# The child polls the wrapper's /proc state (bounded, ~20k reads ~= 2.7 s)
+		# The child polls the wrapper's /proc state until a 5 s deadline
 		#   and forks nothing if it never observes state 'T'.
+		# The bound must be wall-clock: an iteration budget drains in well under a
+		#   second on a fast machine, before the abort can land.
 		forkrace)
 			get_job_wrapper_pid fr_seed || return 1
 			(
-				fr_i=0
-				while [ "${fr_i}" -lt 20000 ]; do
-					fr_i=$((fr_i + 1))
+				fr_deadline=
+				get_uptime_cs fr_now && fr_deadline=$((fr_now + 500))
+				while [ -n "${fr_deadline}" ] && [ "${fr_now}" -lt "${fr_deadline}" ]; do
 					IFS= read -r fr_line < "/proc/${fr_seed}/stat" || break
 					# Greedy strip of 'pid (comm) ' - comm may contain ')'
 					fr_line="${fr_line##*") "}"
 					[ "${fr_line%% *}" = T ] && { fr_stopped=1; break; }
+					get_uptime_cs fr_now || break
 				done
 
 				fr_i=0
@@ -438,7 +458,10 @@ _jt_forkrace_scenario() {
 		schedule_jobs "${jt_job}" &
 
 	sched_pid=${!}
-	sleep 1
+
+	# Abort once the helper child has been forked and recorded, not after a fixed delay:
+	#   a delay long enough for a slow machine outlives the whole run on a fast one
+	jt_wait_recorded "${PIDS_F}" 500 || echo "helper child was never recorded"
 	kill -USR1 "${sched_pid}" 2>/dev/null
 	wait "${sched_pid}"
 	sched_rv=${?}

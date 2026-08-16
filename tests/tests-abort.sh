@@ -118,7 +118,7 @@ mark_done_job() {
 count_items() {
 	local ci_out="${1:?}" ci_had_f
 
-	case "${-}" in *f*) ci_had_f=1 ;; esac
+	has_f && ci_had_f=1
 	set -f
 	set -- ${2}
 	[ -n "${ci_had_f}" ] || set +f

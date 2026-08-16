@@ -31,6 +31,7 @@ These are facts about the suite. Keep them to suite behavior and to the minimum 
 - A test that needs to observe a late completion record must keep a separate, longer-running job alive: an aborted or expired job releases its slot at once, so the run can finish and exit before that job's own record arrives.
 - Variant-specific tests are gated with `require_variant full|mini || return 2`, placed just above `print_test_header`; the runner reports them as SKIP on the other variant.
 - A completion record is only acted on once capacity is full or nothing is left to dispatch. The variants reach that point differently - full reads the FIFO on every pass and queues what it finds, mini does not read it until no slot can be filled - but the observable timing is the same. For tests this means a job is not classified (OK/FAIL) the instant its record arrives; note that `JOB_DONE_CB` *does* fire while other jobs are still pending whenever the slots are full, so do not write a test assuming otherwise. To have jobs fully classified before a later timeout/abort, use SCHED_MAX_JOBS=1 for strict sequential dispatch: each dispatch fills the only slot, so the next iteration classifies before dispatching again.
+- tests.sh resolves the library paths from `$0`, which a wrapper script breaks. Set `SCRIPT_DIR` to the tests directory to override that lookup: run with no arguments it only defines things, so a wrapper can source it and exercise individual helpers in isolation.
 
 ### Test categories
 
@@ -64,6 +65,7 @@ Note: non-interference between concurrent scheduler instances is covered in two 
 - Category-specific shared helpers live in that category's script.
 - Cross-category shared helpers live in tests/tests.sh
 - When, and only when you need to write or update tests, or understand details of tests implementation, read tests/SHARED-HELPERS.md.
+- The suite's shared `SCHED_FINALIZE_CB` (`finalize_handler` in tests/tests.sh) sends SIGTERM, via a bare `kill`, to every still-running PID the scheduler reports to it.
 
 ### Testing suite command line options
 

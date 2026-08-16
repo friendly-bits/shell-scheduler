@@ -5,6 +5,12 @@ Shared helpers in tests.sh:
 - `require_variant full|mini` - SKIP and return non-zero under the other variant. Usage: `require_variant full || return 2`.
 - `print_test_header <test_id> <description> <jobs>`
 - `is_uint <value> [<value>...]` - true only if every argument is an unsigned integer.
+- `is_included <item> <list>` - true if the item is one of the whitespace-separated elements of the list. The item is matched literally, so a glob character in it is inert.
+- `append <out_var> <list> <element>` - the list with the element appended, single-space separated; an empty list or element contributes no separator.
+- `tr_trailing <out_var> <value> <chars>` - the value with every trailing character in the set removed.
+- `get_uptime_cs <out_var>` - uptime in centiseconds, for bounding a wait by wall clock instead of by an iteration count (which drains at a machine-dependent rate). A copy of the library's `sch_get_uptime_cs`, so timing helpers do not depend on a scheduler internal. Sets the out var to 0 and returns 1 if `/proc/uptime` is unusable.
+- `is_included`, `append`, `tr_trailing` and `get_uptime_cs` take values rather than variable names, so unlike their `sch_*` counterparts no name reaches an `eval` and no name validation is needed.
+- `has_f` - true if noglob (`set -f`) is currently on. `set -f` is shell-wide with no function-scoped form, so a helper that word-splits an unquoted list must save the caller's setting, set `-f`, and restore it on **every** exit path including an early `return`: `has_f && had_f=1; set -f; ...; [ -n "${had_f}" ] || set +f`. Without the `-f` an element containing a glob character expands against the working directory.
 - `mk_name_of_len <out_var> <len> [<prefix>]` - name of exactly `<len>` `[a-zA-Z0-9_]` chars, `'x'`-padded.
 - `read_first_line [--rm] <out_var> <file>` - first line of the file; `--rm` consumes the file.
 - `read_flat [--rm] <out_var> <file>` - all lines joined with single spaces, no trailing space, empty if absent; `--rm` consumes the file.
