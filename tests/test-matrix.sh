@@ -102,7 +102,6 @@ DEFAULT_IFS=" "$'\t'$'\n'
 IFS="${DEFAULT_IFS}"
 
 . "${script_dir}/../scheduler.sh"
-. "${script_dir}/../job-term.sh"
 
 SUITE="${script_dir}/tests.sh"
 [ "${#}" -gt 0 ] || set -- run

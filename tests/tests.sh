@@ -28,10 +28,9 @@ esac
 
 . "${script_dir}/../${SCHEDULER_LIB}"
 
-# The full variant uses the standalone job-termination library.
+# The full variant offers three selectable mechanisms (sched_job_term_<mech>).
 # The mini variant has its own built-in mechanism (sch_job_term_ppid).
 if [ -z "${SCHED_IS_MINI}" ]; then
-	. "${script_dir}/../job-term.sh"
 	SCHED_TERM_CB_DEFAULT=sched_job_term_ppid
 
 	# Probe a job termination mechanism, quietly and without the ${JOB_TERM_CB}

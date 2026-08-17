@@ -9,9 +9,8 @@
 #   they drive the variant's default termination callback via ${SCHED_TERM_CB_DEFAULT}
 #   (full: sched_job_term_ppid; mini: sch_job_term_ppid)
 #   and gate on term_default_capable.
-# Full-only library tests live in tests-job_termination_full.sh
+# Full-only mechanism tests live in tests-job_termination_full.sh
 # Mini-only tests in tests-job_termination_mini.sh
-# The job-termination library is sourced by tests.sh (full variant only).
 
 # This file is sourced by tests.sh; it defines test_job_termination_NN functions
 #   plus the shared infrastructure used by all three job-termination files.
@@ -281,7 +280,7 @@ _jt_timeout_scenario() {
 	jt_finalize_get fin_expired expired "${FINALIZE_F}" && [ "${fin_expired}" = "${jt_job}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "expired bucket '${fin_expired}' (want '${jt_job}')"
 
-	# No verification in a /proc-based library:
+	# No verification in a /proc-based mechanism:
 	#   the expired job's wrapper PID must still be reported in running_pids
 	jt_finalize_get fin_pids pids "${FINALIZE_F}" && [ "${fin_pids}" = "${done_pid}" ] && checks_pass=$((checks_pass + 1)) ||
 		echo "running_pids '${fin_pids}' (want '${done_pid}' - unverified kill)"
@@ -588,23 +587,23 @@ test_job_termination_02() {
 	fi
 }
 
-# ppid library: per-job timeout kills the job's process tree at expiry.
+# ppid mechanism: per-job timeout kills the job's process tree at expiry.
 # Unverified, so the expired PID stays in running_pids.
 test_job_termination_03() {
 	_jt_timeout_scenario job_termination_03 "${SCHED_TERM_CB_DEFAULT}" term_default_capable "${TERM_DEFAULT_SKIP_REASON}" block_03
 }
 
-# ppid library: USR1 abort kills all running job trees; unverified.
+# ppid mechanism: USR1 abort kills all running job trees; unverified.
 test_job_termination_04() {
 	_jt_abort_scenario job_termination_04 "${SCHED_TERM_CB_DEFAULT}" term_default_capable "${TERM_DEFAULT_SKIP_REASON}" 'block_04a block_04b'
 }
 
-# ppid library: completed-job stragglers are NOT reaped (documented orphan limitation).
+# ppid mechanism: completed-job stragglers are NOT reaped (documented orphan limitation).
 test_job_termination_05() {
 	_jt_strag_scenario job_termination_05 "${SCHED_TERM_CB_DEFAULT}" strag_05
 }
 
-# ppid library: the PPID-map fixpoint walk reaches a multi-level subtree.
+# ppid mechanism: the PPID-map fixpoint walk reaches a multi-level subtree.
 # The job keeps a live wrapper -> child -> grandchild chain (child and grandchild both recorded);
 #   a USR1 abort must kill the whole chain,
 #   proving discovery iterates past direct children rather than stopping at depth 1.
@@ -658,13 +657,13 @@ test_job_termination_06() {
 	fi
 }
 
-# ppid library: the /proc/<pid>/stat parser tolerates a comm containing ')'
+# ppid mechanism: the /proc/<pid>/stat parser tolerates a comm containing ')'
 #   plus a fake ' <state> <ppid> ' sequence.
 # A job child exec's a shebang script whose basename is 'x) R 99999'
 #   (<=15 bytes, so it survives comm truncation);
 #   its stat line reads '<pid> (x) R 99999) S <wrapper> ...'.
 # A naive first-')' parse mis-reads the ppid and drops the process;
-#   the library's greedy match recovers it, so an abort must still kill the crafted-comm child.
+#   the mechanism's greedy match recovers it, so an abort must still kill the crafted-comm child.
 test_job_termination_07() {
 	job_termination_07_do_job() {
 		local scr="${P6_DIR:?}/x) R 99999"

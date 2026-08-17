@@ -5,17 +5,16 @@
 # tests-job_termination_full.sh
 
 # Category: job termination, full-variant only.
-#   Tests of the standalone termination library's mechanisms (cgroup, children,
-#   ppid) and the full JOB_TERM_CB protocol (init/setup/term <out_var>/cleanup,
-#   verified kills). The mini variant drops these; its own tests live in
-#   tests-job_termination_mini.sh. Shared infrastructure (gates, do_job_term,
-#   cg_* helpers, _jt_*_scenario) is defined in tests-job_termination.sh.
+
+# Tests of the full variant's termination mechanisms (cgroup, children, ppid)
+#   and the full JOB_TERM_CB protocol (init/setup/term <out_var>/cleanup, verified kills).
+# The mini variant drops these. its own tests live in tests-job_termination_mini.sh.
+# Shared infrastructure (gates, do_job_term, cg_* helpers, _jt_*_scenario) is defined in tests-job_termination.sh.
 
 # This file is sourced by tests.sh; it defines test_job_termination_full_NN functions only.
 
 #
-# Full-only infrastructure: capability gates and cgroup-base helpers for the
-#   standalone library's cgroup and children mechanisms.
+# Full-only infrastructure: capability gates and cgroup-base helpers for the cgroup and children mechanisms.
 #
 
 # Capability gate for the cgroup mechanism, evaluated once per suite run
@@ -47,8 +46,8 @@ CHILDREN_CAPABLE_CACHED=
 CHILDREN_SKIP_REASON="children-walk termination unsupported here - kernel lacks CONFIG_PROC_CHILDREN (/proc/<pid>/task/<tid>/children)"
 
 # Create a private parent cgroup for one test under this process's own cgroup
-#   and assign its path to ${CG_TEST_BASE}; the test passes it to the cgroup
-#   library via SCHED_CGROUP_BASE, and can then assert the run left it empty
+#   and assign its path to ${CG_TEST_BASE}; the test passes it via SCHED_CGROUP_BASE,
+#   and can then assert the run left it empty
 # 1: test id (used in the dir name)
 cg_mk_test_base() {
 	local mnt line fstype own
@@ -84,9 +83,10 @@ cg_base_empty() {
 }
 
 # Verify sched_use_job_term cgroup: consistent return code across calls,
-#   ${JOB_TERM_CB} armed on success and cleared on failure, forced-failure via
-#   bad SCHED_CGROUP_BASE returns 1, '-q' silent on stderr and through a
-#   user-set SCHED_FAIL_MSG_CB, and one message without '-q'. Runs in any environment.
+#   ${JOB_TERM_CB} armed on success and cleared on failure,
+#   forced-failure via bad SCHED_CGROUP_BASE returns 1,
+#   '-q' silent on stderr and through a user-set SCHED_FAIL_MSG_CB, and one message without '-q'.
+# Runs in any environment.
 test_job_termination_full_01() {
 	job_termination_full_01_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
 
@@ -139,10 +139,9 @@ test_job_termination_full_01() {
 
 # Verify clean early abort of a run whose termination command cannot work:
 #   (a) an invalid JOB_TERM_CB fails callback validation;
-#   (b) a valid command whose 'init' fails (cgroup library with an invalid
-#       SCHED_CGROUP_BASE) aborts before dispatch.
-#   In both cases: rv 1, the job callback never runs, an error is delivered
-#   via SCHED_FAIL_MSG_CB, the finalize callback is not invoked.
+#   (b) a valid command whose 'init' fails (cgroup with an invalid SCHED_CGROUP_BASE) aborts before dispatch.
+# In both cases: rv 1, the job callback never runs, an error is delivered via SCHED_FAIL_MSG_CB,
+#   the finalize callback is not invoked.
 #   Runs in any environment.
 test_job_termination_full_02() {
 	job_termination_full_02_fail_msg() { printf '%s\n' "${*}" >> "${MSG_FILE:?}"; }
@@ -200,11 +199,11 @@ test_job_termination_full_02() {
 	fi
 }
 
-# cgroup library: stragglers of a completed job are reaped by scheduler
-#   exit (the cleanup sweep - completion itself no longer kills) - a job that
-#   exits 0 leaving a background child and an orphaned grandchild behind:
-#   both must be dead after the run, both jobs classified ok, running_pids
-#   empty, and the run must leave the base cgroup empty.
+# cgroup mechanism: stragglers of a completed job are reaped by scheduler exit
+#   (the cleanup sweep - completion itself no longer kills) -
+#   a job that exits 0 leaving a background child and an orphaned grandchild behind:
+#   both must be dead after the run, both jobs classified ok, running_pids empty,
+#   and the run must leave the base cgroup empty.
 test_job_termination_full_03() {
 	local \
 		TEST_ID=job_termination_full_03 \
@@ -268,11 +267,10 @@ test_job_termination_full_03() {
 	fi
 }
 
-# cgroup library: the job tree is killed at per-job timeout expiry (not
-#   merely at scheduler exit): the completion callback - invoked right after
-#   the expiry sweep - must observe the job's recorded child already dead;
-#   the job is classified expired and its PID is scrubbed from running_pids
-#   (kill verified).
+# cgroup mechanism: the job tree is killed at per-job timeout expiry (not merely at scheduler exit):
+#   the completion callback - invoked right after the expiry sweep -
+#   must observe the job's recorded child already dead;
+#   the job is classified expired and its PID is scrubbed from running_pids(kill verified).
 test_job_termination_full_04() {
 	job_termination_full_04_done() {
 		local i pid alive=unknown
@@ -354,9 +352,8 @@ test_job_termination_full_04() {
 	fi
 }
 
-# cgroup library: USR1 abort kills all running job trees, kills are
-#   verified (running_pids empty), the jobs are classified unfinished, and
-#   the base cgroup is left empty.
+# cgroup mechanism: USR1 abort kills all running job trees, kills are verified (running_pids empty),
+#   the jobs are classified unfinished, and the base cgroup is left empty.
 test_job_termination_full_05() {
 	local \
 		TEST_ID=job_termination_full_05 \
@@ -419,8 +416,8 @@ test_job_termination_full_05() {
 	fi
 }
 
-# cgroup library: scheduler global timeout kills the running job tree, with
-#   the same guarantees as on USR1 and return code 82.
+# cgroup mechanism: scheduler global timeout kills the running job tree,
+#   with the same guarantees as on USR1 and return code 82.
 test_job_termination_full_06() {
 	local \
 		TEST_ID=job_termination_full_06 \
@@ -479,9 +476,9 @@ test_job_termination_full_06() {
 	fi
 }
 
-# cgroup library, autodetected base (no SCHED_CGROUP_BASE): termination
-#   works with the base derived from the scheduler's own cgroup - stragglers
-#   of a completed job are reaped.
+# cgroup mechanism, autodetected base (no SCHED_CGROUP_BASE):
+#   termination works with the base derived from the scheduler's own cgroup -
+#   stragglers of a completed job are reaped.
 test_job_termination_full_07() {
 	local \
 		TEST_ID=job_termination_full_07 \
@@ -533,21 +530,21 @@ test_job_termination_full_07() {
 	fi
 }
 
-# children library: per-job timeout kills the job's process tree at expiry;
+# children mechanism: per-job timeout kills the job's process tree at expiry;
 #   kills unverified, so the expired PID stays in running_pids.
 # SKIP where the children mechanism is unavailable.
 test_job_termination_full_08() {
 	_jt_timeout_scenario job_termination_full_08 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" block_08 full
 }
 
-# children library: USR1 abort kills all running job trees; jobs classified unfinished;
+# children mechanism: USR1 abort kills all running job trees; jobs classified unfinished;
 #   both wrapper PIDs reported (kills unverified).
 # SKIP where the children mechanism is unavailable.
 test_job_termination_full_09() {
 	_jt_abort_scenario job_termination_full_09 sched_job_term_children children_capable "${CHILDREN_SKIP_REASON}" 'block_09a block_09b' full
 }
 
-# children library, documented limitation:
+# children mechanism, documented limitation:
 #   stragglers of a COMPLETED job are not reaped (the wrapper already exited,
 #   so its children are reparented to init and escape the descendant walk).
 # The recorded stragglers must survive the run; the test then kills them.
@@ -645,8 +642,8 @@ test_job_termination_full_11() {
 # 'init' must route around it to sched_<pid>.1 without disturbing the squat,
 #   and 'cleanup' must remove only this instance's own base.
 # Deterministically emulates the shared-base collision without containers or a real second process.
-# SCH_JT_BASE/SCH_JT_PENDING are shadowed locally so the in-process init/cleanup calls resolve them by dynamic
-#   scope and don't touch suite-global state.
+# SCH_JT_BASE/SCH_JT_PENDING are shadowed locally so the in-process init/cleanup calls
+#   resolve them by dynamic scope and don't touch suite-global state.
 test_job_termination_full_12() {
 	local \
 		TEST_ID=job_termination_full_12 \
@@ -733,7 +730,7 @@ test_job_termination_full_13() {
 	fi
 }
 
-# children library: abort kills processes forked between discovery scans.
+# children mechanism: abort kills processes forked between discovery scans.
 # The job's helper child starts forking recorded children only once the first
 #   SIGSTOP pass has frozen the wrapper, so they are absent from the first scan.
 # SKIP where the children mechanism is unavailable.
@@ -901,9 +898,9 @@ test_job_termination_full_15() {
 	fi
 }
 
-# A custom termination command that fails: a non-zero return from 'term' or from
-#   'cleanup' is reported via SCHED_FAIL_MSG_CB - naming the subcommand and the code -
-#   but is not fatal: the run still ends with its own return code.
+# A custom termination command that fails: a non-zero return from 'term' or from 'cleanup'
+#   is reported via SCHED_FAIL_MSG_CB - naming the subcommand and the code - but is not fatal:
+#   the run still ends with its own return code.
 # Runs in any environment.
 test_job_termination_full_16() {
 	job_termination_full_16_cb() {
@@ -972,9 +969,9 @@ test_job_termination_full_16() {
 	fi
 }
 
-# A custom termination command reporting a mixed verified-kill list: the invalid
-#   tokens are reported via SCHED_FAIL_MSG_CB and skipped, while the valid PIDs in
-#   the same report are still honored - scrubbed from <running_pids>.
+# A custom termination command reporting a mixed verified-kill list:
+#   the invalid tokens are reported via SCHED_FAIL_MSG_CB and skipped,
+#   while the valid PIDs in the same report are still honored - scrubbed from <running_pids>.
 # Runs in any environment.
 test_job_termination_full_17() {
 	job_termination_full_17_cb() {
