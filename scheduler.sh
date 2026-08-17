@@ -184,11 +184,11 @@ sch_get_uid() {
 sch_check_name() {
 	# A job ID reaches this check both bare and wrapped in the internal 'SCH_JOB_PARAMS_<namespace><job ID>' var name,
 	#   so a var gets the base budget plus that prefix - otherwise the same ID would pass one and fail the other
-	local scn_pfx="SCH_JOB_PARAMS_${#SCHED_ID}_${SCHED_ID}_" scn_max_len=2020
+	local pfx="SCH_JOB_PARAMS_${#SCHED_ID}_${SCHED_ID}_" max_len=2020
 
-	[ "${1}" = var ] && scn_max_len=$((scn_max_len + ${#scn_pfx}))
+	[ "${1}" = var ] && max_len=$((max_len + ${#pfx}))
 
-	[ "${#2}" -le "${scn_max_len}" ] &&
+	[ "${#2}" -le "${max_len}" ] &&
 	case "${2}" in
 		''|*[!a-zA-Z0-9_]*) false ;;
 		*) : ;;
@@ -223,7 +223,7 @@ sch_check_var_name() {
 # 1: caller
 # any extra args attached to err msg
 sch_in_main_process() {
-	local uid args caller="${1}"
+	local uid arg args caller="${1}"
 	sch_get_uid uid &&
 	[ "${uid}" = "${SCHED_UID}" ] &&
 	eval "[ -n \"\${SCH_STARTED_${uid}}\" ]" &&
@@ -764,8 +764,8 @@ schedule_jobs() {
 		IFS=" "$'\t'$'\n' \
 		SCHED_PID \
 		SCHED_UID \
-		SCH_REMAIN_TIME_CS \
-		SCH_INIT_UPTIME_CS \
+		sch_cur_time_cs \
+		sch_idle_remain_time_cs \
 		sch_job_id \
 		sch_job_pid \
 		sch_ns \
@@ -773,28 +773,25 @@ schedule_jobs() {
 		sch_seen_ids \
 		sch_job_to \
 		sch_dl_now_cs \
-		SCH_RUNNING_JOBS_CNT=0 \
-		sch_ipc_fifo \
-		sch_fifo_owned \
 		sch_run_dir \
 		sch_run_n \
 		sch_dir="/tmp" \
+		sch_ipc_fifo \
+		sch_fifo_owned \
 		\
-		sch_cur_time_cs \
-		sch_idle_remain_time_cs \
-		\
+		SCH_RUNNING_JOBS_CNT=0 \
 		SCH_HAD_F \
+		SCH_REMAIN_TIME_CS \
+		SCH_INIT_UPTIME_CS \
+		SCH_LAST_PROGRESS_TIME_CS \
 		SCH_IN_FAIL_MSG_CB \
 		SCH_RUNNING \
-		SCH_LAST_PROGRESS_TIME_CS \
 		SCH_MAX_JOBS \
 		SCH_TIMEOUT_S \
 		SCH_IDLE_TIMEOUT_S \
 		SCH_JOB_TIMEOUT_S \
 		SCH_DEADLINES \
 		SCH_UNREAPED \
-		SCH_TERM_ACTIVE \
-		SCH_TERM_KILLED \
 		\
 		SCH_PENDING_IDS \
 		SCH_ABORTED_IDS \
@@ -802,6 +799,9 @@ schedule_jobs() {
 		SCH_OK_IDS \
 		SCH_FAIL_IDS \
 		SCH_EXPIRED_IDS \
+		\
+		SCH_TERM_ACTIVE \
+		SCH_TERM_KILLED \
 		\
 		SCH_JOB_IDS="${1?}"
 	
@@ -982,37 +982,37 @@ schedule_jobs() {
 jobs_init() {
 	local \
 		IFS=" "$'\t'$'\n' \
-		sch_had_f \
-		sch_cur_params \
-		sch_param \
-		sch_job_id \
-		sch_ns \
-		sch_rv=0
+		had_f \
+		cur_params \
+		param \
+		job_id \
+		ns \
+		rv=0
 
 	# Resolved before any name is built: 'unset' with an invalid name aborts busybox ash
-	sch_get_ns sch_ns "jobs_init" || return 1
+	sch_get_ns ns "jobs_init" || return 1
 
-	sch_has_f && sch_had_f=1
+	sch_has_f && had_f=1
 	set -f
 
 	#shellcheck disable=SC2048
-	for sch_job_id in ${*}; do
-		sch_check_name "job ID" "${sch_job_id}" "jobs_init" ||
-			{ sch_rv=1; break; }
-		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_ns}${sch_job_id}}\""
+	for job_id in ${*}; do
+		sch_check_name "job ID" "${job_id}" "jobs_init" ||
+			{ rv=1; break; }
+		eval "cur_params=\"\${SCH_JOB_PARAMS_${ns}${job_id}}\""
 
-		for sch_param in ${sch_cur_params}; do
-			case "${sch_param}" in
+		for param in ${cur_params}; do
+			case "${param}" in
 				''|*[!a-zA-Z0-9_]*) continue ;;
 			esac
-			unset "SCH_JOB_PARAM_${sch_ns}${#sch_job_id}_${sch_job_id}_${sch_param}"
+			unset "SCH_JOB_PARAM_${ns}${#job_id}_${job_id}_${param}"
 		done
-		unset "SCH_JOB_PARAMS_${sch_ns}${sch_job_id}" \
-			"SCH_TIMEOUT_JOB_${sch_ns}${sch_job_id}"
+		unset "SCH_JOB_PARAMS_${ns}${job_id}" \
+			"SCH_TIMEOUT_JOB_${ns}${job_id}"
 	done
 
-	[ -n "${sch_had_f}" ] || set +f
-	return "${sch_rv}"
+	[ -n "${had_f}" ] || set +f
+	return "${rv}"
 }
 
 # 1: job ID
@@ -1135,33 +1135,32 @@ job_set_timeout() {
 # args: job IDs
 jobs_abort() {
 	local \
-		sch_me=jobs_abort \
+		me=jobs_abort \
 		IFS=" "$'\t'$'\n' \
-		sch_job_id sch_job_pid sch_kill_pids
+		job_id job_pid kill_pids
 
 	# guard against calls from DO_JOB_CB, SCHED_FINALIZE_CB or outside the scheduler
-	sch_in_main_process "${sch_me}" || return 1
+	sch_in_main_process "${me}" "${@}" || return 1
 
-	for sch_job_id in "${@}"; do
-		sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || continue
-		sch_is_included "${sch_job_id}" "${SCH_JOB_IDS}" || { sch_fail_msg "${sch_me}: unknown job ID '${sch_job_id}'."; continue; }
-
+	for job_id in "${@}"; do
+		sch_check_name "job ID" "${job_id}" "${me}" || continue
+		sch_is_included "${job_id}" "${SCH_JOB_IDS}" || { sch_fail_msg "${me}: unknown job ID '${job_id}'."; continue; }
 		# Not dispatched yet: stays undispatched rather than aborted - outcome matters more than cause
-		if sch_is_included "${sch_job_id}" "${SCH_PENDING_IDS}"; then
-			sch_rm_elem SCH_PENDING_IDS "${sch_job_id}" "${SCH_PENDING_IDS}"
-		elif sch_pid_of_id sch_job_pid "${sch_job_id}" "${SCH_RUNNING}"; then
-			sch_rm_elem SCH_RUNNING "${sch_job_pid}:${sch_job_id}" "${SCH_RUNNING}"
+		if sch_is_included "${job_id}" "${SCH_PENDING_IDS}"; then
+			sch_rm_elem SCH_PENDING_IDS "${job_id}" "${SCH_PENDING_IDS}"
+		elif sch_pid_of_id job_pid "${job_id}" "${SCH_RUNNING}"; then
+			sch_rm_elem SCH_RUNNING "${job_pid}:${job_id}" "${SCH_RUNNING}"
 			[ -n "${SCH_DEADLINES}" ] &&
-				sch_deadline_rm_id SCH_DEADLINES "${sch_job_id}" "${SCH_DEADLINES}"
+				sch_deadline_rm_id SCH_DEADLINES "${job_id}" "${SCH_DEADLINES}"
 			SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
-			sch_append SCH_UNREAPED "${sch_job_pid}:${sch_job_id}"
-			sch_append SCH_ABORTED_IDS "${sch_job_id}"
-			[ -n "${SCH_TERM_ACTIVE}" ] && sch_append sch_kill_pids "${sch_job_pid}"
+			sch_append SCH_UNREAPED "${job_pid}:${job_id}"
+			sch_append SCH_ABORTED_IDS "${job_id}"
+			[ -n "${SCH_TERM_ACTIVE}" ] && sch_append kill_pids "${job_pid}"
 		fi
 	done
-	[ -n "${sch_kill_pids}" ] || return 0
+	[ -n "${kill_pids}" ] || return 0
 	# shellcheck disable=SC2086
-	sch_term_run term ${sch_kill_pids}
+	sch_term_run term ${kill_pids}
 	:
 }
 
@@ -1331,67 +1330,69 @@ sch_get_descendants_children() {
 # Shared implementation of the /proc job termination callbacks.
 #   init, setup and cleanup are no-ops: no per-run or per-job state is held.
 #   term freezes, re-scans to a fixpoint and kills.
-# Reports no verified killed PIDs (assigns empty list to <out var>):
+# Reports no verified killed PIDs (assigns empty string to <out var>):
 #   kill verification is not possible here.
 # 1: mechanism (ppid|children)
 # 2: subcommand
-# 3..: subcommand args
+# 3: out-var (receives empty string)
+# 4..: subcommand args
 sch_term_proc() {
 	local \
-		mech="${1:?}" \
-		caller="sched_job_term_${1}" \
-		had_f \
-		seeds all prev found try \
-		subcmd="${2}"
+		tp_mech="${1:?}" \
+		tp_caller="sched_job_term_${1}" \
+		tp_had_f \
+		tp_seeds tp_all tp_prev tp_found tp_try \
+		tp_subcmd="${2}" \
+		tp_out_var="${3}"
 
 	shift
 	[ -n "${1}" ] && shift
 
-	case "${subcmd}" in
+	case "${tp_subcmd}" in
 		init|setup|cleanup) return 0 ;;
 		term) : ;;
-		*) sch_fail_msg "${caller}: unknown subcommand '${subcmd}'."; return 1
+		*) sch_fail_msg "${tp_caller}: unknown subcommand '${tp_subcmd}'."; return 1
 	esac
 
-	sch_check_name "var" "${1}" "${caller}: term" || return 1
-	export -n "${1}="
+	sch_check_name "var" "${tp_out_var}" "${tp_caller}: term" || return 1
+	export -n "${tp_out_var}="
 	shift
 
-	sch_collect_valid_pids seeds "${caller}" "${@}"
-	[ -n "${seeds}" ] || return 0
+	sch_collect_valid_pids tp_seeds "${tp_caller}" "${@}"
+	[ -n "${tp_seeds}" ] || return 0
 
 	# Freeze, re-scan to fixpoint, then kill:
 	#   each STOP pass pins down what the previous scan saw,
 	#   while the next scan catches anything forked in between
-	all="${seeds}"
-	prev=
+	tp_all="${tp_seeds}"
+	tp_prev=
 
-	sch_has_f && had_f=1
+	sch_has_f && tp_had_f=1
 	set -f
 
-	for try in 1 2 3; do
+	for tp_try in 1 2 3; do
 		# shellcheck disable=SC2086
-		kill -STOP ${all} 2>/dev/null
-		case "${mech}" in
-			ppid) sch_get_descendants_ppid found "${all}" ;;
-			children) sch_get_descendants_children found "${all}" ;;
+		kill -STOP ${tp_all} 2>/dev/null
+		case "${tp_mech}" in
+			ppid) sch_get_descendants_ppid tp_found "${tp_all}" ;;
+			children) sch_get_descendants_children tp_found "${tp_all}" ;;
 			*) false
 		esac ||
 		{
-			sch_fail_msg "${caller}: /proc scan failed."
+			sch_fail_msg "${tp_caller}: /proc scan failed."
 			break
 		}
-		sch_append all "${found}"
-		sch_tr_trailing all "${all}" " "
-		[ "${all}" = "${prev}" ] && break
-		prev="${all}"
+		sch_append tp_all "${tp_found}"
+		sch_tr_trailing tp_all "${tp_all}" " "
+		[ "${tp_all}" = "${tp_prev}" ] && break
+		tp_prev="${tp_all}"
 	done
 
 	# SIGKILL is delivered to stopped processes; no CONT needed
 	# shellcheck disable=SC2086
-	[ -n "${all}" ] && kill -KILL ${all} 2>/dev/null
+	[ -n "${tp_all}" ] && kill -KILL ${tp_all} 2>/dev/null
 
-	[ -n "${had_f}" ] || set +f
+	[ -n "${tp_had_f}" ] || set +f
 	:
 }
 
@@ -1623,12 +1624,12 @@ sch_cleanup_cgroup() {
 #   space-separated list to <out var>.
 sched_job_term_cgroup() {
 	local \
-		me=sched_job_term_cgroup \
-		sub="${1}"
+		sch_me=sched_job_term_cgroup \
+		sch_sub="${1}"
 
 	shift 2>/dev/null
 
-	case "${sub}" in
+	case "${sch_sub}" in
 		init)
 			sch_cgroup_init
 		;;
@@ -1638,29 +1639,29 @@ sched_job_term_cgroup() {
 			#   which is the job process since the core invokes 'setup' there;
 			#   all the job's descendants inherit the membership
 			sch_is_uint "${2}" ||
-				{ sch_fail_msg "${me}: setup: invalid PID '${2}'."; return 1; }
+				{ sch_fail_msg "${sch_me}: setup: invalid PID '${2}'."; return 1; }
 			mkdir "${SCH_JT_BASE:?}/job_${2}" 2>/dev/null &&
 			printf '0\n' 2>/dev/null > "${SCH_JT_BASE}/job_${2}/cgroup.procs" ||
 			{
-				sch_fail_msg "${me}: job '${1}' (PID ${2}): failed to join cgroup '${SCH_JT_BASE}/job_${2}'."
+				sch_fail_msg "${sch_me}: job '${1}' (PID ${2}): failed to join cgroup '${SCH_JT_BASE}/job_${2}'."
 				return 1
 			}
 		;;
 
 		term)
-			sch_check_name "var" "${1}" "${me}: term" || return 1
+			sch_check_name "var" "${1}" "${sch_me}: term" || return 1
 			export -n "${1}="
 			sch_kill_jobs_cgroup "${@}"
 		;;
 
 		cleanup)
-			sch_check_name "var" "${1}" "${me}: cleanup" || return 1
+			sch_check_name "var" "${1}" "${sch_me}: cleanup" || return 1
 			export -n "${1}="
 			sch_cleanup_cgroup "${1}"
 		;;
 
 		*)
-			sch_fail_msg "${me}: unknown subcommand '${sub}'."
+			sch_fail_msg "${sch_me}: unknown subcommand '${sch_sub}'."
 			return 1
 	esac
 }

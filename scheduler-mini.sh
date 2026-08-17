@@ -101,34 +101,34 @@ sch_tr_trailing() {
 sch_job_term_ppid() {
 	local \
 		me=sch_job_term_ppid \
-		sch_had_f \
-		sch_p sch_seeds sch_all sch_prev sch_found sch_try
+		had_f \
+		p seeds all prev found try
 
-	sch_seeds=
-	for sch_p in "${@}"; do
-		sch_is_uint "${sch_p}" ||
-			{ sch_fail_msg "${me}: ignoring invalid PID '${sch_p}'."; continue; }
-		sch_append sch_seeds "${sch_p}"
+	seeds=
+	for p in "${@}"; do
+		sch_is_uint "${p}" ||
+			{ sch_fail_msg "${me}: ignoring invalid PID '${p}'."; continue; }
+		sch_append seeds "${p}"
 	done
-	[ -n "${sch_seeds}" ] || return 0
+	[ -n "${seeds}" ] || return 0
 
 	# Freeze, re-scan to fixpoint, kill
-	sch_all="${sch_seeds}"
-	sch_prev=
+	all="${seeds}"
+	prev=
 
-	sch_has_f && sch_had_f=1
+	sch_has_f && had_f=1
 	set -f
 
-	for sch_try in 1 2 3; do
-		kill -STOP ${sch_all} 2>/dev/null
+	for try in 1 2 3; do
+		kill -STOP ${all} 2>/dev/null
 
 		# Get all live descendant PIDs (space-separated, seeds excluded).
-		sch_found="$(
+		found="$(
 			set +f
 			cat /proc/[0-9]*/stat 2>/dev/null | {
 				set -f
 				# shellcheck disable=SC2016
-				${SCHED_AWK_CMD:-awk} -v seeds="${sch_all}" '
+				${SCHED_AWK_CMD:-awk} -v seeds="${all}" '
 				/^[0-9]+ \(/ {
 					pid = $1
 					s = $0
@@ -162,15 +162,15 @@ sch_job_term_ppid() {
 			break
 		}
 
-		sch_append sch_all "${sch_found}"
-		sch_tr_trailing sch_all "${sch_all}" " "
-		[ "${sch_all}" = "${sch_prev}" ] && break
-		sch_prev="${sch_all}"
+		sch_append all "${found}"
+		sch_tr_trailing all "${all}" " "
+		[ "${all}" = "${prev}" ] && break
+		prev="${all}"
 	done
 
-	kill -KILL ${sch_all} 2>/dev/null
+	kill -KILL ${all} 2>/dev/null
 
-	[ -n "${sch_had_f}" ] || set +f
+	[ -n "${had_f}" ] || set +f
 	:
 }
 
@@ -226,11 +226,11 @@ sch_get_uid() {
 }
 
 sch_check_name() {
-	local scn_pfx="SCH_JOB_PARAMS_${#SCHED_ID}_${SCHED_ID}_" scn_max_len=2020
+	local pfx="SCH_JOB_PARAMS_${#SCHED_ID}_${SCHED_ID}_" max_len=2020
 
-	[ "${1}" = var ] && scn_max_len=$((scn_max_len + ${#scn_pfx}))
+	[ "${1}" = var ] && max_len=$((max_len + ${#pfx}))
 
-	[ "${#2}" -le "${scn_max_len}" ] &&
+	[ "${#2}" -le "${max_len}" ] &&
 	case "${2}" in
 		''|*[!a-zA-Z0-9_]*) false ;;
 		*) : ;;
@@ -263,7 +263,7 @@ sch_check_var_name() {
 # 1: caller
 # any extra args attached to err msg
 sch_in_main_process() {
-	local uid args caller="${1}"
+	local uid arg args caller="${1}"
 	sch_get_uid uid &&
 	[ "${uid}" = "${SCHED_UID}" ] &&
 	eval "[ -n \"\${SCH_STARTED_${uid}}\" ]" &&
@@ -635,8 +635,8 @@ schedule_jobs() {
 		sch_run_n \
 		sch_dir="/tmp" \
 		\
-		SCH_RUNNING_JOBS_CNT=0 \
 		SCH_IPC_FIFO \
+		SCH_RUNNING_JOBS_CNT=0 \
 		SCH_HAD_F \
 		SCH_REMAIN_TIME_CS \
 		SCH_INIT_UPTIME_CS \
@@ -807,37 +807,37 @@ schedule_jobs() {
 jobs_init() {
 	local \
 		IFS=" "$'\t'$'\n' \
-		sch_had_f \
-		sch_cur_params \
-		sch_param \
-		sch_job_id \
-		sch_ns \
-		sch_rv=0
+		had_f \
+		cur_params \
+		param \
+		job_id \
+		ns \
+		rv=0
 
 	# Resolved before any name is built: 'unset' with an invalid name aborts busybox ash
-	sch_get_ns sch_ns "jobs_init" || return 1
+	sch_get_ns ns "jobs_init" || return 1
 
-	sch_has_f && sch_had_f=1
+	sch_has_f && had_f=1
 	set -f
 
 	#shellcheck disable=SC2048
-	for sch_job_id in ${*}; do
-		sch_check_name "job ID" "${sch_job_id}" "jobs_init" ||
-			{ sch_rv=1; break; }
-		eval "sch_cur_params=\"\${SCH_JOB_PARAMS_${sch_ns}${sch_job_id}}\""
+	for job_id in ${*}; do
+		sch_check_name "job ID" "${job_id}" "jobs_init" ||
+			{ rv=1; break; }
+		eval "cur_params=\"\${SCH_JOB_PARAMS_${ns}${job_id}}\""
 
-		for sch_param in ${sch_cur_params}; do
-			case "${sch_param}" in
+		for param in ${cur_params}; do
+			case "${param}" in
 				''|*[!a-zA-Z0-9_]*) continue ;;
 			esac
-			unset "SCH_JOB_PARAM_${sch_ns}${#sch_job_id}_${sch_job_id}_${sch_param}"
+			unset "SCH_JOB_PARAM_${ns}${#job_id}_${job_id}_${param}"
 		done
-		unset "SCH_JOB_PARAMS_${sch_ns}${sch_job_id}" \
-			"SCH_TIMEOUT_JOB_${sch_ns}${sch_job_id}"
+		unset "SCH_JOB_PARAMS_${ns}${job_id}" \
+			"SCH_TIMEOUT_JOB_${ns}${job_id}"
 	done
 
-	[ -n "${sch_had_f}" ] || set +f
-	return "${sch_rv}"
+	[ -n "${had_f}" ] || set +f
+	return "${rv}"
 }
 
 # 1: job ID
@@ -955,30 +955,30 @@ job_set_timeout() {
 
 jobs_abort() {
 	local \
-		sch_me=jobs_abort \
+		me=jobs_abort \
 		IFS=" "$'\t'$'\n' \
-		sch_job_id sch_job_pid sch_kill_pids
+		job_id job_pid kill_pids
 
 	# guard against calls from DO_JOB_CB, SCHED_FINALIZE_CB or outside the scheduler
-	sch_in_main_process "${sch_me}" "${@}" || return 1
+	sch_in_main_process "${me}" "${@}" || return 1
 
-	for sch_job_id in "${@}"; do
-		sch_check_name "job ID" "${sch_job_id}" "${sch_me}" || continue
-		sch_is_included "${sch_job_id}" "${SCH_JOB_IDS}" || { sch_fail_msg "${sch_me}: unknown job ID '${sch_job_id}'."; continue; }
+	for job_id in "${@}"; do
+		sch_check_name "job ID" "${job_id}" "${me}" || continue
+		sch_is_included "${job_id}" "${SCH_JOB_IDS}" || { sch_fail_msg "${me}: unknown job ID '${job_id}'."; continue; }
 		# Not dispatched yet: stays undispatched rather than aborted - outcome matters more than cause
-		if sch_is_included "${sch_job_id}" "${SCH_PENDING_IDS}"; then
-			sch_rm_elem SCH_PENDING_IDS "${sch_job_id}" "${SCH_PENDING_IDS}"
-		elif sch_pid_of_id sch_job_pid "${sch_job_id}" "${SCH_RUNNING}"; then
-			sch_rm_elem SCH_RUNNING "${sch_job_pid}:${sch_job_id}" "${SCH_RUNNING}"
+		if sch_is_included "${job_id}" "${SCH_PENDING_IDS}"; then
+			sch_rm_elem SCH_PENDING_IDS "${job_id}" "${SCH_PENDING_IDS}"
+		elif sch_pid_of_id job_pid "${job_id}" "${SCH_RUNNING}"; then
+			sch_rm_elem SCH_RUNNING "${job_pid}:${job_id}" "${SCH_RUNNING}"
 			[ -n "${SCH_DEADLINES}" ] &&
-				sch_deadline_rm_id SCH_DEADLINES "${sch_job_id}" "${SCH_DEADLINES}"
+				sch_deadline_rm_id SCH_DEADLINES "${job_id}" "${SCH_DEADLINES}"
 			SCH_RUNNING_JOBS_CNT=$((SCH_RUNNING_JOBS_CNT - 1))
-			sch_append SCH_UNREAPED "${sch_job_pid}:${sch_job_id}"
-			sch_append SCH_ABORTED_IDS "${sch_job_id}"
-			[ -n "${JOB_TERM_CB}" ] && sch_append sch_kill_pids "${sch_job_pid}"
+			sch_append SCH_UNREAPED "${job_pid}:${job_id}"
+			sch_append SCH_ABORTED_IDS "${job_id}"
+			[ -n "${JOB_TERM_CB}" ] && sch_append kill_pids "${job_pid}"
 		fi
 	done
-	[ -n "${sch_kill_pids}" ] || return 0
-	sch_term_run ${sch_kill_pids}
+	[ -n "${kill_pids}" ] || return 0
+	sch_term_run ${kill_pids}
 	:
 }
