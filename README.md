@@ -42,18 +42,19 @@ This library is designed to solve the following problems:
 
 - **Linux** - required for its reliance on `/proc` to read PIDs and system uptime. Should be not too complicated to port to any other Unix-like system.
 - **Bash or BusyBox ash or [shed](https://github.com/km-clay/shed)**. Other shells are not supported. Could be conceivably ported to POSIX-compliant code.
-- The utilities `mkfifo`, `mkdir`, and `rm`. No other binary utilities are used by the library.
+- The utilities `mkfifo`, `mkdir`, and `rm`.
+- Job termination needs some additional utilities, depending on which mechanism you pick: `awk` and `cat` for the PPID-walk, `awk` for the children-walk, `rmdir` and `sleep` for the cgroup mechanism.
 
 ## Variants
 
 shell-scheduler comes in two variants: full (`scheduler.sh`) and mini (`scheduler-mini.sh`). The differences are listed below:
 
-- **Job termination**: the full variant hands this off to a separate helper library (`job-term.sh`), which implements three selectable job termination mechanisms (cgroup, children-walk, PPID-walk). The mini variant has the PPID-walk mechanism built in and uses a simplified job termination callback protocol, which makes it incompatible with the helper library.
+- **Job termination**: the full variant has three selectable job termination mechanisms built in (cgroup, children-walk, PPID-walk). The mini variant has only the PPID-walk mechanism and uses a simplified job termination callback protocol, so a callback written for one variant does not work with the other.
 - **Per-job parameters**: the full variant exports registered params to jobs and to the job completion callback only when you opt in with `SCHED_AUTO_PARAMS=1`; the mini variant always exports them.
 - **Aborting jobs from outside**: only the full variant can do this. Both variants can abort jobs from the job completion callback.
 - **Code comments**: the mini version removes a lot of them to reduce the size.
 
-Everything else (callbacks, timeouts, per-job parameters and helpers) is identical. Pick mini if file size is important and the PPID-walk job termination mechanism is sufficient for your application; or if you prefer a single file. Pick full if you want all three job termination mechanisms available, want to abort jobs from outside the scheduler, or want control over whether parameters are automatically passed to jobs.
+Everything else (callbacks, timeouts, per-job parameters and helpers) is identical. Pick mini if file size is important and the PPID-walk job termination mechanism is sufficient for your application. Pick full if you want all three job termination mechanisms available, want to abort jobs from outside the scheduler, or want control over whether parameters are automatically passed to jobs.
 
 ## Quick start
 
@@ -218,16 +219,7 @@ It is also worth clearing the environment for the untrusted command, with `env -
 
 The above information, along with the below example, should be enough for most basic use cases. For additional options, technical details and examples, see **[REFERENCE.md](REFERENCE.md)**:
 
-- **[How to use (Scheduler API)](REFERENCE.md#how-to-use-scheduler-api)**
-- **[Callbacks](REFERENCE.md#callbacks)**
-- **[Job parameters](REFERENCE.md#job-parameters)**
-- **[Environment variables](REFERENCE.md#environment-variables)**
-- **[Return codes](REFERENCE.md#return-codes)**
-- **[Timeouts](REFERENCE.md#timeouts)**
-- **[Signal handling](REFERENCE.md#signal-handling)**
-- **[Job termination mechanisms](REFERENCE.md#job-termination-mechanisms)**
-
-Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The optional job termination helper library and its three mechanisms are documented in **[JOB-TERMINATION-LIBRARY.md](JOB-TERMINATION-LIBRARY.md)**.
+Time measurement and timeout behavior are covered in depth in **[TIMEKEEPING.md](TIMEKEEPING.md)**. The three job termination mechanisms are documented in depth in **[JOB-TERMINATION.md](JOB-TERMINATION.md)**.
 
 ## Real-world examples
 
@@ -241,7 +233,7 @@ TL;DR: AI was used as an assistant when developing this project, but it is not v
 
 This project started as a generalizing refactor of code I wrote for [adblock-lean](https://github.com/lynxthecat/adblock-lean). That code was entirely written by hand. I am planning to contribute this generalized and refactored code back to adblock-lean and to re-integrate it into that project. While working on the refactor and further development, I used AI for correctness verification, bug detection and initial documentation. Later, while working on some especially tricky features, I co-developed them with AI. Specifically: some parts of the timeout handling code were co-developed with AI; some parts of the job termination code were initially implemented by AI with my supervision, then I rewrote some of it, again using AI as code reviewer and bug-checker.
 
-**Every line of code and every command** in the three main scripts (scheduler.sh, scheduler-mini.sh and job-term.sh) was either written by me or checked by me.
+**Every line of code and every command** in the two main scripts (scheduler.sh and scheduler-mini.sh) was either written by me or checked by me.
 
 Testing infrastructure was co-developed with AI. Tests themselves were written by AI following my prompts and, for the most part, verified by me and, where bugs were discovered, manually fixed.
 

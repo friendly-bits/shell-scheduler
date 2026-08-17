@@ -16,7 +16,7 @@ Complete technical reference for the `shell-scheduler` library. If you're just g
 - [Job termination mechanisms](#job-termination-mechanisms)
 - [Job termination callback - mini](#job-termination-callback---mini)
 - [Job termination callback - full](#job-termination-callback---full)
-- [Job termination helper library](#job-termination-helper-library)
+- [Built-in job termination mechanisms - full](#built-in-job-termination-mechanisms---full)
 
 ## How to use (Scheduler API)
 
@@ -575,7 +575,8 @@ The scheduler is configured entirely through environment variables. Required var
 | SCHED_ID                  |          |  unset  | Namespace for per-job params and timeouts, letting schedulers driven from one shell process reuse job IDs without overwriting each other's values ( same character and length rules as a job ID ). Unset or empty selects the default namespace. See [Scheduler namespace](#scheduler-namespace-sched_id). |
 | SCHED_INNER_SUBSHELL      |          |  unset  | Whether to run the job execution callback one process deeper, in a subshell with the scheduler's file descriptor 3 closed ( any non-empty value to enable ). Set it when your jobs run commands you do not fully trust, or when they need fd 3 for themselves (see Notes below). |
 | SCHED_AUTO_PARAMS         |          |  unset  | **(full variant only)** Whether to export job-specific params before invoking the job execution and job completion callbacks for each job ( 1 to enable, any other value to disable ). The mini variant always delivers registered params and ignores this. |
-| SCHED_CGROUP_BASE         |          |  unset  | **(full variant only)** Read by the `job-term.sh` library's cgroup mechanism, not by the scheduler core. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
+| SCHED_CGROUP_BASE         |          |  unset  | **(full variant only)** Read only by the cgroup job termination mechanism. For testing or advanced use: writable cgroup2 directory under which the per-run cgroup is created, overriding autodetection. Trailing `/` characters are ignored. |
+| SCHED_AUTO_JOB_TERM       |          |  unset  | **(mini variant only)** Whether to enable the built-in job termination mechanism ( any non-empty value to enable ). Overwrites `JOB_TERM_CB` at scheduler startup. See [Job termination callback - mini](#job-termination-callback---mini). |
 
 Notes:
 
@@ -626,17 +627,17 @@ If your application needs to stop timed-out and unfinished jobs, you can either 
 
 ### TL;DR
 
-For simple use cases with relatively few well-behaved jobs, it doesn't really matter which of the three mechanisms implemented in the included helper library is used in practice.
+For simple use cases with relatively few well-behaved jobs, it doesn't really matter which of the three built-in mechanisms is used.
 
-- If an extra file and ~18KiB doesn't make or break your project, include the helper library `job-term.sh` with your application and let `sched_use_job_term auto` pick the mechanism automatically, as explained in [Job termination helper library](#job-termination-helper-library) below. If you implement this exactly as shown in the example code snippet, it will just work [almost] anywhere without any extra configuration.
+- Unless you have a reason to prefer a particular mechanism, let `sched_use_job_term auto` pick one automatically, as explained in [Built-in job termination mechanisms](#built-in-job-termination-mechanisms---full) below. If you implement this exactly as shown in the example code snippet, it will just work (almost) anywhere without any extra configuration.
 - If spawning many jobs, strongly prefer the `cgroup` mechanism because it is much more efficient.
 - If spawning jobs which are prone to misbehavior, hanging or leaving orphaned processes behind, prefer the `cgroup` mechanism because it allows for more deterministic process termination.
 - If the target system doesn't support the `cgroup` mechanism, use a `/proc`-based one: `ppid` needs only `/proc` and `awk` and works essentially anywhere; `children` is a more efficient variant, available where the kernel provides `CONFIG_PROC_CHILDREN`.
 
 ## Job termination callback - mini
-The **mini scheduler variant** comes with the **PPID-walk** job termination mechanism built-in and **does not** implement the subcommand interface implemented by the full variant, so the helper library discussed below is not supported by the mini variant.
+The **mini scheduler variant** comes with the **PPID-walk** job termination mechanism built-in and **does not** implement the subcommand interface implemented by the full variant, so the mechanisms discussed below are not available in the mini variant.
 
-To enable automatic job termination via the built-in mechanism in the **mini** variant, set `JOB_TERM_CB=sched_job_term_mini` or (equivalent) `SCHED_AUTO_JOB_TERM=1`.
+To enable automatic job termination via the built-in mechanism in the **mini** variant, set `JOB_TERM_CB=sch_job_term_ppid`, or set `SCHED_AUTO_JOB_TERM` to any non-empty value.
 
 ## Job termination callback - full
 
@@ -656,11 +657,11 @@ The PIDs passed to `term` are job wrapper PIDs (the same PIDs reported in `<runn
 
 **`term` and `cleanup` may report verified job terminations via the output variable**: `<verified_kills_out_var>` is the name of a variable the callback may assign a whitespace-separated job PID list to. A reported job PID asserts that the job's entire process tree has been killed; the scheduler then excludes it from the `<running_pids>` passed to the **scheduler completion callback**.
 
-## Job termination helper library
+## Built-in job termination mechanisms - full
 
-**(full variant only** - the mini variant has an equivalent mechanism built in and does not use this library.**)**
+**(full variant only** - the mini variant has its own equivalent mechanism, described above.**)**
 
-The project includes the helper library `job-term.sh`, which implements the **job termination callback** (`JOB_TERM_CB`) via any of three mechanisms:
+`scheduler.sh` implements the **job termination callback** (`JOB_TERM_CB`) via any of three mechanisms, ready to use without writing one yourself:
 
 - **`cgroup`** - puts each job in its own cgroup when spawning it, then kills the whole process tree - including orphaned grandchildren - via the kernel's `cgroup.kill`. Process kills are kernel-verified, so under normal operation `<running_pids>` reported to the **scheduler completion callback** is empty even after scheduler timeouts or early exit. Requires cgroup v2 with `cgroup.kill` (kernel >= 5.14) and write access to a cgroup - available when running as root, when started by the systemd user manager, or in a container with a writable cgroup mount.
 - **`children`** - reconstructs each job's process tree from the kernel's `/proc/<pid>/task/<tid>/children` files, freezes all processes in the tree with `SIGSTOP`, then delivers `SIGKILL`. Those files require a kernel built with the option `CONFIG_PROC_CHILDREN` enabled. Discovers descendant PIDs more efficiently than the `ppid` mechanism, so prefer it where available.
@@ -669,11 +670,10 @@ The project includes the helper library `job-term.sh`, which implements the **jo
 Neither `/proc`-based mechanism can find orphaned processes, and neither verifies process termination, so `<running_pids>` reported to the **scheduler completion callback** may list job PIDs whose trees are already gone.
 
 ### Selecting job termination mechanism at runtime
-Source `job-term.sh` after `scheduler.sh`, then call `sched_use_job_term`, which probes the requested mechanism and on success sets `JOB_TERM_CB=sched_job_term_<mechanism>`:
+Call `sched_use_job_term`, which probes the requested mechanism and on success sets `JOB_TERM_CB=sched_job_term_<mechanism>`:
 
 ```sh
 . ./scheduler.sh
-. ./job-term.sh
 
 sched_use_job_term [-q] <cgroup|children|ppid|auto>
 schedule_jobs "${IDS}" &
@@ -686,4 +686,4 @@ If you want to implement and use a custom job termination mechanism, simply spec
 
 ### Details
 
-Each mechanism, its requirements, and how to deploy it (containers, cron, systemd, unprivileged use) are documented in **[JOB-TERMINATION-LIBRARY.md](JOB-TERMINATION-LIBRARY.md)**.
+Each mechanism, its requirements, and how to deploy it (containers, cron, systemd, unprivileged use) are documented in **[JOB-TERMINATION.md](JOB-TERMINATION.md)**.
